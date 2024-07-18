@@ -1,0 +1,13 @@
+[package]
+name = "freva-gpt2-backend"
+version = "0.1.0"
+edition = "2021"
+authors = ["Sebastian Willmann"]
+
+[dependencies]
+actix-web = "4.8.0"
+clap = {version = "4.5.9", features = ["derive", "cargo"]}
+const_format = "0.2.32"
+dotenvy = "0.15.7"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
