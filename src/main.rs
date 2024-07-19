@@ -8,6 +8,7 @@ use tracing::{error, info, trace};
 mod cla_parser; // for parsing the command line arguments
 mod logging; // for setting up the logger
 mod static_serve; // for serving static responses
+mod chatbot; // for the actual chatbot
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -46,6 +47,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         let services = services![
             web::scope("/ping").route("", web::get().to(static_serve::ping)), // Ping, just reply with a pong
+            web::scope("/stop").route("", web::post().to(chatbot::stop::stop)), // Stop, stop a specific conversation by thread ID. 
         ];
         App::new()
             .service(services)

@@ -576,6 +576,7 @@ dependencies = [
  "clap",
  "const_format",
  "dotenvy",
+ "once_cell",
  "tracing",
  "tracing-subscriber",
 ]
