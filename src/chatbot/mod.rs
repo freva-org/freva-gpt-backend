@@ -1,31 +1,39 @@
-// For all the things that is needed in the background for the chatbot to work. 
+// For all the things that is needed in the background for the chatbot to work.
 
+// Relays the files from this folder up 
 
-// Relays the files from this folder up
+/// Contains all common types and implementations for the chatbot.
+pub mod types;
 
+/// Internal use: describes all available chatbots
+pub(crate) mod available_chatbots;
 /// Handles the stop request from the client.
-pub mod stop; 
+pub mod stop;
 
-// Because multiple threads need to work together and need to know about the conversations, this static variable holds information about all active conversation.
+/// Returns a thread as a list of strings
+pub mod get_thread;
 
-use std::{sync::{Arc, Mutex}, time::Instant};
+/// Internal use: handles the storing and retrieval of the streamed data
+pub(crate) mod thread_storage;
 
+
+// Defines a few useful static variables that are used throughout the chatbot.
+
+use std::sync::{Arc, Mutex};
+
+use async_openai::config::OpenAIConfig;
 use once_cell::sync::Lazy;
 
-pub enum ConversationState{
-    Streaming,
-    Stopping,
-    Ended(Instant),
-}
+use types::ActiveConversation;
 
-// When a thread is streaming, it is in the Streaming state. If nothing goes wrong, at the end, it will be in the Ended state. 
-// If a request to stop it is sent, another thread will change the state to Stopping.
-// The thread that is streaming will check the state and if it is Stopping, it will stop the streaming and change the state to Ended.
+/// Because multiple threads need to work together and need to know about the conversations, this static variable holds information about all active conversation.
+/// The Lazy and Arc are transparent, it can be accessed by locking the mutex and then accessing the Vec inside.
+pub static ACTIVE_CONVERSATIONS: Lazy<Arc<Mutex<Vec<ActiveConversation>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
 
-pub struct ActiveConversation{
-    id: String, // Either the id as given by OpenAI or our internal id, maybe an Enum or `either` later
-
-    state: ConversationState,
-}
-
-pub static ACTIVE_CONVERSATIONS: Lazy<Arc<Mutex<Vec<ActiveConversation>>>> = Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+/// Because we shouldn't have to construct a new client for every stream we start, we'll use this static variable to hold the client.
+/// The Lazy is transparent, it can be accessed as-is.
+pub static CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
+    let config = async_openai::config::OpenAIConfig::new();
+    async_openai::Client::with_config(config)
+});

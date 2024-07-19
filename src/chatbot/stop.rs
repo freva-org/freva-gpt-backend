@@ -3,7 +3,7 @@
 use actix_web::{HttpResponse, Responder};
 use tracing::{debug, trace, warn};
 
-use crate::chatbot::{ConversationState, ACTIVE_CONVERSATIONS};
+use super::{types::ConversationState, ACTIVE_CONVERSATIONS};
 
 // TODO: guarentee panic safety
 /// Handles the stop request from the client.
