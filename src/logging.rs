@@ -13,26 +13,24 @@ pub fn setup_logger(args: &cla_parser::Args) {
         .init();
 
     tracing::info!("Logger initialized successfully.");
-    println!(
-        "Logger initialized successfully. Logs will be written to {}",
-        filename
-    );
+    println!("Logger initialized successfully. Logs will be written to {filename}");
 }
 
 fn generate_log_file() -> (std::fs::File, String) {
     // We want to log all our messages to a file that by convention is named after the current amount of nanoseconds since the Unix epoch.
     // Since it's inside a docker container, we just write to "/logs/log_NS.txt".
-    // Maybe we can also write to stdout?
-    let time_ns = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        Ok(time) => time.as_nanos(),
-        Err(_) => {
+    // Maybe later we can also write to stdout?
+    let time_ns =
+        if let Ok(time) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            time.as_nanos()
+        } else {
+            // We can't fail here, but if we do, we'll just return a 404.
             eprintln!("Error getting the current time in nanoseconds.");
             404
-        } // we can't just fail, but this is bad, so we resolve it by writing to a file with a 404 in the name
-    };
+        };
 
     // let log_file = format!("/logs/log_{}.txt", time_ns);
-    let log_file = format!("./logs/log_{}.txt", time_ns); // TODO: Change this back! In production, this needs to be correct.
+    let log_file = format!("./logs/log_{time_ns}.txt"); // TODO: Change this back! In production, this needs to be correct.
 
     let file = std::fs::File::create(&log_file).expect("Error creating the log file. Either the system clock moved backwards or the file system is full.");
 

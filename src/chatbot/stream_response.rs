@@ -1,9 +1,12 @@
 use actix_web::{HttpRequest, HttpResponse, Responder};
-use async_openai::types::{ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs};
+use async_openai::types::{
+    ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequest,
+    CreateChatCompletionRequestArgs,
+};
 use futures::StreamExt;
 use tracing::{debug, info, trace, warn};
 
-use crate::chatbot::{available_chatbots::DEFAULTCHATBOT, types::StreamVariant, CLIENT};
+use crate::chatbot::{available_chatbots::DEFAULTCHATBOT, handle_active_conversations::add_to_conversation, types::StreamVariant, CLIENT};
 
 pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
     // Try to get the thread ID and input from the request's query parameters.
@@ -15,7 +18,7 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
             return HttpResponse::BadRequest()
                 .body("Thread ID not found. Please provide a thread_id in the query parameters.");
         }
-        Some(thread_id) => thread_id,
+        Some(thread_id) => thread_id.to_string(),
     };
 
     let input = match qstring.get("input") {
@@ -26,7 +29,7 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
                 "Input not found. Please provide a non-empty input in the query parameters.",
             );
         }
-        Some(input) => input,
+        Some(input) => input.to_string(),
     };
     trace!(
         "Starting stream for thread {} with input: {}",
@@ -47,7 +50,7 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
     };
 
     // For testing, a basic request
-    let request = match CreateChatCompletionRequestArgs::default()
+    let request: CreateChatCompletionRequest = match CreateChatCompletionRequestArgs::default()
         .model(String::from(DEFAULTCHATBOT))
         .n(1)
         // .prompt(input) // This isn't used for the chat API
@@ -65,6 +68,10 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
     };
     trace!("Request built!");
 
+    create_and_stream(request, thread_id).await
+}
+
+async fn create_and_stream(request: CreateChatCompletionRequest, thread_id: String) -> actix_web::HttpResponse {
     let stream = match CLIENT.chat().create_stream(request).await {
         Ok(stream) => stream,
         Err(e) => {
@@ -79,10 +86,9 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
     // First we need to transform the stream from the OpenAI client into a stream that can be used by Actix.
     // Before we can do that, we'll first transform the stream of responses into a stream of Stream Variants.
 
-    let variant_stream = stream.map(|response| match response {
-        Ok(response) => match response.choices.first() {
-            // The reponse contains a list of choices for the next word, we only care about the first one.
-            Some(choice) => {
+    let variant_stream = stream.map(move |response| { // moves the thread_id into the closure
+        let variant = match response {
+            Ok(response) => if let Some(choice) = response.choices.first() {
                 // let delta = choice.delta;
                 // trace!("Delta: {}", delta);
                 // Ok(actix_web::web::Bytes::copy_from_slice(delta.as_bytes())) // Actix wants the stream in this exact format.
@@ -117,17 +123,21 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
                         StreamVariant::StreamEnd("No content found in response and no reason to stop given.".to_string())
                     }
                 }
-            }
-            None => {
+            } else {
                 debug!("No response found, ending stream.");
                 StreamVariant::OpenAIError("No response found.".to_string())
+            },
+            Err(e) => {
+                // If we can't get the response, we'll return a generic error.
+                warn!("Error getting response: {:?}", e);
+                StreamVariant::OpenAIError("Error getting response.".to_string())
             }
-        },
-        Err(e) => {
-            // If we can't get the response, we'll return a generic error.
-            warn!("Error getting response: {:?}", e);
-            StreamVariant::OpenAIError("Error getting response.".to_string())
-        }
+        };
+        
+        // Also add the variant into the active conversation
+        add_to_conversation(&thread_id, variant.clone());
+
+        variant
     });
 
     // Now we can transform the stream to a string stream that Actix can use.
@@ -135,9 +145,8 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
         .map(|v| match serde_json::to_string(&v) {
             Ok(string) => string,
             Err(e) => {
-                warn!("Error converting StreamVariant to string: {:?}", e);
-                StreamVariant::ServerError(format!("Error converting StreamVariant to string: {:?}", v).to_string())
-                    .to_string()
+                warn!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
+                format!("{:?}",StreamVariant::ServerError(format!("Error converting StreamVariant to string: {v:?}").to_string()))
             }
         })
         .map(|string| {

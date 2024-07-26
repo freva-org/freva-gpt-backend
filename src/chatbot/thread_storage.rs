@@ -21,7 +21,9 @@ use std::{
 
 use tracing::{debug, error, trace, warn};
 
-use super::types::{Conversation, StreamVariant};
+use super::
+    types::{Conversation, StreamVariant}
+;
 
 /// Appends events from a stream of a conversation to the file of the conversation.
 pub(crate) fn append_thread(file: &mut File, content: Conversation) {
@@ -43,7 +45,7 @@ pub(crate) fn append_thread(file: &mut File, content: Conversation) {
 
     // Then we write it to the file.
     match file.write_all(to_write.as_bytes()) {
-        Ok(_) => trace!("Successfully wrote to file."),
+        Ok(()) => trace!("Successfully wrote to file."),
         Err(e) => {
             // If we can't write to the file, we'll just print the error and continue.
             // This is not a critical error, as the conversation is still running, but is bad because it means something is wrong with the filesystem.
@@ -61,7 +63,7 @@ pub(crate) fn open_thread(thread_id: &str) -> Option<File> {
         .write(true)
         .append(true)
         .create(true)
-        .open(format!("/threads/{}.txt", thread_id))
+        .open(format!("/threads/{thread_id}.txt"))
     {
         // We want to only append to the file and also to create it if it doesn't exist.
         Ok(file) => {
@@ -78,13 +80,13 @@ pub(crate) fn open_thread(thread_id: &str) -> Option<File> {
 }
 
 /// Reads a file for a conversation and returns the content.
-/// Returns the Read content as a Vec of StreamVariants or the IO Error that occured.
+/// Returns the Read content as a Vec of `StreamVariants` or the IO Error that occured.
 pub(crate) fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
     trace!("Reading thread with id: {}", thread_id);
 
     let content = match OpenOptions::new()
         .read(true)
-        .open(format!("/threads/{}.txt", thread_id))
+        .open(format!("/threads/{thread_id}.txt"))
     {
         Ok(mut file) => {
             // we can open the file
@@ -124,15 +126,15 @@ pub(crate) fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
         let parts = line.splitn(2, ':').collect::<Vec<&str>>();
         trace!("Parts: {:?}", parts);
         let to_append = match parts.as_slice() {
-            ["User", s] => StreamVariant::User(s.to_string()),
-            ["Assistant", s] => StreamVariant::Assistant(s.to_string()),
-            ["Code", s] => StreamVariant::Code(s.to_string()),
-            ["CodeOutput", s] => StreamVariant::CodeOutput(s.to_string()),
-            ["Image", s] => StreamVariant::Image(s.to_string()),
-            ["ServerError", s] => StreamVariant::ServerError(s.to_string()),
-            ["OpenAIError", s] => StreamVariant::OpenAIError(s.to_string()),
-            ["CodeError", s] => StreamVariant::CodeError(s.to_string()),
-            ["Streamend", s] => StreamVariant::StreamEnd(s.to_string()),
+            ["User", s] => StreamVariant::User((*s).to_string()),
+            ["Assistant", s] => StreamVariant::Assistant((*s).to_string()),
+            ["Code", s] => StreamVariant::Code((*s).to_string()),
+            ["CodeOutput", s] => StreamVariant::CodeOutput((*s).to_string()),
+            ["Image", s] => StreamVariant::Image((*s).to_string()),
+            ["ServerError", s] => StreamVariant::ServerError((*s).to_string()),
+            ["OpenAIError", s] => StreamVariant::OpenAIError((*s).to_string()),
+            ["CodeError", s] => StreamVariant::CodeError((*s).to_string()),
+            ["Streamend", s] => StreamVariant::StreamEnd((*s).to_string()),
             // If the line is empty, this will be the empty slice, so we need to cover that case.
             [] => {
                 warn!("Empty line in conversation file, skipping.");
@@ -140,7 +142,10 @@ pub(crate) fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
             }
             // If we do find a line that doesn't match any of the above, we can skip it.
             [variant, s] => {
-                warn!("Unknown variant in conversation file: {}, skipping.", variant);
+                warn!(
+                    "Unknown variant in conversation file: {}, skipping.",
+                    variant
+                );
                 debug!("The content of the line was: {}", s);
                 continue;
             }
@@ -154,3 +159,4 @@ pub(crate) fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
 
     Ok(res)
 }
+
