@@ -1,9 +1,9 @@
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use async_openai::types::{ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs};
 use futures::StreamExt;
-use tracing::{trace, warn};
+use tracing::{debug, info, trace, warn};
 
-use crate::chatbot::{available_chatbots::DEFAULTCHATBOT, CLIENT};
+use crate::chatbot::{available_chatbots::DEFAULTCHATBOT, types::StreamVariant, CLIENT};
 
 pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
     // Try to get the thread ID and input from the request's query parameters.
@@ -77,9 +77,9 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
     trace!("Stream created!");
 
     // First we need to transform the stream from the OpenAI client into a stream that can be used by Actix.
-    // For now, it'll be a simple string stream.
+    // Before we can do that, we'll first transform the stream of responses into a stream of Stream Variants.
 
-    let string_stream = stream.map(|response| match response {
+    let variant_stream = stream.map(|response| match response {
         Ok(response) => match response.choices.first() {
             // The reponse contains a list of choices for the next word, we only care about the first one.
             Some(choice) => {
@@ -89,40 +89,63 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
                 match (&choice.delta.content, choice.finish_reason) {
                     (Some(string_delta), _) => {
                         trace!("Delta: {}", string_delta);
-                        Ok(actix_web::web::Bytes::copy_from_slice(
-                            string_delta.as_bytes(),
-                        )) // Actix wants the stream in this exact format.
+                        StreamVariant::Assistant(string_delta.clone())
                     }
                     (None, Some(reason)) => {
                         trace!("Got stop event from OpenAI: {:?}", reason);
                         match reason {
                             async_openai::types::FinishReason::Stop => {
                                 trace!("Stopping stream.");
-                                Err("Stop event received.".to_string())
+                                StreamVariant::StreamEnd("Generation complete".to_string())
                             }
-                            _ => {
-                                warn!("Unknown finish reason: {:?}", reason);
-                                Err("Unknown finish reason.".to_string())
+                            async_openai::types::FinishReason::Length => {
+                                info!("Stopping stream due to reaching max tokens.");
+                                StreamVariant::StreamEnd("Reached max tokens".to_string())
+                            }
+                            async_openai::types::FinishReason::ContentFilter => {
+                                info!("Stopping stream due to content filter.");
+                                StreamVariant::StreamEnd("Content filter triggered".to_string())
+                            }
+                            async_openai::types::FinishReason::FunctionCall | async_openai::types::FinishReason::ToolCalls => {
+                                warn!("Stopping stream due to function call or tool calls. This should not happen, as it isn't implemented yet.");
+                                StreamVariant::StreamEnd("Function call or tool calls not yet implemented".to_string())
                             }
                         }
                     }
                     (None, None) => {
                         warn!("No content found in response and no reason to stop given: {:?}", response);
-                        Err("No content found in response and no reason to stop given.".to_string())
+                        StreamVariant::StreamEnd("No content found in response and no reason to stop given.".to_string())
                     }
                 }
             }
             None => {
-                trace!("No response found, ending stream.");
-                Err("No response found.".to_string())
+                debug!("No response found, ending stream.");
+                StreamVariant::OpenAIError("No response found.".to_string())
             }
         },
         Err(e) => {
             // If we can't get the response, we'll return a generic error.
             warn!("Error getting response: {:?}", e);
-            Err("Error getting response.".to_string())
+            StreamVariant::OpenAIError("Error getting response.".to_string())
         }
     });
+
+    // Now we can transform the stream to a string stream that Actix can use.
+    let string_stream = variant_stream
+        .map(|v| match serde_json::to_string(&v) {
+            Ok(string) => string,
+            Err(e) => {
+                warn!("Error converting StreamVariant to string: {:?}", e);
+                StreamVariant::ServerError(format!("Error converting StreamVariant to string: {:?}", v).to_string())
+                    .to_string()
+            }
+        })
+        .map(|string| {
+            Ok::<actix_web::web::Bytes, std::convert::Infallible>(
+                // It requires a Result, so we'll wrap it in an Ok where the Error cannot happen.
+                actix_web::web::Bytes::copy_from_slice(string.as_bytes()),
+            )
+        });
 
     HttpResponse::Ok().streaming(string_stream)
 }
