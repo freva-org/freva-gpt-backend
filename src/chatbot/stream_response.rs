@@ -1,5 +1,5 @@
 use actix_web::{HttpRequest, HttpResponse, Responder};
-use async_openai::types::CreateCompletionRequestArgs;
+use async_openai::types::{ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs};
 use futures::StreamExt;
 use tracing::{trace, warn};
 
@@ -34,15 +34,26 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
         input
     );
 
+    let messages = match ChatCompletionRequestUserMessageArgs::default()
+        .content(input)
+        .build()
+    {
+        Ok(messages) => messages,
+        Err(e) => {
+            // If we can't build the messages, we'll return a generic error.
+            warn!("Error building messages: {:?}", e);
+            return HttpResponse::InternalServerError().body("Error building messages.");
+        }
+    };
+
     // For testing, a basic request
-    let request = match CreateCompletionRequestArgs::default()
-        // .model(String::from(DEFAULTCHATBOT))
-        // .model("gpt-4o")
-        .model("gpt-3.5-turbo-instruct")// TODO: change this to the default chatbot
+    let request = match CreateChatCompletionRequestArgs::default()
+        .model(String::from(DEFAULTCHATBOT))
         .n(1)
-        .prompt(input)
+        // .prompt(input) // This isn't used for the chat API
+        .messages(vec![messages.into()])
         .stream(true)
-        .max_tokens(100u32)
+        .max_tokens(1000u32)
         .build()
     {
         Ok(request) => request,
@@ -54,7 +65,7 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
     };
     trace!("Request built!");
 
-    let stream = match CLIENT.completions().create_stream(request).await {
+    let stream = match CLIENT.chat().create_stream(request).await {
         Ok(stream) => stream,
         Err(e) => {
             // If we can't create the stream, we'll return a generic error.
@@ -72,9 +83,34 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
         Ok(response) => match response.choices.first() {
             // The reponse contains a list of choices for the next word, we only care about the first one.
             Some(choice) => {
-                let delta = choice.text.clone();
-                trace!("Delta: {}", delta);
-                Ok(actix_web::web::Bytes::copy_from_slice(delta.as_bytes())) // Actix wants the stream in this exact format.
+                // let delta = choice.delta;
+                // trace!("Delta: {}", delta);
+                // Ok(actix_web::web::Bytes::copy_from_slice(delta.as_bytes())) // Actix wants the stream in this exact format.
+                match (&choice.delta.content, choice.finish_reason) {
+                    (Some(string_delta), _) => {
+                        trace!("Delta: {}", string_delta);
+                        Ok(actix_web::web::Bytes::copy_from_slice(
+                            string_delta.as_bytes(),
+                        )) // Actix wants the stream in this exact format.
+                    }
+                    (None, Some(reason)) => {
+                        trace!("Got stop event from OpenAI: {:?}", reason);
+                        match reason {
+                            async_openai::types::FinishReason::Stop => {
+                                trace!("Stopping stream.");
+                                Err("Stop event received.".to_string())
+                            }
+                            _ => {
+                                warn!("Unknown finish reason: {:?}", reason);
+                                Err("Unknown finish reason.".to_string())
+                            }
+                        }
+                    }
+                    (None, None) => {
+                        warn!("No content found in response and no reason to stop given: {:?}", response);
+                        Err("No content found in response and no reason to stop given.".to_string())
+                    }
+                }
             }
             None => {
                 trace!("No response found, ending stream.");

@@ -1,5 +1,7 @@
 // Freva-GPT2-backend: Backend for the second version of the Freva-GPT project
 
+use std::time::Duration;
+
 use actix_web::{services, web, App, HttpServer};
 use clap::Parser;
 use dotenvy::dotenv;
@@ -61,6 +63,10 @@ async fn main() -> std::io::Result<()> {
         eprintln!("Error binding to the address. Exiting...");
         std::process::exit(1);
     })
+    .keep_alive(Duration::from_secs(75)) // Long keep-alive time to prevent the server from closing the connection too early. 
+    // But as far as I can see, we will always have the problem that the stream length is capped at the keep-alive time...
+    // If the keep-alive time is too short, we risk the connection being closed before the stream is finished.
+    // If it's too long, there might be a lot of open connections that are not being used.
     .run()
     .await
 }
