@@ -729,14 +729,16 @@ dependencies = [
 
 [[package]]
 name = "freva-gpt2-backend"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "actix-web",
  "async-openai",
  "clap",
  "const_format",
  "dotenvy",
+ "futures",
  "once_cell",
+ "qstring",
  "serde",
  "serde_json",
  "tracing",
@@ -1326,6 +1328,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e719e8df665df0d1c8fbfd238015744736151d4445ec0836b8e628aae103b77"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "qstring"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d464fae65fff2680baf48019211ce37aaec0c78e9264c84a3e484717f965104e"
+dependencies = [
+ "percent-encoding",
 ]
 
 [[package]]

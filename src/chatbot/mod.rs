@@ -16,6 +16,8 @@ pub mod get_thread;
 /// Internal use: handles the storing and retrieval of the streamed data
 pub(crate) mod thread_storage;
 
+/// Streams the response from the chatbot
+pub mod stream_response;
 
 // Defines a few useful static variables that are used throughout the chatbot.
 

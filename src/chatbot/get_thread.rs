@@ -1,12 +1,25 @@
-use actix_web::{HttpResponse, Responder};
+use actix_web::{HttpRequest, HttpResponse, Responder};
+use qstring::QString;
 use tracing::{error, info, trace, warn};
 
 use super::thread_storage::read_thread;
 
 /// Returns the content of a thread as a Json of List of Strings
-pub async fn get_thread(thread_id: String) -> impl Responder {
+pub async fn get_thread(req: HttpRequest) -> impl Responder {
+
+    // Try to get the thread ID from the request's query parameters.
+    let qstring = QString::from(req.query_string());
+    let thread_id = match qstring.get("thread_id") {
+        None | Some ("") => { // If no thread_id is provided, we'll return a 400
+            // If the thread ID is not found, we'll return a 400
+            warn!("The User requested a thread without a thread ID.");
+            return HttpResponse::BadRequest().body("Thread ID not found. Please provide a thread_id in the query parameters.");
+        }
+        Some(thread_id) => thread_id,
+    };
+
     // Instead of retrieving from OpenAI, we need to retrieve from disk since that is where all streamed data is stored.
-    let result = match read_thread(thread_id.as_str()) {
+    let result = match read_thread(thread_id) {
         Ok(content) => content,
         Err(e) => {
             // Further handle the error, as we know what possible IO errors can occur.

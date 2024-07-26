@@ -49,6 +49,7 @@ async fn main() -> std::io::Result<()> {
             web::scope("/ping").route("", web::get().to(static_serve::ping)), // Ping, just reply with a pong
             web::scope("/stop").route("", web::post().to(chatbot::stop::stop)), // Stop, stop a specific conversation by thread ID.
             web::scope("/getthread").route("", web::get().to(chatbot::get_thread::get_thread)), // GetThread, get the thread of a specific conversation by thread ID.
+            web::scope("/streamresponse").route("", web::get().to(chatbot::stream_response::stream_response)), // StreamResponse, stream the response of a specific conversation by thread ID.
         ];
         App::new()
             .service(services)

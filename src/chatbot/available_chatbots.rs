@@ -9,8 +9,9 @@
 //     println!("Available models:{:?}", models);
 // }
 
-static DEFAULTCHATBOT: AvailableChatbots = AvailableChatbots::OpenAI(OpenAIModels::gpt_4o);
+pub static DEFAULTCHATBOT: AvailableChatbots = AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini);
 
+#[derive(Debug, Clone, Copy)]
 pub enum AvailableChatbots {
     OpenAI(OpenAIModels),
     // Here will be more chatbots, like LLAMA, etc.
@@ -27,6 +28,7 @@ impl From<AvailableChatbots> for String{
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum OpenAIModels {
     #[allow(non_camel_case_types)] // Easier to read
     gpt_4o,

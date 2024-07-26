@@ -1,13 +1,24 @@
 // Handles the stop request from the client.
 
-use actix_web::{HttpResponse, Responder};
+use actix_web::{HttpRequest, HttpResponse, Responder};
 use tracing::{debug, trace, warn};
 
 use super::{types::ConversationState, ACTIVE_CONVERSATIONS};
 
 // TODO: guarentee panic safety
 /// Handles the stop request from the client.
-pub async fn stop(thread_id: String) -> impl Responder {
+pub async fn stop(req: HttpRequest) -> impl Responder {
+
+    // Try to get the thread ID from the request's query parameters.
+    let qstring = qstring::QString::from(req.query_string());
+    let thread_id = match qstring.get("thread_id") {
+        None | Some("") => {
+            // If the thread ID is not found, we'll return a 400
+            warn!("The User requested a stop without a thread ID.");
+            return HttpResponse::BadRequest().body("Thread ID not found. Please provide a thread_id in the query parameters.");
+        }
+        Some(thread_id) => thread_id,
+    };
     // Trieds to set the conversation state to Stopping
     debug!("Trying to stop conversation with id: {}", thread_id);
 
