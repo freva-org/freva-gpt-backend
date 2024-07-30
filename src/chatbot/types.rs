@@ -48,8 +48,9 @@ pub enum StreamVariant {
     OpenAIError(String),
     /// An error that occured during Code Executing, as a String. Note that this means that trying to start executing the code failed, not that the code itself failed.
     CodeError(String),
-    /// The Stream ended. May contain a reason as a String.
+    /// The Stream ended. Contains a reason as a String.
     StreamEnd(String),
+    //TODO: Add ClientHint variant
 }
 
 impl fmt::Display for StreamVariant {
