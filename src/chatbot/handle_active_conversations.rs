@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use rand::Rng;
-use tracing::{error, trace, warn};
+use tracing::{error, trace, warn, debug};
 
 use crate::chatbot::{types::{ActiveConversation, ConversationState}, ACTIVE_CONVERSATIONS};
 
@@ -101,4 +101,29 @@ pub(crate) fn conversation_stopped(thread_id: &str) -> bool {
         }
     }
 
+}
+
+/// Ends the conversation with the given ID, clearing it from the active conversations and writing it to disk.
+pub(crate) fn end_conversation(thread_id: &str) {
+    trace!("Ending conversation with id: {}", thread_id);
+
+    // We extract the conversation from the global variable to minimize the time we lock the mutex.
+    let conversation = match ACTIVE_CONVERSATIONS.lock() {
+        Ok(mut guard) => {
+            // If we can lock the mutex, we can check if the value is already in use.
+            guard.iter().position(|x| x.id == thread_id).map(|index| guard.remove(index))
+        }
+        Err(e) => {
+            error!("Error locking the mutex: {:?}", e);
+            None
+        }
+    };
+
+    if let Some(conversation) = conversation {
+        // If we found the conversation, we'll write it to disk.
+        trace!("Removed conversation with thread_id: {}", thread_id);
+        trace!("Conversation: {:?}", conversation);
+        debug!("Writing conversation to disk.");
+        crate::chatbot::thread_storage::append_thread(thread_id, conversation.conversation);
+    }
 }

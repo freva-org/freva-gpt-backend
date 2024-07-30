@@ -1,3 +1,5 @@
+use std::future;
+
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use async_openai::types::{
     ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, CreateChatCompletionRequest, CreateChatCompletionRequestArgs
@@ -5,7 +7,7 @@ use async_openai::types::{
 use futures::StreamExt;
 use tracing::{debug, info, trace, warn};
 
-use crate::chatbot::{available_chatbots::DEFAULTCHATBOT, handle_active_conversations::{add_to_conversation, new_conversation_id}, prompting::STARTING_MESSAGES, types::StreamVariant, CLIENT};
+use crate::chatbot::{available_chatbots::DEFAULTCHATBOT, handle_active_conversations::{add_to_conversation, end_conversation, new_conversation_id}, prompting::STARTING_MESSAGES, thread_storage::read_thread, types::StreamVariant, CLIENT};
 
 pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
     // Try to get the thread ID and input from the request's query parameters.
@@ -52,7 +54,22 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
         base_message.push(user_message);
         base_message
     } else {
-        todo!("Read the thread from disk and continue the conversation.");
+        debug!("Expecting there to be a file for thread_id {}", thread_id);
+        let content = match read_thread(thread_id.as_str()){
+            Ok(content) => content,
+            Err(e) => {
+                // If we can't read the thread, we'll return a generic error.
+                warn!("Error reading thread: {:?}", e);
+                return HttpResponse::InternalServerError().body("Error reading thread.");
+            }
+        };
+
+        // We have a Vec of StreamVariant, but we want a Vec of ChatCompletionRequestMessage.
+        content
+            .iter()
+            .map(|e| StreamVariant::try_into(e.clone()))
+            .filter_map(|e| e.ok())
+            .collect::<Vec<_>>()
     };
 
     // For testing, a basic request
@@ -143,11 +160,21 @@ async fn create_and_stream(request: CreateChatCompletionRequest, thread_id: Stri
         // Also add the variant into the active conversation
         add_to_conversation(&thread_id, variant.clone());
 
+        // If the variant is StreamEnd, we expect there to only be one, so we'll end the conversation.
+        if let StreamVariant::StreamEnd(ref m) = variant {
+            debug!("Ending conversation with message: {:?}", m);
+            end_conversation(thread_id.as_str());
+        };
+
+        
         variant
     });
+    
+    // TODO: check whether the conversation was stopped!
+    let test = variant_stream.take_while(|_| future::ready(true));
 
     // Now we can transform the stream to a string stream that Actix can use.
-    let string_stream = variant_stream
+    let string_stream = test
         .map(|v| match serde_json::to_string(&v) {
             Ok(string) => string,
             Err(e) => {

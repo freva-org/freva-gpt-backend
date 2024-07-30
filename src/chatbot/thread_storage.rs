@@ -26,7 +26,7 @@ use super::
 ;
 
 /// Appends events from a stream of a conversation to the file of the conversation.
-pub(crate) fn append_thread(file: &mut File, content: Conversation) {
+pub(crate) fn append_thread(thread_id: &str, content: Conversation) {
     trace!("Appending content to thread: {:?}", content);
     // First we have to convert the content to a string.
     if content.is_empty() {
@@ -42,6 +42,17 @@ pub(crate) fn append_thread(file: &mut File, content: Conversation) {
     }
 
     trace!("Writing to file: {}", to_write);
+
+    // Open File and write to it
+    let mut file = match open_thread(thread_id){
+        Some(file) => file,
+        None => {
+            // If we can't open the file, we'll just print the error and continue.
+            // This is not a critical error, as the conversation is still running, but is bad because it means something is wrong with the filesystem.
+            warn!("Error opening conversation file, not writing to file.");
+            return;
+        }
+    };
 
     // Then we write it to the file.
     match file.write_all(to_write.as_bytes()) {
@@ -60,9 +71,9 @@ pub(crate) fn open_thread(thread_id: &str) -> Option<File> {
     // We'll try to open the file for the conversation.
     // match File::create(format!("/threads/{}.txt", thread_id)) {
     match OpenOptions::new()
-        .write(true)
-        .append(true)
-        .create(true)
+        .write(true) // Write, don't only read
+        .append(true) // Append, don't overwrite
+        .create(true) // Create if it doesn't exist
         .open(format!("/threads/{thread_id}.txt"))
     {
         // We want to only append to the file and also to create it if it doesn't exist.
@@ -126,6 +137,7 @@ pub(crate) fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
         let parts = line.splitn(2, ':').collect::<Vec<&str>>();
         trace!("Parts: {:?}", parts);
         let to_append = match parts.as_slice() {
+            ["Prompt", s] => StreamVariant::Prompt((*s).to_string()),
             ["User", s] => StreamVariant::User((*s).to_string()),
             ["Assistant", s] => StreamVariant::Assistant((*s).to_string()),
             ["Code", s] => StreamVariant::Code((*s).to_string()),
