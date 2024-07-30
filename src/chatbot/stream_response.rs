@@ -223,11 +223,18 @@ async fn create_and_stream(
                         None => {
                             warn!("Stream ended abruptly and without error. This should not happen; returning StreamEnd.");
                             StreamVariant::StreamEnd("Stream ended abruptly".to_string())
-                        } // Once the stream ends, we'll return the StreamEnd, since we won't be getting any more responses.
+
+                            // This does not mean that the stream ended abruptly, I misunderstood.
+                            // It happends when the stream is done on the OpenAI side.
+                            // We need to detect when a StreamEnd was sent by OpenAI and then stop the stream.
+                        }
                     };
 
                     // Also add the variant into the active conversation
                     add_to_conversation(&thread_id, variant.clone());
+
+                    // Check whether the stream should end by checking the variant.
+                    let should_end = matches!(variant, StreamVariant::StreamEnd(_));
 
                     // Transform to string and then to actix_web::Bytes
 
@@ -247,7 +254,7 @@ async fn create_and_stream(
                     let bytes = actix_web::web::Bytes::copy_from_slice(string_variant.as_bytes());
 
                     // Everything worked, so we'll return the bytes and the new state.
-                    Some((Ok(bytes), (open_ai_stream, thread_id, false)))
+                    Some((Ok(bytes), (open_ai_stream, thread_id, should_end))) // Ends if the variant is a StreamEnd
                 }
             }
         },
