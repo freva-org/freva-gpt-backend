@@ -1,24 +1,28 @@
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use async_openai::types::{
-    ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequest,
-    CreateChatCompletionRequestArgs,
+    ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, CreateChatCompletionRequest, CreateChatCompletionRequestArgs
 };
 use futures::StreamExt;
 use tracing::{debug, info, trace, warn};
 
-use crate::chatbot::{available_chatbots::DEFAULTCHATBOT, handle_active_conversations::add_to_conversation, types::StreamVariant, CLIENT};
+use crate::chatbot::{available_chatbots::DEFAULTCHATBOT, handle_active_conversations::{add_to_conversation, new_conversation_id}, prompting::STARTING_MESSAGES, types::StreamVariant, CLIENT};
 
 pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
     // Try to get the thread ID and input from the request's query parameters.
     let qstring = qstring::QString::from(req.query_string());
-    let thread_id = match qstring.get("thread_id") {
-        None | Some("") => {
+    let (thread_id, create_new) = match qstring.get("thread_id") {
+        None => {
             // If the thread ID is not found, we'll return a 400
             warn!("The User requested a stream without a thread ID.");
             return HttpResponse::BadRequest()
-                .body("Thread ID not found. Please provide a thread_id in the query parameters.");
+                .body("Thread ID not found. Please provide a thread_id in the query parameters. Leave it empty to create a new thread.");
         }
-        Some(thread_id) => thread_id.to_string(),
+        Some("") => {
+            // If the thread ID is empty, we'll create a new thread.
+            debug!("Creating a new thread.");
+            (new_conversation_id(), true)
+        }
+        Some(thread_id) => (thread_id.to_string(), false),
     };
 
     let input = match qstring.get("input") {
@@ -31,22 +35,24 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
         }
         Some(input) => input.to_string(),
     };
+
     trace!(
         "Starting stream for thread {} with input: {}",
         thread_id,
         input
     );
 
-    let messages = match ChatCompletionRequestUserMessageArgs::default()
-        .content(input)
-        .build()
-    {
-        Ok(messages) => messages,
-        Err(e) => {
-            // If we can't build the messages, we'll return a generic error.
-            warn!("Error building messages: {:?}", e);
-            return HttpResponse::InternalServerError().body("Error building messages.");
-        }
+    let messages = if create_new {
+        // If the thread is new, we'll start with the base messages and the user's input.
+        let mut base_message: Vec<ChatCompletionRequestMessage> = STARTING_MESSAGES.clone();
+        let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage{
+            name: Some("user".to_string()),
+            content: async_openai::types::ChatCompletionRequestUserMessageContent::Text(input.clone()),
+        });
+        base_message.push(user_message);
+        base_message
+    } else {
+        todo!("Read the thread from disk and continue the conversation.");
     };
 
     // For testing, a basic request
@@ -54,7 +60,7 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
         .model(String::from(DEFAULTCHATBOT))
         .n(1)
         // .prompt(input) // This isn't used for the chat API
-        .messages(vec![messages.into()])
+        .messages(messages)
         .stream(true)
         .max_tokens(1000u32)
         .build()

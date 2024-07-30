@@ -22,6 +22,9 @@ pub mod stream_response;
 /// Handles the logic for storing and using the global conversation state
 pub(crate) mod handle_active_conversations;
 
+/// Defines the prompts for the chatbot
+pub(crate) mod prompting;
+
 // Defines a few useful static variables that are used throughout the chatbot.
 
 use std::sync::{Arc, Mutex};

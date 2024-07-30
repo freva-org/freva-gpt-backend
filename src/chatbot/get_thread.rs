@@ -1,6 +1,6 @@
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use qstring::QString;
-use tracing::{error, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::thread_storage::read_thread;
 
@@ -23,7 +23,7 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
         Ok(content) => content,
         Err(e) => {
             // Further handle the error, as we know what possible IO errors can occur.
-            trace!("Error reading thread file: {:?}", e);
+            debug!("Error reading thread file: {:?}", e);
             match e.kind() {
                 std::io::ErrorKind::NotFound => {
                     // If the file is not found, we'll return a 404
