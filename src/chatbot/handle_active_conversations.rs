@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use rand::Rng;
 use tracing::{error, trace, warn, debug};
 
@@ -64,47 +62,50 @@ pub(crate) fn add_to_conversation(thread_id: &str, variant: StreamVariant) {
     }
 }
 
-/// Checks if the conversation with the given ID was stopped.
-/// If so, returns true and sets the state to Ended.
-/// If not, returns false.
-pub(crate) fn conversation_stopped(thread_id: &str) -> bool {
-    trace!("Checking if conversation with id: {} is stopped.", thread_id);
+/// Returns the state of the conversation, if possible
+pub(crate) fn conversation_state(thread_id: &str) -> Option<ConversationState> {
+    trace!("Checking the state of conversation with id: {}", thread_id);
 
     match ACTIVE_CONVERSATIONS.lock() {
         Ok(mut guard) => {
             // If we can lock the mutex, we can check if the value is already in use.
             if let Some(conversation) = guard.iter_mut().find(|x| x.id == thread_id) {
                 // If we find the conversation, we'll check if it's stopped.
-                match conversation.state {
-                    ConversationState::Stopping => {
-                        // If it's stopping, we'll set it to ended and return true.
-                        conversation.state = ConversationState::Ended(Instant::now());
-                        true
-                    }
-                    ConversationState::Ended(_) => {
-                        // If it's already ended, we'll return true.
-                        true
-                    }
-                    ConversationState::Streaming => {
-                        // If it's still streaming, we'll return false.
-                        false
-                    }
-                }
+                Some(conversation.state.clone())
             } else {
                 // If the conversation is not found, we'll return false.
-                false
+                warn!("Conversation with id: {} not found.", thread_id);
+                None
             }
         }
         Err(e) => {
             error!("Error locking the mutex: {:?}", e);
-            false
+            None
         }
     }
 
 }
 
-/// Ends the conversation with the given ID, clearing it from the active conversations and writing it to disk.
+/// Ends the conversation with the given ID, setting the state to Ended.
 pub(crate) fn end_conversation(thread_id: &str) {
+    trace!("Ending conversation with id: {}", thread_id);
+
+    match ACTIVE_CONVERSATIONS.lock() {
+        Ok(mut guard) => {
+            // If we can lock the mutex, we can check if the value is already in use.
+            if let Some(conversation) = guard.iter_mut().find(|x| x.id == thread_id) {
+                // If we find the conversation, we'll set the state to Ended.
+                conversation.state = ConversationState::Ended(std::time::Instant::now());
+            }
+        }
+        Err(e) => {
+            error!("Error locking the mutex: {:?}", e);
+        }
+    }
+}
+
+/// removes the conversation with the given ID, clearing it from the active conversations and writing it to disk.
+pub(crate) fn remove_conversation(thread_id: &str) {
     trace!("Ending conversation with id: {}", thread_id);
 
     // We extract the conversation from the global variable to minimize the time we lock the mutex.

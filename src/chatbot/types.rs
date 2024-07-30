@@ -7,7 +7,7 @@ use async_openai::types::{
 use serde::Serialize;
 use tracing::trace;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConversationState {
     Streaming,
     Stopping,
@@ -17,7 +17,7 @@ pub enum ConversationState {
 /// When a thread is streaming, it is in the Streaming state. If nothing goes wrong, at the end, it will be in the Ended state.
 /// If a request to stop it is sent, another thread will change the state to Stopping.
 /// The thread that is streaming will check the state and if it is Stopping, it will stop the streaming and change the state to Ended.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ActiveConversation {
     pub(crate) id: String, // Either the id as given by OpenAI or our internal id, maybe an Enum or `either` later. It's just an identified for while it's streaming, mainly for the stop request.
 

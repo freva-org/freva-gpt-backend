@@ -7,7 +7,7 @@ use async_openai::types::{
 use futures::StreamExt;
 use tracing::{debug, info, trace, warn};
 
-use crate::chatbot::{available_chatbots::DEFAULTCHATBOT, handle_active_conversations::{add_to_conversation, end_conversation, new_conversation_id}, prompting::STARTING_MESSAGES, thread_storage::read_thread, types::StreamVariant, CLIENT};
+use crate::chatbot::{available_chatbots::DEFAULTCHATBOT, handle_active_conversations::{add_to_conversation, conversation_state, end_conversation, new_conversation_id, remove_conversation}, prompting::STARTING_MESSAGES, thread_storage::read_thread, types::{ConversationState, StreamVariant}, CLIENT};
 
 pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
     // Try to get the thread ID and input from the request's query parameters.
@@ -160,21 +160,47 @@ async fn create_and_stream(request: CreateChatCompletionRequest, thread_id: Stri
         // Also add the variant into the active conversation
         add_to_conversation(&thread_id, variant.clone());
 
-        // If the variant is StreamEnd, we expect there to only be one, so we'll end the conversation.
-        if let StreamVariant::StreamEnd(ref m) = variant {
-            debug!("Ending conversation with message: {:?}", m);
-            end_conversation(thread_id.as_str());
-        };
-
         
-        variant
+        (variant, thread_id.clone())
     });
+
+    // Stopping logic:
+    // The stop REST API point will set a conversation to stopping.
+    // The stopped_guard will check if the conversation is Ended and stop the stream if it is.
+    // The stream_end_guard will check if the conversation is stopping and if it is, set it to Ended and replace the current variant with a StreamEnd.
+    // This ensures that as soon as the conversation is stopped, the next variant will be a StreamEnd and there will be no more variants.
     
-    // TODO: check whether the conversation was stopped!
-    let test = variant_stream.take_while(|_| future::ready(true));
+    // Checks whether the conversation has been stopped and ends the stream if it has.
+    let stopped_guard = variant_stream.take_while(|(_, thread_id)| {
+        // future::ready(!crate::chatbot::handle_active_conversations::conversation_stopped(thread_id.as_str()))
+
+        // the thread_id is gotten from the outer scope, where I copied it before moving the original into the closure.
+        let thread_stopped = matches!(conversation_state(thread_id.as_str()), Some(ConversationState::Ended(_))); // If the conversation state can be gotten and is Ended, the thread is stopped.
+        if thread_stopped {
+            debug!("Conversation with thread_id {} has been stopped, aborting stream.", thread_id);
+            
+            // Also remove the conversation from the active conversations, writing it to disk.
+            remove_conversation(thread_id.as_str());
+        }
+
+        future::ready(!thread_stopped)
+    });
+
+    // Now we set the stream item to a StreamEnd if the conversation has been stopped.
+    let stream_end_guard = stopped_guard.map(|(v, thread_id)| {
+        if let Some(ConversationState::Stopping) = conversation_state(thread_id.as_str()) { // If the conversation state can be gotten and is Stopping, the thread is stopping.
+            debug!("Conversation with thread_id {} has been stopped, setting the next variant to StreamEnd.", thread_id);
+            end_conversation(thread_id.as_str());
+
+            trace!("Stopping stream, overwriting variant {:?} with StreamEnd.", v);
+            StreamVariant::StreamEnd("Conversation stopped".to_string())
+        } else {
+            v
+        }
+    });
 
     // Now we can transform the stream to a string stream that Actix can use.
-    let string_stream = test
+    let string_stream = stream_end_guard
         .map(|v| match serde_json::to_string(&v) {
             Ok(string) => string,
             Err(e) => {
