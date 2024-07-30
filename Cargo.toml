@@ -1,6 +1,6 @@
 [package]
 name = "freva-gpt2-backend"
-version = "0.5.2"
+version = "0.7.4"
 edition = "2021"
 authors = ["Sebastian Willmann"]
 repository = "https://gitlab.dkrz.de/k203176/freva-gpt2-backend"
@@ -31,5 +31,5 @@ unsafe_code = "forbid"
 [lints.clippy]
 unwrap_used = "deny" # Always use expect instead
 enum_glob_use = "deny" # Bad form
-nursery = {level = "warn", priority = -1} # General "undertested" lints
-pedantic = {level = "warn", priority = -1} 
+# nursery = {level = "warn", priority = -1} # General "undertested" lints, but many false positives
+# pedantic = {level = "warn", priority = -1}  # Only activate these two when preparing for major versions. 
