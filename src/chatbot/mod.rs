@@ -6,7 +6,7 @@
 pub mod types;
 
 /// Internal use: describes all available chatbots
-pub(crate) mod available_chatbots;
+pub mod available_chatbots;
 /// Handles the stop request from the client.
 pub mod stop;
 
@@ -14,16 +14,16 @@ pub mod stop;
 pub mod get_thread;
 
 /// Internal use: handles the storing and retrieval of the streamed data
-pub(crate) mod thread_storage;
+pub mod thread_storage;
 
 /// Streams the response from the chatbot
 pub mod stream_response;
 
 /// Handles the logic for storing and using the global conversation state
-pub(crate) mod handle_active_conversations;
+pub mod handle_active_conversations;
 
 /// Defines the prompts for the chatbot
-pub(crate) mod prompting;
+pub mod prompting;
 
 // Defines a few useful static variables that are used throughout the chatbot.
 

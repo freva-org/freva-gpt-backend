@@ -8,7 +8,7 @@ use super::types::StreamVariant;
 
 /// Helper function to return an ID for a new conversation.
 /// Currently unused, the thread IDs come from the frontend.
-pub(crate) fn new_conversation_id() -> String {
+pub fn new_conversation_id() -> String {
     trace!("Generating new conversation ID.");
     let value = rand::thread_rng()
         .sample_iter(rand::distributions::Alphanumeric)
@@ -38,7 +38,7 @@ pub(crate) fn new_conversation_id() -> String {
 
 /// Adds the given Stream Variant to the conversation with the given ID
 /// or creates a new conversation if the ID is not found.
-pub(crate) fn add_to_conversation(thread_id: &str, variant: StreamVariant) {
+pub fn add_to_conversation(thread_id: &str, variant: StreamVariant) {
     trace!("Adding to conversation with id: {}", thread_id);
 
     match ACTIVE_CONVERSATIONS.lock() {
@@ -63,7 +63,7 @@ pub(crate) fn add_to_conversation(thread_id: &str, variant: StreamVariant) {
 }
 
 /// Returns the state of the conversation, if possible
-pub(crate) fn conversation_state(thread_id: &str) -> Option<ConversationState> {
+pub fn conversation_state(thread_id: &str) -> Option<ConversationState> {
     trace!("Checking the state of conversation with id: {}", thread_id);
 
     match ACTIVE_CONVERSATIONS.lock() {
@@ -87,7 +87,7 @@ pub(crate) fn conversation_state(thread_id: &str) -> Option<ConversationState> {
 }
 
 /// Ends the conversation with the given ID, setting the state to Ended.
-pub(crate) fn end_conversation(thread_id: &str) {
+pub fn end_conversation(thread_id: &str) {
     trace!("Ending conversation with id: {}", thread_id);
 
     match ACTIVE_CONVERSATIONS.lock() {
@@ -105,7 +105,7 @@ pub(crate) fn end_conversation(thread_id: &str) {
 }
 
 /// removes the conversation with the given ID, clearing it from the active conversations and writing it to disk.
-pub(crate) fn remove_conversation(thread_id: &str) {
+pub fn remove_conversation(thread_id: &str) {
     trace!("Ending conversation with id: {}", thread_id);
 
     // We extract the conversation from the global variable to minimize the time we lock the mutex.
@@ -122,8 +122,7 @@ pub(crate) fn remove_conversation(thread_id: &str) {
 
     if let Some(conversation) = conversation {
         // If we found the conversation, we'll write it to disk.
-        trace!("Removed conversation with thread_id: {}", thread_id);
-        trace!("Conversation: {:?}", conversation);
+        trace!("Removed conversation with thread_id: {}: {:?}", thread_id, conversation);
         debug!("Writing conversation to disk.");
         crate::chatbot::thread_storage::append_thread(thread_id, conversation.conversation);
     }

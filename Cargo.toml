@@ -24,3 +24,12 @@ serde = "1.0.204"
 serde_json = "1.0.120"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny" # Always use expect instead
+enum_glob_use = "deny" # Bad form
+nursery = {level = "warn", priority = -1} # General "undertested" lints
+pedantic = {level = "warn", priority = -1} 

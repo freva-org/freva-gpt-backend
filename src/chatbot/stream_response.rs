@@ -9,7 +9,7 @@ use tracing::{debug, info, trace, warn};
 
 use crate::chatbot::{available_chatbots::DEFAULTCHATBOT, handle_active_conversations::{add_to_conversation, conversation_state, end_conversation, new_conversation_id, remove_conversation}, prompting::STARTING_MESSAGES, thread_storage::read_thread, types::{ConversationState, StreamVariant}, CLIENT};
 
-pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
+pub async fn stream_response(req: HttpRequest) -> impl Responder {
     // Try to get the thread ID and input from the request's query parameters.
     let qstring = qstring::QString::from(req.query_string());
     let (thread_id, create_new) = match qstring.get("thread_id") {
@@ -68,7 +68,7 @@ pub(crate) async fn stream_response(req: HttpRequest) -> impl Responder {
         content
             .iter()
             .map(|e| StreamVariant::try_into(e.clone()))
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .collect::<Vec<_>>()
     };
 
@@ -178,7 +178,7 @@ async fn create_and_stream(request: CreateChatCompletionRequest, thread_id: Stri
         let thread_stopped = matches!(conversation_state(thread_id.as_str()), Some(ConversationState::Ended(_))); // If the conversation state can be gotten and is Ended, the thread is stopped.
         if thread_stopped {
             debug!("Conversation with thread_id {} has been stopped, aborting stream.", thread_id);
-            
+
             // Also remove the conversation from the active conversations, writing it to disk.
             remove_conversation(thread_id.as_str());
         }
@@ -188,7 +188,7 @@ async fn create_and_stream(request: CreateChatCompletionRequest, thread_id: Stri
 
     // Now we set the stream item to a StreamEnd if the conversation has been stopped.
     let stream_end_guard = stopped_guard.map(|(v, thread_id)| {
-        if let Some(ConversationState::Stopping) = conversation_state(thread_id.as_str()) { // If the conversation state can be gotten and is Stopping, the thread is stopping.
+        if matches!(conversation_state(thread_id.as_str()), Some(ConversationState::Stopping)) { // If the conversation state can be gotten and is Stopping, the thread is stopping.
             debug!("Conversation with thread_id {} has been stopped, setting the next variant to StreamEnd.", thread_id);
             end_conversation(thread_id.as_str());
 
@@ -205,7 +205,7 @@ async fn create_and_stream(request: CreateChatCompletionRequest, thread_id: Stri
             Ok(string) => string,
             Err(e) => {
                 warn!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
-                format!("{:?}",StreamVariant::ServerError(format!("Error converting StreamVariant to string: {v:?}").to_string()))
+                format!("{:?}",StreamVariant::ServerError(format!("Error converting StreamVariant to string: {v:?}")))
             }
         })
         .map(|string| {

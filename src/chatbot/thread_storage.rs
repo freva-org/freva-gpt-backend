@@ -26,7 +26,7 @@ use super::
 ;
 
 /// Appends events from a stream of a conversation to the file of the conversation.
-pub(crate) fn append_thread(thread_id: &str, content: Conversation) {
+pub fn append_thread(thread_id: &str, content: Conversation) {
     trace!("Appending content to thread: {:?}", content);
     // First we have to convert the content to a string.
     if content.is_empty() {
@@ -44,14 +44,11 @@ pub(crate) fn append_thread(thread_id: &str, content: Conversation) {
     trace!("Writing to file: {}", to_write);
 
     // Open File and write to it
-    let mut file = match open_thread(thread_id){
-        Some(file) => file,
-        None => {
-            // If we can't open the file, we'll just print the error and continue.
-            // This is not a critical error, as the conversation is still running, but is bad because it means something is wrong with the filesystem.
-            warn!("Error opening conversation file, not writing to file.");
-            return;
-        }
+    let Some(mut file) = open_thread(thread_id) else {
+        // If we can't open the file, we'll just print the error and continue.
+        // This is not a critical error, as the conversation is still running, but is bad because it means something is wrong with the filesystem.
+        warn!("Error opening conversation file, not writing to file.");
+        return;
     };
 
     // Then we write it to the file.
@@ -66,7 +63,7 @@ pub(crate) fn append_thread(thread_id: &str, content: Conversation) {
 }
 
 /// Opens a file for a conversation and returns a file handle.
-pub(crate) fn open_thread(thread_id: &str) -> Option<File> {
+pub fn open_thread(thread_id: &str) -> Option<File> {
     trace!("Opening thread with id: {}", thread_id);
     // We'll try to open the file for the conversation.
     // match File::create(format!("/threads/{}.txt", thread_id)) {
@@ -92,7 +89,9 @@ pub(crate) fn open_thread(thread_id: &str) -> Option<File> {
 
 /// Reads a file for a conversation and returns the content.
 /// Returns the Read content as a Vec of `StreamVariants` or the IO Error that occured.
-pub(crate) fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
+/// # Errors
+/// Returns the IO Errors that occured while reading the file.
+pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
     trace!("Reading thread with id: {}", thread_id);
 
     let content = match OpenOptions::new()
