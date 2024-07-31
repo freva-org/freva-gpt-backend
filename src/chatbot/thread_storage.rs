@@ -1,8 +1,7 @@
 // Handles the storage and retrieval of conversations.
 // In the OpenAI V2, they're called threads, so that's what we'll call them here too.
 // Due to us using V1, OpenAI doesn't store the conversations (for us), so we need to do that ourselves.
-// They will all be stored at `/threads/THEADID.txt`, where the ThreadID is the ID of the conversation.
-// (This works because we're inside docker, so `/threads` is a valid path, as it's a mount to a volume.)
+// They will all be stored at `./threads/THEADID.txt`, where the ThreadID is the ID of the conversation.
 // Reading and writing is just manipulating files, so we can use the `std::fs` module.
 // Note that the file of a conversation is opened at the start of the stream, so it cannot be read from while it is being written to.
 
@@ -66,12 +65,11 @@ pub fn append_thread(thread_id: &str, content: Conversation) {
 pub fn open_thread(thread_id: &str) -> Option<File> {
     trace!("Opening thread with id: {}", thread_id);
     // We'll try to open the file for the conversation.
-    // match File::create(format!("/threads/{}.txt", thread_id)) {
     match OpenOptions::new()
         .write(true) // Write, don't only read
         .append(true) // Append, don't overwrite
         .create(true) // Create if it doesn't exist
-        .open(format!("/threads/{thread_id}.txt"))
+        .open(format!("./threads/{thread_id}.txt"))
     {
         // We want to only append to the file and also to create it if it doesn't exist.
         Ok(file) => {
@@ -96,7 +94,7 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
 
     let content = match OpenOptions::new()
         .read(true)
-        .open(format!("/threads/{thread_id}.txt"))
+        .open(format!("./threads/{thread_id}.txt"))
     {
         Ok(mut file) => {
             // we can open the file
@@ -133,6 +131,7 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
     let mut res = Vec::new();
 
     for line in lines {
+        let line = line.trim_matches('\"'); // Remove any quotes that might be there.
         let parts = line.splitn(2, ':').collect::<Vec<&str>>();
         trace!("Parts: {:?}", parts);
         let to_append = match parts.as_slice() {
@@ -145,7 +144,7 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
             ["ServerError", s] => StreamVariant::ServerError((*s).to_string()),
             ["OpenAIError", s] => StreamVariant::OpenAIError((*s).to_string()),
             ["CodeError", s] => StreamVariant::CodeError((*s).to_string()),
-            ["Streamend", s] => StreamVariant::StreamEnd((*s).to_string()),
+            ["StreamEnd", s] => StreamVariant::StreamEnd((*s).to_string()),
             // If the line is empty, this will be the empty slice, so we need to cover that case.
             [] => {
                 warn!("Empty line in conversation file, skipping.");

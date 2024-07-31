@@ -36,9 +36,9 @@ pub fn new_conversation_id() -> String {
     }
 }
 
-/// Adds the given Stream Variant to the conversation with the given ID
+/// Adds the given Stream Variants to the conversation with the given ID
 /// or creates a new conversation if the ID is not found.
-pub fn add_to_conversation(thread_id: &str, variant: StreamVariant) {
+pub fn add_to_conversation(thread_id: &str, variant: Vec<StreamVariant>) {
     trace!("Adding to conversation with id: {}", thread_id);
 
     match ACTIVE_CONVERSATIONS.lock() {
@@ -46,12 +46,12 @@ pub fn add_to_conversation(thread_id: &str, variant: StreamVariant) {
             // If we can lock the mutex, we can check if the value is already in use.
             if let Some(conversation) = guard.iter_mut().find(|x| x.id == thread_id) {
                 // If we find the conversation, we'll add the variant to it.
-                conversation.conversation.push(variant);
+                conversation.conversation.append(&mut variant.clone());
             } else {
                 // If we don't find the conversation, we'll create a new one.
                 guard.push(ActiveConversation {
                     id: thread_id.to_string(),
-                    conversation: vec![variant],
+                    conversation: variant,
                     state: ConversationState::Streaming,
                 });
             }
@@ -106,7 +106,7 @@ pub fn end_conversation(thread_id: &str) {
 
 /// removes the conversation with the given ID, clearing it from the active conversations and writing it to disk.
 pub fn remove_conversation(thread_id: &str) {
-    trace!("Ending conversation with id: {}", thread_id);
+    trace!("Removing conversation with id: {}", thread_id);
 
     // We extract the conversation from the global variable to minimize the time we lock the mutex.
     let conversation = match ACTIVE_CONVERSATIONS.lock() {

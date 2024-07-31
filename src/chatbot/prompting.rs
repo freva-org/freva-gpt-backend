@@ -1,23 +1,35 @@
 // Handles basic prompting for the chatbot.
 
-use async_openai::types::{ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage, ChatCompletionRequestUserMessage};
+use async_openai::types::{
+    ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage,
+    ChatCompletionRequestSystemMessage, ChatCompletionRequestUserMessage,
+};
 use once_cell::sync::Lazy;
 
+/// The starting prompt including all messages, converted to JSON.
+pub static STARTING_PROMPT_JSON: Lazy<String> = Lazy::new(|| {
+    let temp: Vec<ChatCompletionRequestMessage> = (*STARTING_PROMPT).clone();
+    // This should never fail, but if it does, it will do so during initialization.
+    serde_json::to_string(&temp).expect("Error converting starting prompt to JSON.")
+});
 
 /// All messages that should be added at the start of a new conversation.
 /// Consists of a starting prompt and a few example conversations.
-pub static STARTING_MESSAGES: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::new(|| {
-    let mut messages = vec![ChatCompletionRequestMessage::System(STARTING_PROMPT.clone())];
+pub static STARTING_PROMPT: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::new(|| {
+    let mut messages = vec![ChatCompletionRequestMessage::System(
+        INITIAL_PROMPT.clone(),
+    )];
     messages.extend(EXAMPLE_CONVERSATIONS.clone());
     messages
 });
 
 /// The Starting prompt, as a static variable.
 /// Note that we need to use Lazy because the Type wants a proper String, which isn't const as it requires allocation.
-pub static STARTING_PROMPT: Lazy<ChatCompletionRequestSystemMessage> = Lazy::new(|| ChatCompletionRequestSystemMessage {
-    name: Some("prompt".to_string()),
-    content: (STARTING_PROMPT_STR.to_string()),
-});
+pub static INITIAL_PROMPT: Lazy<ChatCompletionRequestSystemMessage> =
+    Lazy::new(|| ChatCompletionRequestSystemMessage {
+        name: Some("prompt".to_string()),
+        content: (STARTING_PROMPT_STR.to_string()),
+    });
 
 /// The basic starting prompt as a const of the correct type.
 const STARTING_PROMPT_STR: &str = r#"1. You are FrevaGPT, a helpful AI Assistant at the German Centre for Climate Computing (DKRZ). You help answer questions and analyse, but mostly visualize in the field of climate data analysis.
@@ -36,10 +48,9 @@ const STARTING_PROMPT_STR: &str = r#"1. You are FrevaGPT, a helpful AI Assistant
 
 Below are a few examples of good conversations, including code. Try to imatate them when talking to users."#;
 
-
 /// All conversations that are used in the prompt.
 /// We need to use Lazy again.
-static EXAMPLE_CONVERSATIONS: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::new(||
+static EXAMPLE_CONVERSATIONS: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::new(|| {
     vec![
         ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
             name: Some("user".to_string()),
@@ -119,4 +130,4 @@ If you would like to see the map plot for a different year with the highest wind
             ..Default::default() // TODO: this isn't correct, the code blocks are actually tool calls. This needs to be fixed once tool calls are implemented.
         })
     ]
-);
+});

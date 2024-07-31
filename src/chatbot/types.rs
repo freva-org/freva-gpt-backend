@@ -2,10 +2,11 @@ use core::fmt;
 use std::time::Instant;
 
 use async_openai::types::{
-    ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage, ChatCompletionRequestUserMessage
+    ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage,
+    ChatCompletionRequestSystemMessage, ChatCompletionRequestUserMessage,
 };
 use serde::Serialize;
-use tracing::trace;
+use tracing::{error, trace, warn};
 
 #[derive(Debug, Clone)]
 pub enum ConversationState {
@@ -30,7 +31,7 @@ pub struct ActiveConversation {
 #[derive(Debug, Serialize, Clone)]
 #[serde(tag = "variant", content = "content")] // Makes it so that the variant names are inside the object and the content is held in the content field.
 pub enum StreamVariant {
-    /// The Prompt for the LLM, as a String; not to be sent to the client.
+    /// The Prompt for the LLM, as JSON; not to be sent to the client.
     Prompt(String),
     /// The Input of the user, as a String
     User(String),
@@ -79,51 +80,180 @@ pub type Conversation = Vec<StreamVariant>;
 ///
 /// Converts the `StreamVariant` to a `ChatCompletionRequestMessage`, which is used to send the message to `OpenAI`.
 /// This might fail because we can't convert all variants to a `ChatCompletionRequestMessage`.
-impl TryInto<ChatCompletionRequestMessage> for StreamVariant {
+impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
     type Error = &'static str;
 
-    fn try_into(self) -> Result<ChatCompletionRequestMessage, Self::Error> {
-        trace!("Converting StreamVariant to ChatCompletionRequestMessage: {:?}", self);
+    fn try_into(self) -> Result<Vec<ChatCompletionRequestMessage>, Self::Error> {
+        trace!(
+            "Converting StreamVariant to ChatCompletionRequestMessage: {:?}",
+            self
+        );
         match self {
-            Self::Prompt(s) => Ok(ChatCompletionRequestMessage::System(
-                ChatCompletionRequestSystemMessage {
-                    name: Some("Prompt".to_string()),
-                    content: s,
-                },
-            )),
-            Self::User(s) => Ok(ChatCompletionRequestMessage::User(
+            Self::Prompt(s) => {
+                // We cannot just put the prompt in the message, since it's not a valid message.
+                // It consists of multiple messages, so we'll need to unpack them. 
+
+                // It looks like `s` was escaped, so we'll need to unescape it. 
+                // DEBUG: does that just work?
+                let s = s.replace("\\\"", "\"");
+                let s = s.replace("\\\\", "\\");
+
+                trace!("Unescaped prompt: {:?}", s);
+
+
+                // For debugging, check whether the prompt is the same as we are currently using.
+                if s == crate::chatbot::prompting::STARTING_PROMPT_JSON.to_string() {
+                    trace!("Prompt is the same as the starting prompt.");
+                } else {
+                    warn!("Recieved prompt that is different from the current starting prompt. Did the prompt change?");
+                };
+
+                let prompt: Vec<ChatCompletionRequestMessage> = match serde_json::from_str(&s){
+                    Ok(p) => p,
+                    Err(e) => {
+                        error!("Error converting prompt to ChatCompletionRequestMessage: {:?}", e);
+                        return Err("Error converting prompt to ChatCompletionRequestMessage.");
+                    }
+                };
+
+                trace!("Prompt: {:?}", prompt);
+
+                Ok(prompt)},
+            Self::User(s) => Ok(vec![ChatCompletionRequestMessage::User(
                 ChatCompletionRequestUserMessage {
                     name: Some("user".to_string()),
                     content: async_openai::types::ChatCompletionRequestUserMessageContent::Text(s),
                 },
-            )),
-            Self::Assistant(s) => Ok(ChatCompletionRequestMessage::Assistant(
+            )]),
+            Self::Assistant(s) => Ok(vec![ChatCompletionRequestMessage::Assistant(
                 ChatCompletionRequestAssistantMessage {
                     content: Some(s),
                     name: Some("frevaGPT".to_string()),
                     ..Default::default()
                 },
-            )),
-            Self::Code(s) => Ok(ChatCompletionRequestMessage::Tool(
+            )]),
+            Self::Code(s) => Ok(vec![ChatCompletionRequestMessage::Tool(
                 async_openai::types::ChatCompletionRequestToolMessage {
                     tool_call_id: "Code Interpreter".to_string(),
                     content: s,
                 })
-            ),
-            Self::CodeOutput(s) => Ok(ChatCompletionRequestMessage::Tool(
+            ]),
+            Self::CodeOutput(s) => Ok(vec![ChatCompletionRequestMessage::Tool(
                 async_openai::types::ChatCompletionRequestToolMessage {
                     tool_call_id: "Code Interpreter Output".to_string(),
                     content: s,
                 })
-            ),
-            Self::Image(_) => Ok(ChatCompletionRequestMessage::System(
+            ]),
+            Self::Image(_) => Ok(vec![ChatCompletionRequestMessage::System(
                 ChatCompletionRequestSystemMessage {
                     name: Some("Image".to_string()),
                     content: "An image was successfully generated, but isn't displayed due to a lack of vision capabilities.".to_string(),
                 },
-            )),
+            )]),
             Self::CodeError(_) | Self::OpenAIError(_) | Self::ServerError(_) => Err("Error variants should not be passed to the LLM, it doesn't need to know about them."),
             Self::StreamEnd(_) => Err("StreamEnd variants are only for use on the server side, not for the LLM."),
+        }
+    }
+}
+
+/// A helper function to convert the `ChatCompletionRequestMessage` to a `StreamVariant`.
+///
+/// Again, this might not succeed because not all `ChatCompletionRequestMessage` can be converted to a `StreamVariant`.
+impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
+    type Error = &'static str;
+
+    fn try_from(value: ChatCompletionRequestMessage) -> Result<Self, Self::Error> {
+        trace!(
+            "Converting ChatCompletionRequestMessage to StreamVariant: {:?}",
+            value
+        );
+        match value {
+            ChatCompletionRequestMessage::System(content) => {
+                // As of currently, the system messages only contain the prompt and the image.
+                if Some("Prompt".to_string()) == content.name {
+                    Ok(Self::Prompt(content.content))
+                } else if Some("Image".to_string()) == content.name {
+                    Ok(Self::Image(content.content))
+                } else {
+                    Err("Unknown System Message type.")
+                }
+            }
+            ChatCompletionRequestMessage::User(content) => {
+                match content.content {
+                    async_openai::types::ChatCompletionRequestUserMessageContent::Text(s) => {
+                        // Standard Text from the User
+                        Ok(Self::User(s))
+                    }
+                    async_openai::types::ChatCompletionRequestUserMessageContent::Array(vector) => {
+                        // Unlikely to be used, but we'll handle it.
+                        // let text_vec = vector.into_iter().map(|x| if let async_openai::types::ChatCompletionRequestMessageContentPart::Text(s) = x {
+                        //         Ok(s.text)
+                        //     } else {
+                        //         error!("User Message Array contained a non-Text variant.");
+                        //         Err("User Message Array contained a non-Text variant.")
+                        //     }).collect::<Vec<_>>();
+
+                        let mut text_vec = vec![];
+                        for elem in vector {
+                            if let async_openai::types::ChatCompletionRequestMessageContentPart::Text(s) = elem {
+                            text_vec.push(s.text);
+                            } else {
+                                error!("User Message Array contained a non-Text variant.");
+                                return Err("User Message Array contained a non-Text variant.");
+                            }
+                        }
+                        let concat = text_vec.join("\n");
+
+                        Ok(Self::User(concat))
+                    }
+                }
+            }
+            ChatCompletionRequestMessage::Assistant(content) => {
+                // This should always be the case
+                if content.name != Some("frevaGPT".to_string()) {
+                    warn!(
+                        "Assistant Message contained an unknown name instead of frevaGPT: {:?}",
+                        content.name
+                    );
+                };
+
+                // There should never be tool or function calls here
+                if let (Some(_), _) | (_, Some(_)) = (content.tool_calls, content.function_call) {
+                    error!("Tried to convert an Assistant Message that contained a tool or function call. This should not happen and is not supported.");
+                    Err("Assistant Message contained a tool or function call. This should not happen and is not supported.")
+                } else {
+                    match content.content {
+                        Some(s) => Ok(Self::Assistant(s)),
+                        None => {
+                            warn!("Assistant Message contained no content.");
+                            Ok(Self::Assistant(String::new()))
+                        }
+                    }
+                }
+            }
+            ChatCompletionRequestMessage::Tool(content) => {
+                // Route the Code Interpreter and Code Interpreter Output to the correct variants.
+                if content.tool_call_id == "Code Interpreter" {
+                    Ok(Self::Code(content.content))
+                } else if content.tool_call_id == "Code Interpreter Output" {
+                    Ok(Self::CodeOutput(content.content))
+                } else {
+                    warn!(
+                        "Tool Message contained an unknown tool_call_id: {:?}",
+                        content.tool_call_id
+                    );
+                    // We'll still give it to the assistant, he might need it.
+                    let retval = content.tool_call_id + ": " + &content.content;
+                    Ok(Self::Assistant(retval))
+                }
+            }
+            ChatCompletionRequestMessage::Function(content) => {
+                warn!("Function Message received, this is deprecated and should not be used.");
+                // We'll handle it just like an unknown tool call.
+                let retval =
+                    content.name + ": " + &content.content.unwrap_or("(no content)".to_string());
+                Ok(Self::Assistant(retval))
+            }
         }
     }
 }

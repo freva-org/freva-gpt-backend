@@ -44,6 +44,11 @@ async fn main() -> std::io::Result<()> {
     });
     let host = std::env::var("HOST").unwrap_or_else(|_| "localhost".to_string());
 
+    // The lazy static STARTING_MESSAGE_JSON can fail if the prompt or messages cannot be converted to a string. 
+    // To make sure that this is caught early, we'll just test it here.
+    let _ = chatbot::prompting::STARTING_PROMPT_JSON.clone();
+    trace!("Starting messages JSON: {:?}", chatbot::prompting::STARTING_PROMPT_JSON);
+
     info!("Starting server at {host}:{port}");
     println!("Starting server at {host}:{port}");
 

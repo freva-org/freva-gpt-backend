@@ -5,7 +5,7 @@ use async_openai::types::{
 };
 use futures::{stream, StreamExt};
 use once_cell::sync::Lazy;
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::chatbot::{
     available_chatbots::DEFAULTCHATBOT,
@@ -13,12 +13,14 @@ use crate::chatbot::{
         add_to_conversation, conversation_state, end_conversation, new_conversation_id,
         remove_conversation,
     },
-    prompting::STARTING_MESSAGES,
+    prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON},
     thread_storage::read_thread,
     types::{ConversationState, StreamVariant},
     CLIENT,
 };
 
+/// Takes in a thread_id and input from the query parameters and returns a stream of responses from the chatbot.
+/// These are wrapped in a StreamVariant and sent to the client.
 pub async fn stream_response(req: HttpRequest) -> impl Responder {
     // Try to get the thread ID and input from the request's query parameters.
     let qstring = qstring::QString::from(req.query_string());
@@ -56,7 +58,13 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     let messages = if create_new {
         // If the thread is new, we'll start with the base messages and the user's input.
-        let mut base_message: Vec<ChatCompletionRequestMessage> = STARTING_MESSAGES.clone();
+        let mut base_message: Vec<ChatCompletionRequestMessage> = STARTING_PROMPT.clone();
+
+        trace!("Adding base message to stream.");
+
+        let variant_vec = StreamVariant::Prompt((*STARTING_PROMPT_JSON).clone()); // This is a bit hacky, but it works. (We just dump the base messages into a string.)
+        add_to_conversation(&thread_id, vec![variant_vec]);
+
         let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
             name: Some("user".to_string()),
             content: async_openai::types::ChatCompletionRequestUserMessageContent::Text(
@@ -79,12 +87,26 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         // We have a Vec of StreamVariant, but we want a Vec of ChatCompletionRequestMessage.
         content
             .iter()
-            .map(|e| StreamVariant::try_into(e.clone()))
+            .map(|e| TryInto::<Vec<ChatCompletionRequestMessage>>::try_into(e.clone())) // A single Stream variant, like prompt, might turn into multiple messages.
             .filter_map(std::result::Result::ok)
+            .flatten()
+            .chain(std::iter::once(ChatCompletionRequestMessage::User(
+                // Add the user's input to the stream so that the chatbot can respond to it.
+                ChatCompletionRequestUserMessage {
+                    name: Some("user".to_string()),
+                    content: async_openai::types::ChatCompletionRequestUserMessageContent::Text(
+                        input.clone(),
+                    ),
+                },
+            )))
+
             .collect::<Vec<_>>()
     };
 
-    // For testing, a basic request
+    // Also don't forget to add the user's input to the thread file.
+    add_to_conversation(&thread_id, vec![StreamVariant::User(input.clone())]);
+    
+
     let request: CreateChatCompletionRequest = match CreateChatCompletionRequestArgs::default()
         .model(String::from(DEFAULTCHATBOT))
         .n(1)
@@ -231,7 +253,7 @@ async fn create_and_stream(
                     };
 
                     // Also add the variant into the active conversation
-                    add_to_conversation(&thread_id, variant.clone());
+                    add_to_conversation(&thread_id, vec![variant.clone()]);
 
                     // Check whether the stream should end by checking the variant.
                     let should_end = matches!(variant, StreamVariant::StreamEnd(_));

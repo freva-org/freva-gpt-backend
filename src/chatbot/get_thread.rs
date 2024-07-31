@@ -2,6 +2,8 @@ use actix_web::{HttpRequest, HttpResponse, Responder};
 use qstring::QString;
 use tracing::{debug, error, info, trace, warn};
 
+use crate::chatbot::types::StreamVariant;
+
 use super::thread_storage::read_thread;
 
 /// Returns the content of a thread as a Json of List of Strings
@@ -44,6 +46,9 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
             }
         }
     };
+
+    // Because we don't want the user to see the prompt when they request the thread, we'll remove it.
+    let result = result.into_iter().filter(|x|! matches!(x, StreamVariant::Prompt(_))).collect::<Vec<_>>();
 
     // We can now return the content as a JSON response using serde_json
 
