@@ -124,6 +124,34 @@ pub fn remove_conversation(thread_id: &str) {
         // If we found the conversation, we'll write it to disk.
         trace!("Removed conversation with thread_id: {}: {:?}", thread_id, conversation);
         debug!("Writing conversation to disk.");
-        crate::chatbot::thread_storage::append_thread(thread_id, conversation.conversation);
+
+        // Before we'll write it to disk, we'll fold all the consecutive Assistant messages into one.
+
+        let mut new_conversation = Vec::new();
+
+        let mut assistant_buffer = String::new();
+
+        for variant in conversation.conversation {
+            match variant {
+                StreamVariant::Assistant(message) => { // If it's an assistant message, we'll append it to the current buffer;
+                    assistant_buffer.push_str(&message);
+                }
+                _ => { // It's not an assistant message
+                    if !assistant_buffer.is_empty() { // if the assistant buffer contains something, we'll push it to the new conversation.
+                        new_conversation.push(StreamVariant::Assistant(assistant_buffer.clone()));
+                        assistant_buffer.clear(); // and then clear the buffer so the next message can be appended.
+                    }
+                    new_conversation.push(variant);
+                }
+            }
+        }
+
+        // Edge case: theoretically, all conversations should end with a StreamEnd, but if it doesn't, we'd drop the last assistant message, unless we add it here.
+        if !assistant_buffer.is_empty() {
+            new_conversation.push(StreamVariant::Assistant(assistant_buffer));
+        }
+
+
+        crate::chatbot::thread_storage::append_thread(thread_id, new_conversation);
     }
 }
