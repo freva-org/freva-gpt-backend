@@ -22,8 +22,12 @@ use crate::chatbot::{
 /// Takes in a thread_id and input from the query parameters and returns a stream of responses from the chatbot.
 /// These are wrapped in a StreamVariant and sent to the client.
 pub async fn stream_response(req: HttpRequest) -> impl Responder {
-    // Try to get the thread ID and input from the request's query parameters.
     let qstring = qstring::QString::from(req.query_string());
+
+    // First try to authorize the user. 
+    crate::auth::authorize_or_fail!(qstring);
+
+    // Try to get the thread ID and input from the request's query parameters.
     let (thread_id, create_new) = match qstring.get("thread_id") {
         None => {
             // If the thread ID is not found, we'll return a 400
@@ -116,7 +120,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         // .prompt(input) // This isn't used for the chat API
         .messages(messages)
         .stream(true)
-        .max_tokens(1000u32)
+        .max_tokens(100u32)
         .build()
     {
         Ok(request) => request,

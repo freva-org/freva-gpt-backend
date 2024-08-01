@@ -9,8 +9,12 @@ use super::thread_storage::read_thread;
 /// Returns the content of a thread as a Json of List of Strings
 pub async fn get_thread(req: HttpRequest) -> impl Responder {
 
-    // Try to get the thread ID from the request's query parameters.
     let qstring = QString::from(req.query_string());
+
+    // First try to authorize the user. 
+    crate::auth::authorize_or_fail!(qstring);
+
+    // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {
         None | Some ("") => { // If no thread_id is provided, we'll return a 400
             // If the thread ID is not found, we'll return a 400

@@ -15,9 +15,12 @@ pub async fn stop(req: HttpRequest) -> impl Responder {
         NotRunning,
         Error(String),
     }
+    let qstring = qstring::QString::from(req.query_string());
+
+    // First try to authorize the user. 
+    crate::auth::authorize_or_fail!(qstring);
 
     // Try to get the thread ID from the request's query parameters.
-    let qstring = qstring::QString::from(req.query_string());
     let thread_id = match qstring.get("thread_id") {
         None | Some("") => {
             // If the thread ID is not found, we'll return a 400
