@@ -51,7 +51,9 @@ pub enum StreamVariant {
     CodeError(String),
     /// The Stream ended. Contains a reason as a String.
     StreamEnd(String),
-    //TODO: Add ClientHint variant
+    /// The Server hints something to the client. Primarily used for giving the thread_id. May later be used for other things.
+    /// Syntax of content <key>:<value>, for now key is "thread_id" and value is the thread_id.
+    ServerHint(String),
 }
 
 impl fmt::Display for StreamVariant {
@@ -68,6 +70,7 @@ impl fmt::Display for StreamVariant {
             Self::OpenAIError(s) => format!("OpenAIError:{s}"),
             Self::CodeError(s) => format!("CodeError:{s}"),
             Self::StreamEnd(s) => format!("StreamEnd:{s}"),
+            Self::ServerHint(s) => format!("ServerHint:{s}"),
         };
         write!(f, "{result:?}")
     }
@@ -152,6 +155,17 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
             )]),
             Self::CodeError(_) | Self::OpenAIError(_) | Self::ServerError(_) => Err("Error variants should not be passed to the LLM, it doesn't need to know about them."),
             Self::StreamEnd(_) => Err("StreamEnd variants are only for use on the server side, not for the LLM."),
+            Self::ServerHint(s) => {
+                // We do check that only the thread_id is sent. 
+                let first_part = s.splitn(2, ':').collect::<Vec<&str>>()[0];
+                if first_part != "thread_id" {
+                    warn!("ServerHint contained an unknown key: {:?}", first_part);
+                    Err("ServerHint contained an unknown key.")
+            } else {
+                // The ServerHint is only used to send the thread_id to the client, so we don't need to send it to OpenAI.
+                Err("ServerHint variants are only for use on the server side, not for the LLM.")
+            }
+        }
         }
     }
 }

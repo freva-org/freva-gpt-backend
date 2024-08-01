@@ -145,6 +145,7 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
             ["OpenAIError", s] => StreamVariant::OpenAIError((*s).to_string()),
             ["CodeError", s] => StreamVariant::CodeError((*s).to_string()),
             ["StreamEnd", s] => StreamVariant::StreamEnd((*s).to_string()),
+            ["ServerHint", s] => StreamVariant::ServerHint((*s).to_string()),
             // If the line is empty, this will be the empty slice, so we need to cover that case.
             [] => {
                 warn!("Empty line in conversation file, skipping.");

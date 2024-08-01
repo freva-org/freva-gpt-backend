@@ -99,13 +99,16 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
                     ),
                 },
             )))
-
             .collect::<Vec<_>>()
     };
 
+    // We'll also add a ServerHint about the thread_id to the messages.
+    let server_hint = StreamVariant::ServerHint(format!("thread_id:{}", thread_id));
     // Also don't forget to add the user's input to the thread file.
-    add_to_conversation(&thread_id, vec![StreamVariant::User(input.clone())]);
-    
+    add_to_conversation(
+        &thread_id,
+        vec![server_hint, StreamVariant::User(input.clone())],
+    );
 
     let request: CreateChatCompletionRequest = match CreateChatCompletionRequestArgs::default()
         .model(String::from(DEFAULTCHATBOT))
@@ -158,8 +161,23 @@ async fn create_and_stream(
 
     trace!("Stream created!");
     let out_stream = stream::unfold(
-        (open_ai_stream, thread_id, false),
-        |(mut open_ai_stream, thread_id, should_stop)| async move {
+        (open_ai_stream, thread_id, false, true),
+        |(mut open_ai_stream, thread_id, should_stop, should_hint_thread_id)| async move {
+            // Even higher priority than stopping the stream is sending the thread_id hint.
+            if should_hint_thread_id {
+                // If we should hint the thread_id, we'll send a ServerHint event.
+                let hint = StreamVariant::ServerHint(format!("thread_id:{}", thread_id));
+                return Some((
+                    Ok::<actix_web::web::Bytes, std::convert::Infallible>(
+                        actix_web::web::Bytes::copy_from_slice(
+                            serde_json::to_string(&hint)
+                                .expect("ServerHint unable to be converted to actix bytes!")
+                                .as_bytes(),
+                        ),
+                    ),
+                    (open_ai_stream, thread_id, should_stop, false),
+                ));
+            }
             if should_stop {
                 // If the stream should stop, we'll simply return None.
                 // We do it in this order to be able to send one last event to the client signaling the end of the stream.
@@ -181,7 +199,7 @@ async fn create_and_stream(
                         Ok::<actix_web::web::Bytes, std::convert::Infallible>(
                             STREAM_STOP_CONTENT.clone(),
                         ),
-                        (open_ai_stream, thread_id, true),
+                        (open_ai_stream, thread_id, true, false),
                     )) // The type annotation is necessary because the actix web HttpResponse streaming wants a Result.
                 } else {
                     // If the client didn't send a stop request, we'll continue.
@@ -276,7 +294,7 @@ async fn create_and_stream(
                     let bytes = actix_web::web::Bytes::copy_from_slice(string_variant.as_bytes());
 
                     // Everything worked, so we'll return the bytes and the new state.
-                    Some((Ok(bytes), (open_ai_stream, thread_id, should_end))) // Ends if the variant is a StreamEnd
+                    Some((Ok(bytes), (open_ai_stream, thread_id, should_end, false))) // Ends if the variant is a StreamEnd
                 }
             }
         },
