@@ -5,6 +5,7 @@ use async_openai::types::{
     ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage,
     ChatCompletionRequestSystemMessage, ChatCompletionRequestUserMessage,
 };
+use documented::Documented;
 use serde::Serialize;
 use tracing::{error, trace, warn};
 
@@ -27,8 +28,40 @@ pub struct ActiveConversation {
     pub conversation: Conversation,
 }
 
-/// The different variants of the stream that can be sent to the client.
-#[derive(Debug, Serialize, Clone)]
+/// 
+/// # Stream Variants
+/// 
+/// The different variants of the stream or Thread that can be sent to the client.
+/// They are always sent as JSON strings in the format `{"variant": "variant_name", "content": "content"}`.
+/// 
+/// User: The input of the user, as a String.
+/// 
+/// Assistant: The output of the Assistant, as a String. Often Markdown, because the LLM can output Markdown.
+/// Multiple messages of this variant after each other belong to the same message, but are broken up due to the stream.
+/// 
+/// Code: The code that the Assistant generated, as a String. It will be executed on the backend. 
+/// Currently, only Python is supported. The content is not formatted.
+/// 
+/// CodeOutput: The output of the code that was executed, as a String. Also not formatted.
+/// 
+/// Image: An image that was generated during the conversation, as a String. The image is Base64 encoded.
+/// An example of this would be a matplotlib plot.
+/// 
+/// ServerError: An error that occured on the server(backend) side, as a String. Contains the error message.
+/// The client should realize that this error occured and handle it accordingly; most ServerErrors are immeadiately followed by a StreamEnd.
+/// 
+/// OpenAI Error: An error that occured on the OpenAI side, as a String. Contains the error message.
+/// These are often for the rate limits, but can also be for other things, i.E. if the API is down.
+/// 
+/// CodeError: The Code from the LLM could not be executed or there was some other error while setting up the code execution.
+/// 
+/// StreamEnd: The Stream ended. Contains a reason as a String. This is always the last message of a stream.
+/// If the last message is not a StreamEnd but the stream ended, it's an error from the server side and needs to be fixed.
+/// 
+/// ServerHint: The Server hints something to the client. This is primarily used for giving the thread_id.
+/// The Content is in the format `<key>:<value>`, for now the key is "thread_id" and the value is the thread_id.
+/// Might be used for other things in the future. If the client receives a ServerHint with an unknown key, it should log a warning, but not crash.
+#[derive(Debug, Serialize, Clone, Documented)]
 #[serde(tag = "variant", content = "content")] // Makes it so that the variant names are inside the object and the content is held in the content field.
 pub enum StreamVariant {
     /// The Prompt for the LLM, as JSON; not to be sent to the client.
@@ -41,7 +74,7 @@ pub enum StreamVariant {
     Code(String),
     /// The Output of the Code, as a String, verbatim.
     CodeOutput(String),
-    /// An image that was generated during the streaming TODO: mark that this is Base64 encoded
+    /// An image that was generated during the streaming 
     Image(String),
     /// An error that occured on the server(backend) side, as a String
     ServerError(String),

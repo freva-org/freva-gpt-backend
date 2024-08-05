@@ -19,8 +19,25 @@ use crate::chatbot::{
     CLIENT,
 };
 
-/// Takes in a thread_id and input from the query parameters and returns a stream of responses from the chatbot.
-/// These are wrapped in a StreamVariant and sent to the client.
+/// Takes in a thread_id, an input and an auth_key and returns a stream of StreamVariants and their content.
+/// 
+/// The thread_id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
+/// If it's empty or not given, a new thread is created.
+/// 
+/// The stream consists of StreamVariants and their content. See the different Stream Variants above. 
+/// If the stream creates a new thread, the new thread_id will be sent as a ServerHint.
+/// The stream always ends with a StreamEnd event, unless a server error occurs.
+/// 
+/// A usual stream cosists mostly of Assistant messages many times a second. This is to give the impression of a real-time conversation.
+/// 
+/// If the input is not given, a BadRequest response is returned.
+/// 
+/// If the auth_key is not given or does not match the one on the backend, an Unauthorized response is returned.
+/// 
+/// If the thread_id does not point to an existing thread, an InternalServerError response is returned.
+/// 
+/// If the stream fails due to something else on the backend, an InternalServerError response is returned.
+/// 
 pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let qstring = qstring::QString::from(req.query_string());
 
@@ -29,13 +46,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     // Try to get the thread ID and input from the request's query parameters.
     let (thread_id, create_new) = match qstring.get("thread_id") {
-        None => {
-            // If the thread ID is not found, we'll return a 400
-            warn!("The User requested a stream without a thread ID.");
-            return HttpResponse::BadRequest()
-                .body("Thread ID not found. Please provide a thread_id in the query parameters. Leave it empty to create a new thread.");
-        }
-        Some("") => {
+        None | Some("") => {
             // If the thread ID is empty, we'll create a new thread.
             debug!("Creating a new thread.");
             (new_conversation_id(), true)

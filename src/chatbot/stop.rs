@@ -6,7 +6,18 @@ use tracing::{debug, trace, warn};
 use super::{types::ConversationState, ACTIVE_CONVERSATIONS};
 
 // TODO: guarentee panic safety
-/// Handles the stop request from the client.
+
+/// Stops the conversation with the given thread ID as soon as possible.
+/// 
+/// Takes in a `thread_id` and an `auth_key`.
+/// The thread_id identifies the conversation to stop.
+/// The auth_key needs to match the one on the backend for the request to be authorized.
+/// 
+/// If the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.
+/// 
+/// If the thread id is not given, a BadRequest response is returned.
+/// 
+/// If there is an error stopping the conversation, an InternalServerError response is returned.
 pub async fn stop(req: HttpRequest) -> impl Responder {
     #[derive(Debug)]
     enum StopResult {

@@ -80,6 +80,7 @@ async fn main() -> std::io::Result<()> {
             web::scope("/help").route("", web::get().to(static_serve::ping)), // Also reply with a pong
             web::scope("/stop").route("", web::get().to(chatbot::stop::stop)), // Stop, stop a specific conversation by thread ID.
             web::scope("/stop").route("", web::post().to(chatbot::stop::stop)), // Stop, stop a specific conversation by thread ID. Both post and get are allowed.
+            web::scope("/docs").route("", web::get().to(static_serve::docs)), // Docs, return the documentation of the API.
             web::scope("/getthread").route("", web::get().to(chatbot::get_thread::get_thread)), // GetThread, get the thread of a specific conversation by thread ID.
             web::scope("/streamresponse")
                 .route("", web::get().to(chatbot::stream_response::stream_response)), // StreamResponse, stream the response of a specific conversation by thread ID.

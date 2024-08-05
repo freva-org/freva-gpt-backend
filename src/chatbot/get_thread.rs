@@ -6,7 +6,22 @@ use crate::chatbot::types::StreamVariant;
 
 use super::thread_storage::read_thread;
 
-/// Returns the content of a thread as a Json of List of Strings
+/// Returns the content of a thread as a Json of List of Strings. 
+/// 
+/// As arguments, it takes in a `thread_id` and an `auth_key`.
+/// 
+/// The thread id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
+/// 
+/// The auth key needs to match the one on the backend for the request to be authorized.
+/// To get the auth key, the user needs to contact the backend administrator.
+/// 
+/// If the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.
+/// 
+/// If the thread id is not given, a BadRequest response is returned.
+/// 
+/// If the thread with the given id is not found, a NotFound response is returned.
+/// 
+/// If the thread is found but cannot be read or cannot be displayed, an InternalServerError response is returned.
 pub async fn get_thread(req: HttpRequest) -> impl Responder {
 
     let qstring = QString::from(req.query_string());
