@@ -1,6 +1,6 @@
 [package]
 name = "freva-gpt2-backend"
-version = "0.7.4"
+version = "1.0.1"
 edition = "2021"
 authors = ["Sebastian Willmann"]
 repository = "https://gitlab.dkrz.de/k203176/freva-gpt2-backend"
