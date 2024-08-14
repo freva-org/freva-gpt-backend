@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use async_openai::types::{
     ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, CreateChatCompletionRequest,
@@ -7,41 +9,45 @@ use futures::{stream, StreamExt};
 use once_cell::sync::Lazy;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::chatbot::{
-    available_chatbots::DEFAULTCHATBOT,
-    handle_active_conversations::{
-        add_to_conversation, conversation_state, end_conversation, new_conversation_id,
-        remove_conversation,
+use crate::{
+    chatbot::{
+        available_chatbots::DEFAULTCHATBOT,
+        handle_active_conversations::{
+            add_to_conversation, conversation_state, end_conversation, new_conversation_id,
+            remove_conversation,
+        },
+        prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON},
+        thread_storage::read_thread,
+        types::{ConversationState, StreamVariant},
+        CLIENT,
     },
-    prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON},
-    thread_storage::read_thread,
-    types::{ConversationState, StreamVariant},
-    CLIENT,
+    tool_calls::route_call::route_call,
+    tool_calls::ALL_TOOLS,
 };
 
 /// Takes in a thread_id, an input and an auth_key and returns a stream of StreamVariants and their content.
-/// 
+///
 /// The thread_id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
 /// If it's empty or not given, a new thread is created.
-/// 
-/// The stream consists of StreamVariants and their content. See the different Stream Variants above. 
+///
+/// The stream consists of StreamVariants and their content. See the different Stream Variants above.
 /// If the stream creates a new thread, the new thread_id will be sent as a ServerHint.
 /// The stream always ends with a StreamEnd event, unless a server error occurs.
-/// 
+///
 /// A usual stream cosists mostly of Assistant messages many times a second. This is to give the impression of a real-time conversation.
-/// 
+///
 /// If the input is not given, a BadRequest response is returned.
-/// 
+///
 /// If the auth_key is not given or does not match the one on the backend, an Unauthorized response is returned.
-/// 
+///
 /// If the thread_id does not point to an existing thread, an InternalServerError response is returned.
-/// 
+///
 /// If the stream fails due to something else on the backend, an InternalServerError response is returned.
-/// 
+///
 pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let qstring = qstring::QString::from(req.query_string());
 
-    // First try to authorize the user. 
+    // First try to authorize the user.
     crate::auth::authorize_or_fail!(qstring);
 
     // Try to get the thread ID and input from the request's query parameters.
@@ -132,6 +138,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         .messages(messages)
         .stream(true)
         .max_tokens(100u32)
+        .tools(ALL_TOOLS.clone())
         .build()
     {
         Ok(request) => request,
@@ -176,8 +183,8 @@ async fn create_and_stream(
 
     trace!("Stream created!");
     let out_stream = stream::unfold(
-        (open_ai_stream, thread_id, false, true),
-        |(mut open_ai_stream, thread_id, should_stop, should_hint_thread_id)| async move {
+        (open_ai_stream, thread_id, false, true, VecDeque::new()),
+        |(mut open_ai_stream, thread_id, should_stop, should_hint_thread_id, mut variant_queue)| async move {
             // Even higher priority than stopping the stream is sending the thread_id hint.
             if should_hint_thread_id {
                 // If we should hint the thread_id, we'll send a ServerHint event.
@@ -190,10 +197,33 @@ async fn create_and_stream(
                                 .as_bytes(),
                         ),
                     ),
-                    (open_ai_stream, thread_id, should_stop, false),
+                    (open_ai_stream, thread_id, should_stop, false, variant_queue),
                 ));
             }
-            if should_stop {
+
+            // After potentially sending a thread_id hint, but before stopping, check whether the variants queue contains something; if so, send it.
+            if let Some(content) = variant_queue.pop_front() {
+                let string_variant = match serde_json::to_string(&content) {
+                    Ok(string) => string,
+                    Err(e) => {
+                        warn!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
+                        format!(
+                            "{:?}",
+                            StreamVariant::ServerError(format!(
+                                "Error converting StreamVariant to string: {content:?}"
+                            ))
+                        )
+                    }
+                };
+
+                let bytes = actix_web::web::Bytes::copy_from_slice(string_variant.as_bytes());
+
+                // Everything worked, so we'll return the bytes and the new state.
+                Some((
+                    Ok(bytes),
+                    (open_ai_stream, thread_id, should_stop, false, variant_queue),
+                ))
+            } else if should_stop {
                 // If the stream should stop, we'll simply return None.
                 // We do it in this order to be able to send one last event to the client signaling the end of the stream.
                 trace!("Stream is stopping, sent one last event, removing the conversation from the pool and then aborting stream.");
@@ -214,7 +244,7 @@ async fn create_and_stream(
                         Ok::<actix_web::web::Bytes, std::convert::Infallible>(
                             STREAM_STOP_CONTENT.clone(),
                         ),
-                        (open_ai_stream, thread_id, true, false),
+                        (open_ai_stream, thread_id, true, false, variant_queue),
                     )) // The type annotation is necessary because the actix web HttpResponse streaming wants a Result.
                 } else {
                     // If the client didn't send a stop request, we'll continue.
@@ -222,62 +252,152 @@ async fn create_and_stream(
                     // gets the response from the OpenAI Stream
                     let response = open_ai_stream.next().await;
 
-                    let variant = match response {
+                    let variants: Vec<StreamVariant> = match response {
                         Some(Ok(response)) => {
                             if let Some(choice) = response.choices.first() {
-                                match (&choice.delta.content, choice.finish_reason) {
-                                    (Some(string_delta), _) => {
+                                match (&choice.delta.tool_calls ,&choice.delta.content, choice.finish_reason) {
+                                    (None ,Some(string_delta), _) => {
                                         trace!("Delta: {}", string_delta);
-                                        StreamVariant::Assistant(string_delta.clone())
+                                        vec![StreamVariant::Assistant(string_delta.clone())]
                                     }
-                                    (None, Some(reason)) => {
+                                    (_, None, Some(reason)) => {
                                         trace!("Got stop event from OpenAI: {:?}", reason);
                                         match reason {
                                             async_openai::types::FinishReason::Stop => {
                                                 trace!("Stopping stream due to successfull end of generation.");
-                                                StreamVariant::StreamEnd(
+                                                vec![StreamVariant::StreamEnd(
                                                     "Generation complete".to_string(),
-                                                )
+                                                )]
                                             }
                                             async_openai::types::FinishReason::Length => {
                                                 info!(
                                                     "Stopping stream due to reaching max tokens."
                                                 );
-                                                StreamVariant::StreamEnd(
+                                                vec![StreamVariant::StreamEnd(
                                                     "Reached max tokens".to_string(),
-                                                )
+                                                )]
                                             }
                                             async_openai::types::FinishReason::ContentFilter => {
                                                 info!("Stopping stream due to content filter.");
-                                                StreamVariant::StreamEnd(
+                                                vec![StreamVariant::StreamEnd(
                                                     "Content filter triggered".to_string(),
-                                                )
+                                                )]
                                             }
-                                            async_openai::types::FinishReason::FunctionCall
-                                            | async_openai::types::FinishReason::ToolCalls => {
-                                                warn!("Stopping stream due to function call or tool calls. This should not happen, as it isn't implemented yet.");
-                                                StreamVariant::StreamEnd("Function call or tool calls not yet implemented".to_string())
+                                            async_openai::types::FinishReason::FunctionCall => {
+                                                warn!("Stopping stream due to function call. This should not happen, as it it's deprecated and the LLM was instructed not to use them.");
+                                                vec![StreamVariant::StreamEnd("Function call is deprecated, LLM should use Tool call instead.".to_string())]
+                                            }
+                                            async_openai::types::FinishReason::ToolCalls => {
+                                                // We expect there to now be a tool call in the response.
+                                                let temp = choice.delta.tool_calls.clone();
+
+                                                if let Some(content) = temp {
+                                                    // Handle the tool call
+                                                    trace!("Tool call: {:?}", content);
+
+                                                    let mut all_generated_variants = vec![];
+
+                                                    for tool_call in content {
+                                                        // There now should be a tool call in there
+                                                        if let Some(call) = tool_call.function {
+                                                            let arguments = call.arguments;
+                                                            let function = call.name;
+
+                                                            debug!("Tool call: {:?} with arguments: {:?}", function, arguments);
+                                                            // We require a function name, but not necessarily arguments.
+                                                            if let Some(name) = function {
+                                                                all_generated_variants.append(
+                                                                    &mut route_call(
+                                                                        name, arguments,
+                                                                    ),
+                                                                )
+                                                            } else {
+                                                                warn!("Tool call expected function name, but not found in response: {:?}", response);
+                                                                all_generated_variants.push(StreamVariant::CodeError("Tool call expected function name, but not found in response.".to_string()));
+                                                            }
+                                                        } else {
+                                                            warn!("Tool call expected, but not found in response: {:?}", response);
+                                                            all_generated_variants.push(StreamVariant::CodeError("Tool call expected, but not found in response.".to_string()));
+                                                        }
+                                                    }
+
+                                                    all_generated_variants
+                                                } else {
+                                                    warn!("Tool call expected, but not found in response: {:?}", response);
+                                                    vec![StreamVariant::CodeError("Tool call expected, but not found in response.".to_string())]
+                                                }
+
+                                                // TODO: currently, the stream ends abruptly after calling a tool. We need to restart the stream with the tool call.
                                             }
                                         }
                                     }
-                                    (None, None) => {
-                                        warn!("No content found in response and no reason to stop given: {:?}", response);
-                                        StreamVariant::StreamEnd("No content found in response and no reason to stop given.".to_string())
+                                    (Some(tool_calls), None, None) => {
+                                        debug!("A tool was called, converting the delta to a Code variant: {:?}", tool_calls);
+                                        if tool_calls.len() > 1 {
+                                            warn!("Multiple tool calls found, but only one is supported. All are ignored except the first: {:?}", tool_calls);
+                                        }
+                                        match tool_calls.first() { // TODO: This doesn't support multiple tool calls at once yet.
+                                            Some(tool_call) => {
+                                                // We now know that we are sending the delta of a tool call.
+                                                // For the user to see a stream of i.e. the code interpreter's code being written by the LLM, we need to send the code interpreter's code as a stream.
+                                                match &tool_call.function {
+                                                    Some(function) => {
+                                                        // Now we need to check what function was called. For now, we only have the code interpreter.
+                                                        let name = function.name.clone().unwrap_or("".to_string());
+                                                        let arguments = function.arguments.clone().unwrap_or("".to_string());
+
+                                                        if name != "code_interpreter" {
+                                                            warn!("Tool call expected code_interpreter, but found: {:?}", name);
+                                                            // Instead of ending the stream, we'll just ignore the tool call, but send the user a ServerHint.
+                                                            vec![StreamVariant::ServerHint(format!("warning:Tool call expected code_interpreter, but found ->{}<-; content: ->{}<-", name, arguments).to_string())]
+                                                        } else {
+                                                            // We know it's the code interpreter and can send it as a delta.
+                                                            trace!("Tool call: {:?} with arguments: {:?}", name, arguments);
+                                                            vec![StreamVariant::Code(arguments)]
+                                                        }
+                                                    },
+                                                    None => {
+                                                        warn!("Tool call expected function, but not found in response: {:?}", response);
+                                                        vec![StreamVariant::CodeError("Tool call expected function, but not found in response.".to_string())]
+                                                    }
+                                                }
+
+                                            },
+                                            None => {
+                                                warn!("Tool call expected, but not found in response: {:?}", response);
+                                                vec![StreamVariant::CodeError("Tool call expected, but not found in response.".to_string())]
+                                            }
+                                            
+                                            
+                                        }
                                     }
+                                    (None, None, None) => {
+                                        warn!("No content found in response and no reason to stop given: {:?}", response);
+                                        vec![StreamVariant::StreamEnd("No content found in response and no reason to stop given.".to_string())]
+                                    }
+                                    (Some(tool_calls), Some(string_delta), _) => {
+                                        warn!("Tool call AND content found in response, the API specified that this couldn't happen: {:?} and {:?}", tool_calls, string_delta);
+                                        vec![StreamVariant::StreamEnd("Tool call AND content found in response, the API specified that this couldn't happen.".to_string())]
+                                    }
+
                                 }
                             } else {
                                 debug!("No response found, ending stream.");
-                                StreamVariant::OpenAIError("No response found.".to_string())
+                                vec![StreamVariant::OpenAIError("No response found.".to_string())]
                             }
                         }
                         Some(Err(e)) => {
                             // If we can't get the response, we'll return a generic error.
                             warn!("Error getting response: {:?}", e);
-                            StreamVariant::OpenAIError("Error getting response.".to_string())
+                            vec![StreamVariant::OpenAIError(
+                                "Error getting response.".to_string(),
+                            )]
                         }
                         None => {
                             warn!("Stream ended abruptly and without error. This should not happen; returning StreamEnd.");
-                            StreamVariant::StreamEnd("Stream ended abruptly".to_string())
+                            vec![StreamVariant::StreamEnd(
+                                "Stream ended abruptly".to_string(),
+                            )]
 
                             // This does not mean that the stream ended abruptly, I misunderstood.
                             // It happends when the stream is done on the OpenAI side.
@@ -285,22 +405,33 @@ async fn create_and_stream(
                         }
                     };
 
-                    // Also add the variant into the active conversation
-                    add_to_conversation(&thread_id, vec![variant.clone()]);
+                    // Also add the variants into the active conversation
+                    add_to_conversation(&thread_id, variants.clone());
 
-                    // Check whether the stream should end by checking the variant.
-                    let should_end = matches!(variant, StreamVariant::StreamEnd(_));
+                    // Check whether the stream should end by checking the variants.
+                    // let should_end = matches!(variants, StreamVariant::StreamEnd(_));
+                    let should_end = variants
+                        .iter()
+                        .any(|v| matches!(v, StreamVariant::StreamEnd(_)));
 
                     // Transform to string and then to actix_web::Bytes
 
-                    let string_variant = match serde_json::to_string(&variant) {
+                    // The variant to return if there are no variants in the response.
+                    let error_variant =
+                        StreamVariant::ServerError("No variants found in response.".to_string());
+
+                    // Split the variants into the first variant and the rest of the variants.
+                    let mut variants: VecDeque<StreamVariant> = variants.into();
+                    let first_variant = variants.pop_front().unwrap_or(error_variant);
+
+                    let string_variant = match serde_json::to_string(&first_variant) {
                         Ok(string) => string,
                         Err(e) => {
                             warn!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
                             format!(
                                 "{:?}",
                                 StreamVariant::ServerError(format!(
-                                    "Error converting StreamVariant to string: {variant:?}"
+                                    "Error converting StreamVariant to string: {first_variant:?}"
                                 ))
                             )
                         }
@@ -309,7 +440,11 @@ async fn create_and_stream(
                     let bytes = actix_web::web::Bytes::copy_from_slice(string_variant.as_bytes());
 
                     // Everything worked, so we'll return the bytes and the new state.
-                    Some((Ok(bytes), (open_ai_stream, thread_id, should_end, false))) // Ends if the variant is a StreamEnd
+                    Some((
+                        Ok(bytes),
+                        (open_ai_stream, thread_id, should_end, false, variants),
+                    ))
+                    // Ends if the variant is a StreamEnd
                 }
             }
         },

@@ -10,11 +10,12 @@ use clap::Parser;
 use dotenvy::dotenv;
 use tracing::{error, info, trace};
 
-mod chatbot;
+mod chatbot; // for the actual chatbot
 mod cla_parser; // for parsing the command line arguments
 mod logging; // for setting up the logger
 mod static_serve; // for serving static responses // for the actual chatbot
 mod auth; // for basic authentication
+mod tool_calls; // for the tool calls
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
