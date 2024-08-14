@@ -183,8 +183,24 @@ async fn create_and_stream(
 
     trace!("Stream created!");
     let out_stream = stream::unfold(
-        (open_ai_stream, thread_id, false, true, VecDeque::new()),
-        |(mut open_ai_stream, thread_id, should_stop, should_hint_thread_id, mut variant_queue)| async move {
+        (
+            open_ai_stream, // the stream from the OpenAI client
+            thread_id,
+            false,           // whether the stream should stop
+            true,            // whether the stream should hint the thread_id
+            VecDeque::new(), // the queue of variants to send
+            None,            // The tool name, if it was called
+            String::new(),   // the tool arguments,
+        ),
+        |(
+            mut open_ai_stream,
+            thread_id,
+            should_stop,
+            should_hint_thread_id,
+            mut variant_queue,
+            mut tool_name,
+            mut tool_arguments,
+        )| async move {
             // Even higher priority than stopping the stream is sending the thread_id hint.
             if should_hint_thread_id {
                 // If we should hint the thread_id, we'll send a ServerHint event.
@@ -197,7 +213,15 @@ async fn create_and_stream(
                                 .as_bytes(),
                         ),
                     ),
-                    (open_ai_stream, thread_id, should_stop, false, variant_queue),
+                    (
+                        open_ai_stream,
+                        thread_id,
+                        should_stop,
+                        false,
+                        variant_queue,
+                        tool_name,
+                        tool_arguments,
+                    ),
                 ));
             }
 
@@ -221,7 +245,15 @@ async fn create_and_stream(
                 // Everything worked, so we'll return the bytes and the new state.
                 Some((
                     Ok(bytes),
-                    (open_ai_stream, thread_id, should_stop, false, variant_queue),
+                    (
+                        open_ai_stream,
+                        thread_id,
+                        should_stop,
+                        false,
+                        variant_queue,
+                        tool_name,
+                        tool_arguments,
+                    ),
                 ))
             } else if should_stop {
                 // If the stream should stop, we'll simply return None.
@@ -244,7 +276,15 @@ async fn create_and_stream(
                         Ok::<actix_web::web::Bytes, std::convert::Infallible>(
                             STREAM_STOP_CONTENT.clone(),
                         ),
-                        (open_ai_stream, thread_id, true, false, variant_queue),
+                        (
+                            open_ai_stream,
+                            thread_id,
+                            true,
+                            false,
+                            variant_queue,
+                            tool_name,
+                            tool_arguments,
+                        ),
                     )) // The type annotation is necessary because the actix web HttpResponse streaming wants a Result.
                 } else {
                     // If the client didn't send a stop request, we'll continue.
@@ -255,8 +295,12 @@ async fn create_and_stream(
                     let variants: Vec<StreamVariant> = match response {
                         Some(Ok(response)) => {
                             if let Some(choice) = response.choices.first() {
-                                match (&choice.delta.tool_calls ,&choice.delta.content, choice.finish_reason) {
-                                    (None ,Some(string_delta), _) => {
+                                match (
+                                    &choice.delta.tool_calls,
+                                    &choice.delta.content,
+                                    choice.finish_reason,
+                                ) {
+                                    (None, Some(string_delta), _) => {
                                         trace!("Delta: {}", string_delta);
                                         vec![StreamVariant::Assistant(string_delta.clone())]
                                     }
@@ -294,38 +338,49 @@ async fn create_and_stream(
                                                 if let Some(content) = temp {
                                                     // Handle the tool call
                                                     trace!("Tool call: {:?}", content);
+                                                }
 
-                                                    let mut all_generated_variants = vec![];
+                                                let mut all_generated_variants = vec![];
 
-                                                    for tool_call in content {
-                                                        // There now should be a tool call in there
-                                                        if let Some(call) = tool_call.function {
-                                                            let arguments = call.arguments;
-                                                            let function = call.name;
+                                                // for tool_call in content {
+                                                //     // There now should be a tool call in there
+                                                //     if let Some(call) = tool_call.function {
+                                                //         let arguments = call.arguments;
+                                                //         let function = call.name;
 
-                                                            debug!("Tool call: {:?} with arguments: {:?}", function, arguments);
-                                                            // We require a function name, but not necessarily arguments.
-                                                            if let Some(name) = function {
-                                                                all_generated_variants.append(
-                                                                    &mut route_call(
-                                                                        name, arguments,
-                                                                    ),
-                                                                )
-                                                            } else {
-                                                                warn!("Tool call expected function name, but not found in response: {:?}", response);
-                                                                all_generated_variants.push(StreamVariant::CodeError("Tool call expected function name, but not found in response.".to_string()));
-                                                            }
-                                                        } else {
-                                                            warn!("Tool call expected, but not found in response: {:?}", response);
-                                                            all_generated_variants.push(StreamVariant::CodeError("Tool call expected, but not found in response.".to_string()));
-                                                        }
-                                                    }
+                                                //         debug!("Tool call: {:?} with arguments: {:?}", function, arguments);
+                                                //         // We require a function name, but not necessarily arguments.
+                                                //         if let Some(name) = function {
+                                                //             all_generated_variants.append(
+                                                //                 &mut route_call(
+                                                //                     name, arguments,
+                                                //                 ),
+                                                //             )
+                                                //         } else {
+                                                //             warn!("Tool call expected function name, but not found in response: {:?}", response);
+                                                //             all_generated_variants.push(StreamVariant::CodeError("Tool call expected function name, but not found in response.".to_string()));
+                                                //         }
+                                                //     } else {
+                                                //         warn!("Tool call expected, but not found in response: {:?}", response);
+                                                //         all_generated_variants.push(StreamVariant::CodeError("Tool call expected, but not found in response.".to_string()));
+                                                //     }
+                                                // }
 
-                                                    all_generated_variants
+                                                // There is NOT a tool call there, because that was accumulated in the previous iterations.
+                                                // The stream ending is just OpenAI's way of telling us that the tool call is done and can now be executed.
+                                                if let Some(name) = tool_name {
+                                                    let mut temp =
+                                                        route_call(name, Some(tool_arguments));
+                                                    all_generated_variants.append(&mut temp);
+                                                    // Reset the tool_name and tool_arguments
+                                                    tool_name = None;
+                                                    tool_arguments = String::new();
                                                 } else {
                                                     warn!("Tool call expected, but not found in response: {:?}", response);
-                                                    vec![StreamVariant::CodeError("Tool call expected, but not found in response.".to_string())]
+                                                    all_generated_variants.push(StreamVariant::CodeError("Tool call expected, but not found in response.".to_string()));
                                                 }
+
+                                                all_generated_variants
 
                                                 // TODO: currently, the stream ends abruptly after calling a tool. We need to restart the stream with the tool call.
                                             }
@@ -336,39 +391,57 @@ async fn create_and_stream(
                                         if tool_calls.len() > 1 {
                                             warn!("Multiple tool calls found, but only one is supported. All are ignored except the first: {:?}", tool_calls);
                                         }
-                                        match tool_calls.first() { // TODO: This doesn't support multiple tool calls at once yet.
+                                        match tool_calls.first() {
+                                            // TODO: This doesn't support multiple tool calls at once yet.
                                             Some(tool_call) => {
                                                 // We now know that we are sending the delta of a tool call.
                                                 // For the user to see a stream of i.e. the code interpreter's code being written by the LLM, we need to send the code interpreter's code as a stream.
                                                 match &tool_call.function {
                                                     Some(function) => {
                                                         // Now we need to check what function was called. For now, we only have the code interpreter.
-                                                        let name = function.name.clone().unwrap_or("".to_string());
-                                                        let arguments = function.arguments.clone().unwrap_or("".to_string());
+                                                        let arguments = function
+                                                            .arguments
+                                                            .clone()
+                                                            .unwrap_or("".to_string());
 
-                                                        if name != "code_interpreter" {
-                                                            warn!("Tool call expected code_interpreter, but found: {:?}", name);
+                                                        // Because of the genius way OpenAI constructed this very good API, the name of the tool call is only sent in the very first delta.
+                                                        // So if the name is not None, we store it in the tool_name variable that is passed to the next iteration of the stream.
+                                                        // If the name is None, we try to read the tool_name from the tool_name variable.
+                                                        if let Some(name) = function.name.clone() {
+                                                            debug!(
+                                                                "New tool call started: {:?}",
+                                                                name
+                                                            );
+                                                            tool_name = Some(name.clone());
+                                                        }
+
+                                                        // Another things is that the arguments for the tool calls, even though they are strings, are not repeated when the actual tool call is made.
+                                                        // that means that I need to add another state to the closure to keep track of the tool arguments.
+                                                        tool_arguments.push_str(&arguments);
+
+                                                        let name_copy = tool_name.clone(); // because tool_name will be used at the end to pass the tool name to the next iteration of the stream, we need to clone it here.
+                                                        if name_copy
+                                                            != Some("code_interpreter".to_string())
+                                                        {
+                                                            warn!("Tool call expected code_interpreter, but found: {:?}", name_copy);
                                                             // Instead of ending the stream, we'll just ignore the tool call, but send the user a ServerHint.
-                                                            vec![StreamVariant::ServerHint(format!("warning:Tool call expected code_interpreter, but found ->{}<-; content: ->{}<-", name, arguments).to_string())]
+                                                            vec![StreamVariant::ServerHint(format!("warning:Tool call expected code_interpreter, but found ->{}<-; content: ->{}<-", name_copy.unwrap_or(String::new()), arguments).to_string())]
                                                         } else {
                                                             // We know it's the code interpreter and can send it as a delta.
-                                                            trace!("Tool call: {:?} with arguments: {:?}", name, arguments);
+                                                            trace!("Tool call: {:?} with arguments: {:?}", name_copy, arguments);
                                                             vec![StreamVariant::Code(arguments)]
                                                         }
-                                                    },
+                                                    }
                                                     None => {
                                                         warn!("Tool call expected function, but not found in response: {:?}", response);
                                                         vec![StreamVariant::CodeError("Tool call expected function, but not found in response.".to_string())]
                                                     }
                                                 }
-
-                                            },
+                                            }
                                             None => {
                                                 warn!("Tool call expected, but not found in response: {:?}", response);
                                                 vec![StreamVariant::CodeError("Tool call expected, but not found in response.".to_string())]
                                             }
-                                            
-                                            
                                         }
                                     }
                                     (None, None, None) => {
@@ -379,7 +452,6 @@ async fn create_and_stream(
                                         warn!("Tool call AND content found in response, the API specified that this couldn't happen: {:?} and {:?}", tool_calls, string_delta);
                                         vec![StreamVariant::StreamEnd("Tool call AND content found in response, the API specified that this couldn't happen.".to_string())]
                                     }
-
                                 }
                             } else {
                                 debug!("No response found, ending stream.");
@@ -442,7 +514,15 @@ async fn create_and_stream(
                     // Everything worked, so we'll return the bytes and the new state.
                     Some((
                         Ok(bytes),
-                        (open_ai_stream, thread_id, should_end, false, variants),
+                        (
+                            open_ai_stream,
+                            thread_id,
+                            should_end,
+                            false,
+                            variants,
+                            tool_name,
+                            tool_arguments,
+                        ),
                     ))
                     // Ends if the variant is a StreamEnd
                 }

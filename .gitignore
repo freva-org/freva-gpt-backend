@@ -2,3 +2,4 @@
 /logs
 .env
 /threads
+.DS_Store
