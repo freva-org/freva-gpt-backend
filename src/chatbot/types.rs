@@ -70,10 +70,10 @@ pub enum StreamVariant {
     User(String),
     /// The Output of the Assistant, as a String or Strindelta. Often Markdown.
     Assistant(String),
-    /// Code the Assistant generated, as a String or Stringdelta. Python, no formatting.
-    Code(String),
-    /// The Output of the Code, as a String, verbatim.
-    CodeOutput(String),
+    /// Code the Assistant generated, as a String or Stringdelta, as well as the ID of the Tool Call the Code belongs to. Python, no formatting.
+    Code(String, String),
+    /// The Output of the Code, as a String, verbatim, and the ID of the Tool Call it belongs to.
+    CodeOutput(String, String),
     /// An image that was generated during the streaming 
     Image(String),
     /// An error that occured on the server(backend) side, as a String
@@ -96,8 +96,8 @@ impl fmt::Display for StreamVariant {
             Self::Prompt(s) => format!("Prompt:{s}"),
             Self::User(s) => format!("User:{s}"),
             Self::Assistant(s) => format!("Assistant:{s}"),
-            Self::Code(s) => format!("Code:{s}"),
-            Self::CodeOutput(s) => format!("CodeOutput:{s}"),
+            Self::Code(s, id) => format!("Code:{s}:{id}"),
+            Self::CodeOutput(s, id) => format!("CodeOutput:{s}:{id}"),
             Self::Image(s) => format!("Image:{s}"),
             Self::ServerError(s) => format!("ServerError:{s}"),
             Self::OpenAIError(s) => format!("OpenAIError:{s}"),
@@ -129,13 +129,26 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                 // We cannot just put the prompt in the message, since it's not a valid message.
                 // It consists of multiple messages, so we'll need to unpack them. 
 
-                // It looks like `s` was escaped, so we'll need to unescape it. 
-                // DEBUG: does that just work?
-                let s = s.replace("\\\"", "\"");
-                let s = s.replace("\\\\", "\\");
+                // Sometimes `s` is escaped, so we'll need to unescape it. 
+                let prompt = if let Ok(p) = serde_json::from_str(&s) {
+                    trace!("Input prompt: {:?}", s);
+                    p
+                } else {
+                    // it's probably escaped, so we'll unescape it.
+                    let s = s.replace("\\\"", "\"");
+                    let s = s.replace("\\\\", "\\");
 
-                trace!("Unescaped prompt: {:?}", s);
+                    trace!("Unescaped prompt: {:?}", s);
 
+                    let prompt: Vec<ChatCompletionRequestMessage> = match serde_json::from_str(&s){
+                        Ok(p) => p,
+                        Err(e) => {
+                            error!("Error converting prompt to ChatCompletionRequestMessage: {:?}", e);
+                            return Err("Error converting prompt to ChatCompletionRequestMessage.");
+                        }
+                    };
+                    prompt
+                };
 
                 // For debugging, check whether the prompt is the same as we are currently using.
                 if s == crate::chatbot::prompting::STARTING_PROMPT_JSON.to_string() {
@@ -144,13 +157,6 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     warn!("Recieved prompt that is different from the current starting prompt. Did the prompt change?");
                 };
 
-                let prompt: Vec<ChatCompletionRequestMessage> = match serde_json::from_str(&s){
-                    Ok(p) => p,
-                    Err(e) => {
-                        error!("Error converting prompt to ChatCompletionRequestMessage: {:?}", e);
-                        return Err("Error converting prompt to ChatCompletionRequestMessage.");
-                    }
-                };
 
                 trace!("Prompt: {:?}", prompt);
 
@@ -168,15 +174,15 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     ..Default::default()
                 },
             )]),
-            Self::Code(s) => Ok(vec![ChatCompletionRequestMessage::Tool(
+            Self::Code(s, id) => Ok(vec![ChatCompletionRequestMessage::Tool(
                 async_openai::types::ChatCompletionRequestToolMessage {
-                    tool_call_id: "Code Interpreter".to_string(),
+                    tool_call_id: id,
                     content: s,
                 })
             ]),
-            Self::CodeOutput(s) => Ok(vec![ChatCompletionRequestMessage::Tool(
+            Self::CodeOutput(s, id) => Ok(vec![ChatCompletionRequestMessage::Tool(
                 async_openai::types::ChatCompletionRequestToolMessage {
-                    tool_call_id: "Code Interpreter Output".to_string(),
+                    tool_call_id: id,
                     content: s,
                 })
             ]),
@@ -281,9 +287,9 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
             ChatCompletionRequestMessage::Tool(content) => {
                 // Route the Code Interpreter and Code Interpreter Output to the correct variants.
                 if content.tool_call_id == "Code Interpreter" {
-                    Ok(Self::Code(content.content))
+                    Ok(Self::Code(content.content, content.tool_call_id))
                 } else if content.tool_call_id == "Code Interpreter Output" {
-                    Ok(Self::CodeOutput(content.content))
+                    Ok(Self::CodeOutput(content.content, content.tool_call_id))
                 } else {
                     warn!(
                         "Tool Message contained an unknown tool_call_id: {:?}",

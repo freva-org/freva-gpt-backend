@@ -13,16 +13,15 @@ use crate::{
     chatbot::{
         available_chatbots::DEFAULTCHATBOT,
         handle_active_conversations::{
-            add_to_conversation, conversation_state, end_conversation, new_conversation_id,
-            remove_conversation,
+            add_to_conversation, conversation_state, end_conversation, get_conversation,
+            new_conversation_id, remove_conversation,
         },
         prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON},
         thread_storage::read_thread,
         types::{ConversationState, StreamVariant},
         CLIENT,
     },
-    tool_calls::route_call::route_call,
-    tool_calls::ALL_TOOLS,
+    tool_calls::{route_call::route_call, ALL_TOOLS},
 };
 
 /// Takes in a thread_id, an input and an auth_key and returns a stream of StreamVariants and their content.
@@ -131,16 +130,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         vec![server_hint, StreamVariant::User(input.clone())],
     );
 
-    let request: CreateChatCompletionRequest = match CreateChatCompletionRequestArgs::default()
-        .model(String::from(DEFAULTCHATBOT))
-        .n(1)
-        // .prompt(input) // This isn't used for the chat API
-        .messages(messages)
-        .stream(true)
-        .max_tokens(100u32)
-        .tools(ALL_TOOLS.clone())
-        .build()
-    {
+    let request: CreateChatCompletionRequest = match build_request(messages) {
         Ok(request) => request,
         Err(e) => {
             // If we can't build the request, we'll return a generic error.
@@ -151,6 +141,20 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     trace!("Request built!");
 
     create_and_stream(request, thread_id).await
+}
+
+/// A simple helper function to build the stream.
+fn build_request(
+    messages: Vec<ChatCompletionRequestMessage>,
+) -> Result<CreateChatCompletionRequest, async_openai::error::OpenAIError> {
+    CreateChatCompletionRequestArgs::default()
+        .model(String::from(DEFAULTCHATBOT))
+        .n(1)
+        .messages(messages)
+        .stream(true)
+        .max_tokens(100u32)
+        .tools(ALL_TOOLS.clone())
+        .build()
 }
 
 // The last event in the event. Should be sent if the stream is stopped by the client sending a stop request.
@@ -191,6 +195,7 @@ async fn create_and_stream(
             VecDeque::new(), // the queue of variants to send
             None,            // The tool name, if it was called
             String::new(),   // the tool arguments,
+            String::new(),   // the tool id
         ),
         |(
             mut open_ai_stream,
@@ -200,6 +205,7 @@ async fn create_and_stream(
             mut variant_queue,
             mut tool_name,
             mut tool_arguments,
+            mut tool_id,
         )| async move {
             // Even higher priority than stopping the stream is sending the thread_id hint.
             if should_hint_thread_id {
@@ -221,6 +227,7 @@ async fn create_and_stream(
                         variant_queue,
                         tool_name,
                         tool_arguments,
+                        tool_id,
                     ),
                 ));
             }
@@ -253,6 +260,7 @@ async fn create_and_stream(
                         variant_queue,
                         tool_name,
                         tool_arguments,
+                        tool_id,
                     ),
                 ))
             } else if should_stop {
@@ -284,6 +292,7 @@ async fn create_and_stream(
                             variant_queue,
                             tool_name,
                             tool_arguments,
+                            tool_id,
                         ),
                     )) // The type annotation is necessary because the actix web HttpResponse streaming wants a Result.
                 } else {
@@ -342,47 +351,89 @@ async fn create_and_stream(
 
                                                 let mut all_generated_variants = vec![];
 
-                                                // for tool_call in content {
-                                                //     // There now should be a tool call in there
-                                                //     if let Some(call) = tool_call.function {
-                                                //         let arguments = call.arguments;
-                                                //         let function = call.name;
-
-                                                //         debug!("Tool call: {:?} with arguments: {:?}", function, arguments);
-                                                //         // We require a function name, but not necessarily arguments.
-                                                //         if let Some(name) = function {
-                                                //             all_generated_variants.append(
-                                                //                 &mut route_call(
-                                                //                     name, arguments,
-                                                //                 ),
-                                                //             )
-                                                //         } else {
-                                                //             warn!("Tool call expected function name, but not found in response: {:?}", response);
-                                                //             all_generated_variants.push(StreamVariant::CodeError("Tool call expected function name, but not found in response.".to_string()));
-                                                //         }
-                                                //     } else {
-                                                //         warn!("Tool call expected, but not found in response: {:?}", response);
-                                                //         all_generated_variants.push(StreamVariant::CodeError("Tool call expected, but not found in response.".to_string()));
-                                                //     }
-                                                // }
-
                                                 // There is NOT a tool call there, because that was accumulated in the previous iterations.
                                                 // The stream ending is just OpenAI's way of telling us that the tool call is done and can now be executed.
                                                 if let Some(name) = tool_name {
                                                     let mut temp =
-                                                        route_call(name, Some(tool_arguments));
+                                                        route_call(name, Some(tool_arguments), tool_id); // call the tool with the arguments
                                                     all_generated_variants.append(&mut temp);
                                                     // Reset the tool_name and tool_arguments
                                                     tool_name = None;
                                                     tool_arguments = String::new();
+                                                    tool_id = String::new();
                                                 } else {
                                                     warn!("Tool call expected, but not found in response: {:?}", response);
                                                     all_generated_variants.push(StreamVariant::CodeError("Tool call expected, but not found in response.".to_string()));
                                                 }
 
-                                                all_generated_variants
+                                                // Before we can return the generated variants, we need to start a new steam because the old one is done.
+                                                // We need a list of all messages, which we can get from the active conversation global variable.
+                                                match get_conversation(&thread_id) {
+                                                    None => {
+                                                        error!("Tried to restart conversation after tool call, but failed! No active conversation found with thread_id: {}", thread_id);
+                                                        vec![StreamVariant::ServerError("Tried to restart conversation after tool call, but failed! No active conversation found.".to_string())]
+                                                    }
+                                                    Some(messages) => {
+                                                        trace!("Restarting conversation after tool call with messages: {:?}", messages);
+                                                        // the actual messages we need to put there are those plus the generated ones, because the generated one were not added to the conversation yet.
+                                                        let mut all_messages = messages.clone();
+                                                        all_messages.append(
+                                                            &mut all_generated_variants.clone(),
+                                                        );
 
-                                                // TODO: currently, the stream ends abruptly after calling a tool. We need to restart the stream with the tool call.
+                                                        // The stream wants a vector of ChatCompletionRequestMessage, so we need to convert the StreamVariants to that.
+                                                        let mut all_oai_messages = vec![];
+                                                        for message in all_messages {
+                                                            let temp: Vec<
+                                                                ChatCompletionRequestMessage,
+                                                            > = match message.try_into() {
+                                                                Ok(temp) => temp,
+                                                                Err(e) => {
+                                                                    warn!("Error converting StreamVariant to ChatCompletionRequestMessage: {:?}", e);
+                                                                    vec![]
+                                                                }
+                                                            };
+                                                            all_oai_messages.extend(temp);
+                                                        }
+
+                                                        trace!("All messages: {:?}", all_oai_messages);
+
+                                                        // Now we construct a new stream and substitute the old one with it.
+                                                        match build_request(all_oai_messages) {
+                                                            Err(e) => {
+                                                                // If we can't build the request, we'll return a generic error.
+                                                                warn!(
+                                                                    "Error building request: {:?}",
+                                                                    e
+                                                                );
+                                                                vec![StreamVariant::ServerError(
+                                                                    "Error building request."
+                                                                        .to_string(),
+                                                                )]
+                                                            }
+                                                            Ok(request) => {
+                                                                trace!("Request built successfully: {:?}", request);
+                                                                match CLIENT
+                                                                    .chat()
+                                                                    .create_stream(request)
+                                                                    .await
+                                                                {
+                                                                    Err(e) => {
+                                                                        // If we can't create the stream, we'll return a generic error.
+                                                                        warn!("Error creating stream: {:?}", e);
+                                                                        vec![StreamVariant::ServerError("Error creating new stream.".to_string())]
+                                                                    }
+                                                                    Ok(stream) => {
+                                                                        // Everything worked, so we'll return the new stream and the new state.
+                                                                        open_ai_stream = stream;
+                                                                        all_generated_variants
+                                                                        // we need to return the generated variants, because the stream will be restarted with the tool call.
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -419,6 +470,19 @@ async fn create_and_stream(
                                                         // that means that I need to add another state to the closure to keep track of the tool arguments.
                                                         tool_arguments.push_str(&arguments);
 
+                                                        // The same thing goes for the tool call id, which is neccessary to be machted later on in the response.
+                                                        match tool_call.id.clone() {
+                                                            Some(id) => {
+                                                                // We need to store the id in the tool_name variable, because the id is not repeated in the response.
+                                                                tool_id = id;
+                                                            }
+                                                            None => {
+                                                                if tool_id.is_empty() {
+                                                                    warn!("Tool call expected id, but not found in response: {:?}", response);
+                                                                }
+                                                            }
+                                                        }
+
                                                         let name_copy = tool_name.clone(); // because tool_name will be used at the end to pass the tool name to the next iteration of the stream, we need to clone it here.
                                                         if name_copy
                                                             != Some("code_interpreter".to_string())
@@ -428,8 +492,11 @@ async fn create_and_stream(
                                                             vec![StreamVariant::ServerHint(format!("warning:Tool call expected code_interpreter, but found ->{}<-; content: ->{}<-", name_copy.unwrap_or(String::new()), arguments).to_string())]
                                                         } else {
                                                             // We know it's the code interpreter and can send it as a delta.
-                                                            trace!("Tool call: {:?} with arguments: {:?}", name_copy, arguments);
-                                                            vec![StreamVariant::Code(arguments)]
+                                                            trace!("Tool call: {:?} with arguments: {:?} and id: {}", name_copy, arguments, tool_id);
+                                                            if tool_id.is_empty() {
+                                                                warn!("Tool call expected id, but not set yet: {:?}", response);
+                                                            }
+                                                            vec![StreamVariant::Code(arguments, tool_id.clone())]
                                                         }
                                                     }
                                                     None => {
@@ -522,6 +589,7 @@ async fn create_and_stream(
                             variants,
                             tool_name,
                             tool_arguments,
+                            tool_id,
                         ),
                     ))
                     // Ends if the variant is a StreamEnd

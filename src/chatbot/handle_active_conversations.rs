@@ -127,31 +127,78 @@ pub fn remove_conversation(thread_id: &str) {
 
         // Before we'll write it to disk, we'll fold all the consecutive Assistant messages into one.
 
-        let mut new_conversation = Vec::new();
-
-        let mut assistant_buffer = String::new();
-
-        for variant in conversation.conversation {
-            match variant {
-                StreamVariant::Assistant(message) => { // If it's an assistant message, we'll append it to the current buffer;
-                    assistant_buffer.push_str(&message);
-                }
-                _ => { // It's not an assistant message
-                    if !assistant_buffer.is_empty() { // if the assistant buffer contains something, we'll push it to the new conversation.
-                        new_conversation.push(StreamVariant::Assistant(assistant_buffer.clone()));
-                        assistant_buffer.clear(); // and then clear the buffer so the next message can be appended.
-                    }
-                    new_conversation.push(variant);
-                }
-            }
-        }
-
-        // Edge case: theoretically, all conversations should end with a StreamEnd, but if it doesn't, we'd drop the last assistant message, unless we add it here.
-        if !assistant_buffer.is_empty() {
-            new_conversation.push(StreamVariant::Assistant(assistant_buffer));
-        }
-
+        let new_conversation = concat_variants(conversation.conversation);
 
         crate::chatbot::thread_storage::append_thread(thread_id, new_conversation);
     }
+}
+
+/// The assistant and code messages are streamed, so in order to display them without having `Assistant: A`, `Assistant: B`, `Code: A`, `Code: B`, we'll concatenate them.
+fn concat_variants(input: Vec<StreamVariant>) -> Vec<StreamVariant> {
+    let mut output = Vec::new();
+    let mut assistant_buffer = String::new();
+    let mut code_buffer = (String::new(), String::new());
+
+    for variant in input {
+        match variant {
+            StreamVariant::Assistant(message) => {
+                assistant_buffer.push_str(&message);
+            }
+            StreamVariant::Code(message, id) => {
+                code_buffer.0.push_str(&message);
+                code_buffer.1 = id;
+            }
+            _ => {
+                // If it's not an assistant or code message, we'll push the buffers to the output.
+                if !assistant_buffer.is_empty() {
+                    output.push(StreamVariant::Assistant(assistant_buffer.clone()));
+                    assistant_buffer.clear();
+                }
+                if !code_buffer.0.is_empty() {
+                    output.push(StreamVariant::Code(code_buffer.0.clone(), code_buffer.1.clone()));
+                    code_buffer.0.clear();
+                    code_buffer.1.clear();
+                }
+                output.push(variant);
+            }
+        }
+    }
+
+    // Edge case: theoretically, all conversations should end with a StreamEnd, but if it doesn't, we'd drop the last assistant message, unless we add it here.
+    // The same goes for the code messages.
+    // Actually, this happens often, because we need to restart the stream after a tool call.
+    if !assistant_buffer.is_empty() {
+        output.push(StreamVariant::Assistant(assistant_buffer));
+    }
+    if !code_buffer.0.is_empty() {
+        output.push(StreamVariant::Code(code_buffer.0, code_buffer.1));
+    }
+
+    output
+}
+
+pub fn get_conversation(thread_id: &str) -> Option<Vec<StreamVariant>> {
+    trace!("Getting conversation with id: {}", thread_id);
+
+    // The conversation is stored in the global variable, so we'll lock the mutex to access it.
+    let found_conversation = match ACTIVE_CONVERSATIONS.lock() {
+        Ok(guard) => {
+            // If we can lock the mutex, we can check if the value is already in use.
+            if let Some(conversation) = guard.iter().find(|x| x.id == thread_id) {
+                // If we find the conversation, we'll return it.
+                Some(conversation.conversation.clone())
+            } else {
+                // If the conversation is not found, we'll return false.
+                warn!("Conversation with id: {} not found.", thread_id);
+                None
+            }
+        }
+        Err(e) => {
+            error!("Error locking the mutex: {:?}", e);
+            None
+        }
+    };
+
+    // Because the conversation is stored in the global variable, it might not have concatinated the assistant and code messages yet. 
+    found_conversation.map(concat_variants) // If the conversation is found, we'll concatenate the messages, else we'll return None.
 }

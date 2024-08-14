@@ -20,9 +20,7 @@ use std::{
 
 use tracing::{debug, error, trace, warn};
 
-use super::
-    types::{Conversation, StreamVariant}
-;
+use super::types::{Conversation, StreamVariant};
 
 /// Appends events from a stream of a conversation to the file of the conversation.
 pub fn append_thread(thread_id: &str, content: Conversation) {
@@ -132,38 +130,50 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
 
     for line in lines {
         let line = line.trim_matches('\"'); // Remove any quotes that might be there.
-        let parts = line.splitn(2, ':').collect::<Vec<&str>>();
+        let parts = line.split_once(':');
         trace!("Parts: {:?}", parts);
-        let to_append = match parts.as_slice() {
-            ["Prompt", s] => StreamVariant::Prompt((*s).to_string()),
-            ["User", s] => StreamVariant::User((*s).to_string()),
-            ["Assistant", s] => StreamVariant::Assistant((*s).to_string()),
-            ["Code", s] => StreamVariant::Code((*s).to_string()),
-            ["CodeOutput", s] => StreamVariant::CodeOutput((*s).to_string()),
-            ["Image", s] => StreamVariant::Image((*s).to_string()),
-            ["ServerError", s] => StreamVariant::ServerError((*s).to_string()),
-            ["OpenAIError", s] => StreamVariant::OpenAIError((*s).to_string()),
-            ["CodeError", s] => StreamVariant::CodeError((*s).to_string()),
-            ["StreamEnd", s] => StreamVariant::StreamEnd((*s).to_string()),
-            ["ServerHint", s] => StreamVariant::ServerHint((*s).to_string()),
-            // If the line is empty, this will be the empty slice, so we need to cover that case.
-            [] => {
-                warn!("Empty line in conversation file, skipping.");
-                continue;
-            }
-            // If we do find a line that doesn't match any of the above, we can skip it.
-            [variant, s] => {
-                warn!(
-                    "Unknown variant in conversation file: {}, skipping.",
-                    variant
-                );
-                debug!("The content of the line was: {}", s);
-                continue;
-            }
-            // The splitn should always return a slice of length 0,1 or 2, so we can expect this
-            _ => unreachable!("Splitn called with 2 as a limit returned a slice of length > 2"),
-        };
-        res.push(to_append);
+        if let Some(parts) = parts {
+            let to_append = match parts {
+                ("Prompt", s) => StreamVariant::Prompt((*s).to_string()),
+                ("User", s) => StreamVariant::User((*s).to_string()),
+                ("Assistant", s) => StreamVariant::Assistant((*s).to_string()),
+                ("Code", s) => {
+                    if let Some((content, id)) = split_colon_at_end(s) {
+                        StreamVariant::Code((*content).to_string(), (*id).to_string())
+                    } else {
+                        warn!("Error splitting Code variant, skipping.");
+                        continue;
+                    }
+                }
+                ("CodeOutput", s) => {
+                    if let Some((content, id)) = split_colon_at_end(s) {
+                        StreamVariant::CodeOutput((*content).to_string(), (*id).to_string())
+                    } else {
+                        warn!("Error splitting CodeOutput variant, skipping.");
+                        continue;
+                    }
+                }
+                ("Image", s) => StreamVariant::Image((*s).to_string()),
+                ("ServerError", s) => StreamVariant::ServerError((*s).to_string()),
+                ("OpenAIError", s) => StreamVariant::OpenAIError((*s).to_string()),
+                ("CodeError", s) => StreamVariant::CodeError((*s).to_string()),
+                ("StreamEnd", s) => StreamVariant::StreamEnd((*s).to_string()),
+                ("ServerHint", s) => StreamVariant::ServerHint((*s).to_string()),
+                // If we do find a line that doesn't match any of the above, we can skip it.
+                (variant, s) => {
+                    warn!(
+                        "Unknown variant in conversation file: {}, skipping.",
+                        variant
+                    );
+                    debug!("The content of the line was: {}", s);
+                    continue;
+                }
+            };
+            res.push(to_append);
+        } else {
+            warn!("Error splitting line during parsing, is there no colon? Skipping.");
+            continue;
+        }
     }
 
     trace!("Returning number of lines: {}", res.len());
@@ -171,3 +181,8 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
     Ok(res)
 }
 
+/// Some variants like Code and CodeOutput have more than one field, so this function splits the content at the last colon.
+fn split_colon_at_end(s: &str) -> Option<(&str, &str)> {
+    let (first, last) = s.rsplit_once(':')?;
+    Some((first, last))
+}
