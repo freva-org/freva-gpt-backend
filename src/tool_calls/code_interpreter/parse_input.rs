@@ -1,4 +1,4 @@
-use tracing::warn;
+use tracing::{trace, warn};
 
 use crate::{chatbot::types::StreamVariant, tool_calls::code_interpreter::{execute::execute_code, safety_check::code_is_likely_safe}};
 
@@ -7,6 +7,8 @@ use crate::{chatbot::types::StreamVariant, tool_calls::code_interpreter::{execut
 /// Takes in the arguments that were passed to the tool call as well as the id of the tool call (for the output).
 /// Returns the output of the code interpreter as a Vector of StreamVariants.
 pub fn run_code_interpeter(arguments: Option<String>, id: String) -> Vec<StreamVariant> {
+
+    trace!("Running the code interpreter with the following arguments: {:?}", arguments);
 
     // First run the basic safety check.
     if !code_is_likely_safe(&arguments.clone().unwrap_or_default()) {
@@ -32,6 +34,8 @@ pub fn run_code_interpeter(arguments: Option<String>, id: String) -> Vec<StreamV
             return vec![StreamVariant::CodeOutput("The Input to the Code Interpreter was malformed and not valid JSON. Please try again.".to_string(), id)];
         }
     };
+
+    trace!("Running the code interpreter with the following code: {}", code.code);
 
     let output = execute_code(code.code);
     

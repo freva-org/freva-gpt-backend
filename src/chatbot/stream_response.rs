@@ -152,7 +152,7 @@ fn build_request(
         .n(1)
         .messages(messages)
         .stream(true)
-        .max_tokens(100u32)
+        .max_tokens(500u32)
         .tools(ALL_TOOLS.clone())
         .build()
 }
@@ -511,8 +511,9 @@ async fn create_and_stream(
                                         }
                                     }
                                     (None, None, None) => {
-                                        warn!("No content found in response and no reason to stop given: {:?}", response);
-                                        vec![StreamVariant::StreamEnd("No content found in response and no reason to stop given.".to_string())]
+                                        warn!("No content found in response and no reason to stop given; treating this as an empty Assistant response: {:?}", response);
+                                        // vec![StreamVariant::StreamEnd("No content found in response and no reason to stop given.".to_string())]
+                                        vec![StreamVariant::Assistant("".to_string())]
                                     }
                                     (Some(tool_calls), Some(string_delta), _) => {
                                         warn!("Tool call AND content found in response, the API specified that this couldn't happen: {:?} and {:?}", tool_calls, string_delta);
