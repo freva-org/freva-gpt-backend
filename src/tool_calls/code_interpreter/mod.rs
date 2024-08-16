@@ -1,5 +1,15 @@
 // For the code interpreter, this module is responsible for interpreting the code and returning the result.
 
+/// for parsing the input to the Code Interpreter. 
+pub mod parse_input;
+
+/// For checking whether the code that was sent is safe to execute.
+/// For now, it's a simple check, but we'll expand on this later.
+pub mod safety_check;
+
+/// For executing the code.
+pub mod execute;
+
 use async_openai::types::{ChatCompletionTool, ChatCompletionToolType, FunctionObject};
 use once_cell::sync::Lazy;
 use serde_json::json;
