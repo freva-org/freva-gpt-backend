@@ -11,17 +11,20 @@ pub static CODE_INTERPRETER_TOOL_TYPE: Lazy<ChatCompletionTool> = Lazy::new( || 
     function : CODE_INTERPRETER_FUNCTION.clone()
 });
 
+
 static CODE_INTERPRETER_FUNCTION: Lazy<FunctionObject> = Lazy::new(|| FunctionObject {
     name : "code_interpreter".to_string(),
     description : Some("Recieves python code, executes it in a jupyter environment, and returns the result.".to_string()), // This is technically a lie, but we simulate the main thing about the jupyter notebook: the last line is returned.
-    parameters : Some(json!({
-        "type" : "object",
-        "properties" : {
-            "code" : {
-                "type" : "string",
-                "description" : "The python code to be executed."
-            }
-        },
-        "required" : ["code"]
-    }))
+    parameters : Some(CODE_INTERPRETER_PARAMETER.clone()),
 });
+
+static CODE_INTERPRETER_PARAMETER: Lazy<serde_json::Value> = Lazy::new(|| json!({
+    "type" : "object",
+    "properties" : {
+        "code" : {
+            "type" : "string",
+            "description" : "The python code to be executed."
+        }
+    },
+    "required" : ["code"]
+}));

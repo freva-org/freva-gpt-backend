@@ -18,7 +18,7 @@ use crate::{
         },
         prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON},
         thread_storage::read_thread,
-        types::{ConversationState, StreamVariant},
+        types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
         CLIENT,
     },
     tool_calls::{route_call::route_call, ALL_TOOLS},
@@ -301,6 +301,8 @@ async fn create_and_stream(
                     // gets the response from the OpenAI Stream
                     let response = open_ai_stream.next().await;
 
+                    trace!("Polled Stream, got response: {:?}", response);
+
                     let variants: Vec<StreamVariant> = match response {
                         Some(Ok(response)) => {
                             if let Some(choice) = response.choices.first() {
@@ -354,8 +356,11 @@ async fn create_and_stream(
                                                 // There is NOT a tool call there, because that was accumulated in the previous iterations.
                                                 // The stream ending is just OpenAI's way of telling us that the tool call is done and can now be executed.
                                                 if let Some(name) = tool_name {
-                                                    let mut temp =
-                                                        route_call(name, Some(tool_arguments), tool_id); // call the tool with the arguments
+                                                    let mut temp = route_call(
+                                                        name,
+                                                        Some(tool_arguments),
+                                                        tool_id,
+                                                    ); // call the tool with the arguments
                                                     all_generated_variants.append(&mut temp);
                                                     // Reset the tool_name and tool_arguments
                                                     tool_name = None;
@@ -382,21 +387,12 @@ async fn create_and_stream(
                                                         );
 
                                                         // The stream wants a vector of ChatCompletionRequestMessage, so we need to convert the StreamVariants to that.
-                                                        let mut all_oai_messages = vec![];
-                                                        for message in all_messages {
-                                                            let temp: Vec<
-                                                                ChatCompletionRequestMessage,
-                                                            > = match message.try_into() {
-                                                                Ok(temp) => temp,
-                                                                Err(e) => {
-                                                                    warn!("Error converting StreamVariant to ChatCompletionRequestMessage: {:?}", e);
-                                                                    vec![]
-                                                                }
-                                                            };
-                                                            all_oai_messages.extend(temp);
-                                                        }
+                                                        let all_oai_messages = help_convert_sv_ccrm(all_messages);
 
-                                                        trace!("All messages: {:?}", all_oai_messages);
+                                                        trace!(
+                                                            "All messages: {:?}",
+                                                            all_oai_messages
+                                                        );
 
                                                         // Now we construct a new stream and substitute the old one with it.
                                                         match build_request(all_oai_messages) {
@@ -496,7 +492,10 @@ async fn create_and_stream(
                                                             if tool_id.is_empty() {
                                                                 warn!("Tool call expected id, but not set yet: {:?}", response);
                                                             }
-                                                            vec![StreamVariant::Code(arguments, tool_id.clone())]
+                                                            vec![StreamVariant::Code(
+                                                                arguments,
+                                                                tool_id.clone(),
+                                                            )]
                                                         }
                                                     }
                                                     None => {

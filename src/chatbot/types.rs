@@ -2,12 +2,13 @@ use core::fmt;
 use std::time::Instant;
 
 use async_openai::types::{
-    ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage,
-    ChatCompletionRequestSystemMessage, ChatCompletionRequestUserMessage,
+    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage,
+    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
+    ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall,
 };
 use documented::Documented;
 use serde::Serialize;
-use tracing::{error, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 #[derive(Debug, Clone)]
 pub enum ConversationState {
@@ -28,36 +29,36 @@ pub struct ActiveConversation {
     pub conversation: Conversation,
 }
 
-/// 
+///
 /// # Stream Variants
-/// 
+///
 /// The different variants of the stream or Thread that can be sent to the client.
 /// They are always sent as JSON strings in the format `{"variant": "variant_name", "content": "content"}`.
-/// 
+///
 /// User: The input of the user, as a String.
-/// 
+///
 /// Assistant: The output of the Assistant, as a String. Often Markdown, because the LLM can output Markdown.
 /// Multiple messages of this variant after each other belong to the same message, but are broken up due to the stream.
-/// 
-/// Code: The code that the Assistant generated, as a String. It will be executed on the backend. 
+///
+/// Code: The code that the Assistant generated, as a String. It will be executed on the backend.
 /// Currently, only Python is supported. The content is not formatted.
-/// 
+///
 /// CodeOutput: The output of the code that was executed, as a String. Also not formatted.
-/// 
+///
 /// Image: An image that was generated during the conversation, as a String. The image is Base64 encoded.
 /// An example of this would be a matplotlib plot.
-/// 
+///
 /// ServerError: An error that occured on the server(backend) side, as a String. Contains the error message.
 /// The client should realize that this error occured and handle it accordingly; most ServerErrors are immeadiately followed by a StreamEnd.
-/// 
+///
 /// OpenAI Error: An error that occured on the OpenAI side, as a String. Contains the error message.
 /// These are often for the rate limits, but can also be for other things, i.E. if the API is down.
-/// 
+///
 /// CodeError: The Code from the LLM could not be executed or there was some other error while setting up the code execution.
-/// 
+///
 /// StreamEnd: The Stream ended. Contains a reason as a String. This is always the last message of a stream.
 /// If the last message is not a StreamEnd but the stream ended, it's an error from the server side and needs to be fixed.
-/// 
+///
 /// ServerHint: The Server hints something to the client. This is primarily used for giving the thread_id.
 /// The Content is in the format `<key>:<value>`, for now the key is "thread_id" and the value is the thread_id.
 /// Might be used for other things in the future. If the client receives a ServerHint with an unknown key, it should log a warning, but not crash.
@@ -74,7 +75,7 @@ pub enum StreamVariant {
     Code(String, String),
     /// The Output of the Code, as a String, verbatim, and the ID of the Tool Call it belongs to.
     CodeOutput(String, String),
-    /// An image that was generated during the streaming 
+    /// An image that was generated during the streaming
     Image(String),
     /// An error that occured on the server(backend) side, as a String
     ServerError(String),
@@ -112,12 +113,19 @@ impl fmt::Display for StreamVariant {
 /// A conversation that is not actively streaming, as a List of `StreamVariants`.
 pub type Conversation = Vec<StreamVariant>;
 
+#[derive(Debug, Clone)]
+pub enum ConversionError {
+    VariantHide(&'static str), // Some variants are only for the backend, so they should not be converted.
+    ParseError(&'static str),  // An error occured during parsing the prompt.
+    CodeCall(String, String),  // A Code Call was found, which needs to be handled differently.
+}
+
 /// A helper function to convert the `StreamVariant` to a `ChatCompletionRequestMessage`.
 ///
 /// Converts the `StreamVariant` to a `ChatCompletionRequestMessage`, which is used to send the message to `OpenAI`.
 /// This might fail because we can't convert all variants to a `ChatCompletionRequestMessage`.
 impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
-    type Error = &'static str;
+    type Error = ConversionError;
 
     fn try_into(self) -> Result<Vec<ChatCompletionRequestMessage>, Self::Error> {
         trace!(
@@ -144,7 +152,7 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                         Ok(p) => p,
                         Err(e) => {
                             error!("Error converting prompt to ChatCompletionRequestMessage: {:?}", e);
-                            return Err("Error converting prompt to ChatCompletionRequestMessage.");
+                            return Err(ConversionError::ParseError("Error converting prompt to ChatCompletionRequestMessage."));
                         }
                     };
                     prompt
@@ -174,12 +182,7 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     ..Default::default()
                 },
             )]),
-            Self::Code(s, id) => Ok(vec![ChatCompletionRequestMessage::Tool(
-                async_openai::types::ChatCompletionRequestToolMessage {
-                    tool_call_id: id,
-                    content: s,
-                })
-            ]),
+            Self::Code(s, id) => Err(ConversionError::CodeCall(s, id)),
             Self::CodeOutput(s, id) => Ok(vec![ChatCompletionRequestMessage::Tool(
                 async_openai::types::ChatCompletionRequestToolMessage {
                     tool_call_id: id,
@@ -192,17 +195,17 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     content: "An image was successfully generated, but isn't displayed due to a lack of vision capabilities.".to_string(),
                 },
             )]),
-            Self::CodeError(_) | Self::OpenAIError(_) | Self::ServerError(_) => Err("Error variants should not be passed to the LLM, it doesn't need to know about them."),
-            Self::StreamEnd(_) => Err("StreamEnd variants are only for use on the server side, not for the LLM."),
+            Self::CodeError(_) | Self::OpenAIError(_) | Self::ServerError(_) => Err(ConversionError::VariantHide("Error variants should not be passed to the LLM, it doesn't need to know about them.")),
+            Self::StreamEnd(_) => Err(ConversionError::VariantHide("StreamEnd variants are only for use on the server side, not for the LLM.")),
             Self::ServerHint(s) => {
                 // We do check that only the thread_id is sent. 
                 let first_part = s.splitn(2, ':').collect::<Vec<&str>>()[0];
                 if first_part != "thread_id" {
                     warn!("ServerHint contained an unknown key: {:?}", first_part);
-                    Err("ServerHint contained an unknown key.")
+                    Err(ConversionError::ParseError("ServerHint contained an unknown key."))
             } else {
                 // The ServerHint is only used to send the thread_id to the client, so we don't need to send it to OpenAI.
-                Err("ServerHint variants are only for use on the server side, not for the LLM.")
+                Err(ConversionError::VariantHide("ServerHint variants are only for use on the server side, not for the LLM."))
             }
         }
         }
@@ -309,4 +312,90 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
             }
         }
     }
+}
+
+/// Helper function to convert a Vec<StreamVariant> to a Vec<ChatCompletionRequestMessage>.
+/// This is needed because a Code Variant needs to be incorporated into the Assistant CCRM.
+pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequestMessage> {
+    let mut all_oai_messages = vec![];
+    let mut assistant_message_buffer = None;
+
+    for message in input {
+        match std::convert::TryInto::<Vec<ChatCompletionRequestMessage>>::try_into(message) {
+            Ok(temp) => {
+                for temp in temp {
+                    // If this message is an Assistant message, we need to handle the buffer.
+                    if let ChatCompletionRequestMessage::Assistant(content) = temp {
+                        // If the buffer is not empty, we need to push it to the output.
+                        if let Some(buffer) = assistant_message_buffer.clone() {
+                            all_oai_messages.push(ChatCompletionRequestMessage::Assistant(buffer));
+                        }
+
+                        // We'll set the buffer to the current message.
+                        assistant_message_buffer = Some(content);
+                    } else {
+                        // If it's not an Assistant message, we'll push the buffer to the output and then push the message.
+                        if let Some(buffer) = assistant_message_buffer.clone() {
+                            all_oai_messages.push(ChatCompletionRequestMessage::Assistant(buffer));
+                            assistant_message_buffer = None;
+                        }
+                        all_oai_messages.push(temp);
+                    }
+                }
+            }
+            Err(ConversionError::CodeCall(content, id)) => {
+                // We need to use the Code Call to update the content of the buffer, or initialize it.
+                if let Some(buffer) = assistant_message_buffer.clone() {
+                    let tool_call = ChatCompletionMessageToolCall {
+                        id,
+                        r#type: ChatCompletionToolType::Function,
+                        function: FunctionCall {
+                            name: "code_interpreter".to_string(),
+                            arguments: content,
+                        },
+                    };
+                    assistant_message_buffer = Some( // Set the tool call in the buffer.
+                        ChatCompletionRequestAssistantMessage {
+                            tool_calls: Some(vec![tool_call]),
+                            ..buffer
+                        }
+                    )
+                } else {
+                    // If the buffer is empty, we'll initialize it.
+                    let tool_call = ChatCompletionMessageToolCall {
+                        id,
+                        r#type: ChatCompletionToolType::Function,
+                        function: FunctionCall {
+                            name: "code_interpreter".to_string(),
+                            arguments: content,
+                        },
+                    };
+                    assistant_message_buffer = Some( // Set the tool call in the buffer.
+                        ChatCompletionRequestAssistantMessage {
+                            tool_calls: Some(vec![tool_call]),
+                            content: None, 
+                            name: Some("frevaGPT".to_string()),
+                            ..Default::default() // because else it complain that that field is deprecated.
+                        }
+                    )
+                }
+            }
+            Err(ConversionError::ParseError(e)) => {
+                warn!(
+                    "Error parsing StreamVariant to ChatCompletionRequestMessage: {:?}",
+                    e
+                );
+            }
+            Err(ConversionError::VariantHide(e)) => {
+                debug!("Hiding StreamVariant from LLM: {:?}", e);
+            }
+        };
+    }
+
+    // If the buffer is not empty, we need to push it to the output.
+    if let Some(buffer) = assistant_message_buffer.clone() {
+        all_oai_messages.push(ChatCompletionRequestMessage::Assistant(buffer));
+    }
+
+    all_oai_messages
 }
