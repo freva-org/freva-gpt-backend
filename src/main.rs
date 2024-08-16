@@ -77,14 +77,31 @@ async fn main() -> std::io::Result<()> {
     // Start the server
     HttpServer::new(|| {
         let services = services![
-            web::scope("/ping").route("", web::get().to(static_serve::ping)), // Ping, just reply with a pong
-            web::scope("/help").route("", web::get().to(static_serve::ping)), // Also reply with a pong
-            web::scope("/stop").route("", web::get().to(chatbot::stop::stop)), // Stop, stop a specific conversation by thread ID.
-            web::scope("/stop").route("", web::post().to(chatbot::stop::stop)), // Stop, stop a specific conversation by thread ID. Both post and get are allowed.
-            web::scope("/docs").route("", web::get().to(static_serve::docs)), // Docs, return the documentation of the API.
-            web::scope("/getthread").route("", web::get().to(chatbot::get_thread::get_thread)), // GetThread, get the thread of a specific conversation by thread ID.
-            web::scope("/streamresponse")
-                .route("", web::get().to(chatbot::stream_response::stream_response)), // StreamResponse, stream the response of a specific conversation by thread ID.
+            // web::scope("/api/chatbot/ping").route("", web::get().to(static_serve::ping)), // Ping, just reply with a pong
+            // web::scope("/api/chatbot/help").route("", web::get().to(static_serve::ping)), // Also reply with a pong
+            // web::scope("/api/chatbot/stop").route("", web::get().to(chatbot::stop::stop)), // Stop, stop a specific conversation by thread ID.
+            // web::scope("/api/chatbot/stop").route("", web::post().to(chatbot::stop::stop)), // Stop, stop a specific conversation by thread ID. Both post and get are allowed.
+            // web::scope("/api/chatbot/docs").route("", web::get().to(static_serve::docs)), // Docs, return the documentation of the API.
+            // web::scope("/api/chatbot/getthread").route("", web::get().to(chatbot::get_thread::get_thread)), // GetThread, get the thread of a specific conversation by thread ID.
+            // web::scope("/api/chatbot/streamresponse")
+            //     .route("", web::get().to(chatbot::stream_response::stream_response)), // StreamResponse, stream the response of a specific conversation by thread ID.
+            web::scope("/api/chatbot")
+                .route("/ping", web::get().to(static_serve::ping)) // Ping, just reply with a pong
+                .route("/help", web::get().to(static_serve::ping)) // Also reply with a pong
+                .route("/stop", web::get().to(chatbot::stop::stop)) // Stop, stop a specific conversation by thread ID.
+                .route("/stop", web::post().to(chatbot::stop::stop)) // Stop, stop a specific conversation by thread ID. Both post and get are allowed.
+                .route("/docs", web::get().to(static_serve::docs)) // Docs, return the documentation of the API.
+                .route("/getthread", web::get().to(chatbot::get_thread::get_thread)) // GetThread, get the thread of a specific conversation by thread ID.
+                .route("/streamresponse", web::get().to(chatbot::stream_response::stream_response)) // StreamResponse, stream the response of a specific conversation by thread ID.
+            ,
+            // Also, for convenience, all old points without the /api/chatbot, give a "moved permanently" to the new location.
+            web::scope("/ping").route("", actix_web::web::get().to(static_serve::moved_permanently)),
+            web::scope("/help").route("", actix_web::web::get().to(static_serve::moved_permanently)),
+            web::scope("/stop").route("", actix_web::web::get().to(static_serve::moved_permanently)),
+            web::scope("/stop").route("", actix_web::web::post().to(static_serve::moved_permanently)),
+            web::scope("/docs").route("", actix_web::web::get().to(static_serve::moved_permanently)),
+            web::scope("/getthread").route("", actix_web::web::get().to(static_serve::moved_permanently)),
+            web::scope("/streamresponse").route("", actix_web::web::get().to(static_serve::moved_permanently)),
         ];
         App::new()
             .service(services)

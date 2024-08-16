@@ -54,3 +54,9 @@ pub async fn docs() -> impl Responder {
     trace!("Docs request received.");
     HttpResponse::Ok().body(DOCS) 
 }
+
+/// Simple response to trying to access the old endpoints.
+/// Simple answer that it should be accessed through the /api/chatbot/ endpoint.
+pub async fn moved_permanently() -> impl Responder {
+    HttpResponse::MovedPermanently().body("The Api Endpoints have changed. Instead of using /ping, etc. use /api/chatbot/ping.")
+}
