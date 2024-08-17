@@ -8,6 +8,7 @@ use actix_web::{services, web, App, HttpServer};
 use auth::AUTH_KEY;
 use clap::Parser;
 use dotenvy::dotenv;
+use tool_calls::code_interpreter::parse_input::run_code_interpeter;
 use tracing::{error, info, trace};
 
 mod chatbot; // for the actual chatbot
@@ -22,7 +23,14 @@ async fn main() -> std::io::Result<()> {
     // What the user has passed in the command line
     let args = cla_parser::Args::parse();
 
+    // If we are in code_interpreter mode, run the code interpreter and have it exit without starting the server.
+    //TODO: Test this! Does it work as expected?
+    if let Some(code) = &args.code_interpreter {
+        run_code_interpeter(code.clone());
+    }
+
     logging::setup_logger(&args);
+
 
     // Read from env file. This loads the environment variables from the .env file into `std::env::var`.
     match dotenv() {
@@ -32,6 +40,7 @@ async fn main() -> std::io::Result<()> {
             eprintln!("Error reading from env file due to error: {e:?}. Note that the search for the env file starts at pwd, not where the executable lies. Falling back to defaults, may not work!");
         }
     }
+
 
     // Server information: host and port
     trace!(

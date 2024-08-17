@@ -34,3 +34,19 @@ pub fn code_is_likely_safe(code: &String) -> bool {
     // Later, we'll expand this to include more sophisticated checks.
     true
 }
+
+
+/// Sanitizes the code for problems that we want to avoid.
+/// This isn't something like rm rf, but instead things like using the wrong matplotlib backend.
+pub fn sanitize_code(code: String) -> String {
+    let mut code = code;
+    // Matplotlib backend selection: we are on a linux server and don't do interactive plotting, 
+    // so we enforce the Agg backend.
+
+    // If either matplotlib or `plt` is found in the code, we'll add the backend selection.
+    if code.contains("matplotlib") || code.contains("plt") {
+        code = format!("import matplotlib\nmatplotlib.use('agg')\n{}", code);
+    }
+
+    code
+}

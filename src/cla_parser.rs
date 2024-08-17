@@ -2,6 +2,7 @@
 
 use clap::{self, crate_authors, Parser};
 
+
 #[derive(Parser, Debug)]
 #[command(
     version,
@@ -14,4 +15,9 @@ pub struct Args {
     /// Make the program verbose, printing debug info too, then trace info. Can be used multiple times.
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
+
+    /// Runs the code interpreter with the given code.
+    /// For internal use only.
+    #[arg(long)]
+    pub code_interpreter: Option<String>,
 }
