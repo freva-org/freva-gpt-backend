@@ -192,7 +192,7 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
             Self::Image(_) => Ok(vec![ChatCompletionRequestMessage::System(
                 ChatCompletionRequestSystemMessage {
                     name: Some("Image".to_string()),
-                    content: "An image was successfully generated, but isn't displayed due to a lack of vision capabilities.".to_string(),
+                    content: "An image was successfully generated and is being shown to the user.".to_string(),
                 },
             )]),
             Self::CodeError(_) | Self::OpenAIError(_) | Self::ServerError(_) => Err(ConversionError::VariantHide("Error variants should not be passed to the LLM, it doesn't need to know about them.")),

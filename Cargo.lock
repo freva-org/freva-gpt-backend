@@ -755,6 +755,7 @@ version = "1.3.1"
 dependencies = [
  "actix-web",
  "async-openai",
+ "base64",
  "clap",
  "const_format",
  "documented",

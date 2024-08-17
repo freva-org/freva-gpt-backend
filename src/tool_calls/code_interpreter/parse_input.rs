@@ -96,16 +96,30 @@ pub fn start_code_interpeter(arguments: Option<String>, id: String) -> Vec<Strea
                 );
             }
 
+            // The stdout can contain an image if the code interpreter has generated one.
+            // In that case, we need to extract the image and return it as a separate stream variant.
+            let mut images = vec![];
+            let mut stdout_without_images = String::new();
+            for line in stdout.lines() {
+                if line.starts_with("Encoded Image: ") {
+                    let encoded_image = line.trim_start_matches("Encoded Image: ");
+                    images.push(StreamVariant::Image(encoded_image.to_string()));
+                } else {
+                    stdout_without_images.push_str(line);
+                    stdout_without_images.push('\n');
+                }
+            }
+
             // We might get a problem with the output being too long, so we'll limit it to 1000 characters.
             // This is a temporary solution, and we'll have to find a better one later. FIXME
-            let stdout = if stdout.len() > 1000 {
+            let stdout_short = if stdout_without_images.len() > 1000 {
                 warn!("The code interpreter output was too long. Truncating to 1000 characters.");
-                stdout.chars().take(1000).collect()
+                stdout_without_images.chars().take(1000).collect()
             } else {
-                stdout.to_string()
+                stdout_without_images.to_string()
             };
 
-            let stderr = if stderr.len() > 1000 {
+            let stderr_short = if stderr.len() > 1000 {
                 warn!("The code interpreter error output was too long. Truncating to 1000 characters.");
                 stderr.chars().take(1000).collect()
             } else {
@@ -113,11 +127,14 @@ pub fn start_code_interpeter(arguments: Option<String>, id: String) -> Vec<Strea
             };
 
             // The LLM probably needs both the stdout and stderr, so we'll return both.
-            let stdout_stderr = format!("{}\n{}", stdout, stderr);
+            let stdout_stderr = format!("{}\n{}", stdout_short, stderr_short);
             if stdout_stderr.is_empty() {
                 warn!("The code interpreter returned an empty output.");
             }
-            vec![StreamVariant::CodeOutput(stdout_stderr, id)]
+
+            let mut ouput_vec = vec![StreamVariant::CodeOutput(stdout_stderr, id)];
+            ouput_vec.extend(images); // All the images (most of the time, there will be none and almost all other times it should only be one).
+            ouput_vec
         }
         Err(output) => {
             warn!("Error running the code interpreter: {:?}", output);
