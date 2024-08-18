@@ -61,7 +61,7 @@ async fn main() -> std::io::Result<()> {
     let _ = chatbot::prompting::STARTING_PROMPT_JSON.clone();
     trace!("Starting messages JSON: {:?}", chatbot::prompting::STARTING_PROMPT_JSON);
 
-    trace!("Ping Response: {:?}", static_serve::RESPONSE);
+    trace!("Ping Response: {:?}", static_serve::RESPONSE_STRING);
 
     // We'll also initialize the authentication here so it's available for the entire server, from the very start.
     let auth_string = match std::env::var("AUTH_KEY"){

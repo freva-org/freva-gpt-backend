@@ -25,6 +25,7 @@ qstring = "0.7.2"
 rand = "0.8.5"
 serde = "1.0.204"
 serde_json = "1.0.120"
+strum = {version = "0.26.3", features = ["strum_macros", "derive"]}
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 

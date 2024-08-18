@@ -123,7 +123,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     };
 
     // We'll also add a ServerHint about the thread_id to the messages.
-    let server_hint = StreamVariant::ServerHint(format!("thread_id:{}", thread_id));
+    let server_hint = StreamVariant::ServerHint(format!("{{\"thread_id\": \"{}\"}}", thread_id)); // resolves to {"thread_id": "<thread_id>"}
     // Also don't forget to add the user's input to the thread file.
     add_to_conversation(
         &thread_id,
@@ -210,7 +210,7 @@ async fn create_and_stream(
             // Even higher priority than stopping the stream is sending the thread_id hint.
             if should_hint_thread_id {
                 // If we should hint the thread_id, we'll send a ServerHint event.
-                let hint = StreamVariant::ServerHint(format!("thread_id:{}", thread_id));
+                let hint = StreamVariant::ServerHint(format!("{{\"thread_id\": \"{}\"}}", thread_id)); // resolves to {"thread_id":"<thread_id>"}
                 return Some((
                     Ok::<actix_web::web::Bytes, std::convert::Infallible>(
                         actix_web::web::Bytes::copy_from_slice(
@@ -485,7 +485,7 @@ async fn create_and_stream(
                                                         {
                                                             warn!("Tool call expected code_interpreter, but found: {:?}", name_copy);
                                                             // Instead of ending the stream, we'll just ignore the tool call, but send the user a ServerHint.
-                                                            vec![StreamVariant::ServerHint(format!("warning:Tool call expected code_interpreter, but found ->{}<-; content: ->{}<-", name_copy.unwrap_or(String::new()), arguments).to_string())]
+                                                            vec![StreamVariant::ServerHint(format!("{{\"warning\": \"Tool call expected code_interpreter, but found ->{}<-; content: ->{}<-\"}}", name_copy.unwrap_or(String::new()), arguments).to_string())]
                                                         } else {
                                                             // We know it's the code interpreter and can send it as a delta.
                                                             trace!("Tool call: {:?} with arguments: {:?} and id: {}", name_copy, arguments, tool_id);

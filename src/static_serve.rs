@@ -1,23 +1,154 @@
 // For statically serving responses
 
+use std::env;
+
 use actix_web::{HttpResponse, Responder};
 use const_format::concatcp;
 use documented::Documented;
+use once_cell::sync::Lazy;
+use strum::VariantNames;
 use tracing::{debug, trace};
 
 use crate::chatbot::types::StreamVariant;
 
 // The Ping reponse contains a short description of the server's capabilities.
 
-const VERSION: &str = concat!("Version: ", env!("CARGO_PKG_VERSION"), "\n");
-const STREAMVARIANTS: &str = "Streamvariants=User,Assistant,Code,CodeOutput,Image,ServerError,OpenAIError,CodeError,StreamEnd,ServerHint\n"; //TODO: un-hardcode this, instead read the variants from the LLM module
-const PING_SPEC: &str = "ping:get,,String\n"; // ping has the get method, no input and outputs String.
-const DOCS_SPEC: &str = "docs:get,,String\n"; // docs has the get method, no input and outputs String.
-const GETTHREAD_SPEC:&str="getthread:get,thread_id=String&auth_key=String,Json{List{Variant:Streamvariant=String,Content:String}}\n"; // getthread has the get method, takes a threadid and returns a list of Streamvariants and their content.
-const STREAMRESPONSE_SPEC:&str="streamresponse:get,thread_id=Optional{String}&input=String&auth_key=String,Stream{Json{Variant:Streamvariant=String,Content:String}}\n"; // streamresponse has the get method, takes an optional threadid and returns a stream of Streamvariants and their content.
-const STOP_SPEC: &str = "stop:post+get,thread_id=String&auth_key=String,\n"; // stop can be called with post or get, takes a threadid and returns nothing.
-const ALL_SPECS: &str = concatcp!(PING_SPEC, DOCS_SPEC, GETTHREAD_SPEC, STREAMRESPONSE_SPEC, STOP_SPEC);
-pub const RESPONSE: &str = concatcp!(VERSION, STREAMVARIANTS, ALL_SPECS);
+// const VERSION: &str = concat!("Version: ", env!("CARGO_PKG_VERSION"), "\n");
+// const STREAMVARIANTS: &str = "Streamvariants=User,Assistant,Code,CodeOutput,Image,ServerError,OpenAIError,CodeError,StreamEnd,ServerHint\n"; //TODO: un-hardcode this, instead read the variants from the LLM module
+// const PING_SPEC: &str = "ping:get,,String\n"; // ping has the get method, no input and outputs String.
+// const DOCS_SPEC: &str = "docs:get,,String\n"; // docs has the get method, no input and outputs String.
+// const GETTHREAD_SPEC:&str="getthread:get,thread_id=String&auth_key=String,Json{List{Variant:Streamvariant=String,Content:String}}\n"; // getthread has the get method, takes a threadid and returns a list of Streamvariants and their content.
+// const STREAMRESPONSE_SPEC:&str="streamresponse:get,thread_id=Optional{String}&input=String&auth_key=String,Stream{Json{Variant:Streamvariant=String,Content:String}}\n"; // streamresponse has the get method, takes an optional threadid and returns a stream of Streamvariants and their content.
+// const STOP_SPEC: &str = "stop:post+get,thread_id=String&auth_key=String,\n"; // stop can be called with post or get, takes a threadid and returns nothing.
+// const ALL_SPECS: &str = concatcp!(PING_SPEC, DOCS_SPEC, GETTHREAD_SPEC, STREAMRESPONSE_SPEC, STOP_SPEC);
+// pub const RESPONSE: &str = concatcp!(VERSION, STREAMVARIANTS, ALL_SPECS);
+
+// REWRITE
+// Critique was voiced that all answers by the API should be in JSON format.
+#[derive(Debug, serde::Serialize)]
+enum EndpointMethods {
+    Get,
+    Post,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct EndpointSpec {
+    name: &'static str,
+    methods: &'static [EndpointMethods],
+    params: serde_json::map::Map<String, serde_json::Value>,
+    return_type: serde_json::Value,
+}
+
+static PING_SPEC: Lazy<EndpointSpec> = Lazy::new(|| EndpointSpec {
+    name: "ping",
+    return_type: serde_json::Value::String("JSON".to_string()), // We because we are describing the API, we can't fully describe the return type.
+    params: serde_json::Map::new(),                             // no params
+    methods: &[EndpointMethods::Get],
+});
+
+static DOCS_SPEC: Lazy<EndpointSpec> = Lazy::new(|| EndpointSpec {
+    name: "docs",
+    return_type: serde_json::Value::String("String".to_string()), // Just for manual inspection
+    params: serde_json::Map::new(),                               // no params
+    methods: &[EndpointMethods::Get],
+});
+
+static GETTHREAD_SPEC: Lazy<EndpointSpec> = Lazy::new(|| EndpointSpec {
+    name: "getthread",
+    return_type: serde_json::Value::String(
+        "Json{List{Variant:Streamvariant=String,Content:String}}".to_string(),
+    ),
+    params: serde_json::Map::from_iter(vec![
+        (
+            "thread_id".to_string(),
+            serde_json::Value::String("String".to_string()),
+        ),
+        (
+            "auth_key".to_string(),
+            serde_json::Value::String("String".to_string()),
+        ),
+    ]),
+    methods: &[EndpointMethods::Get],
+});
+
+static STREAMRESPONSE_SPEC: Lazy<EndpointSpec> = Lazy::new(|| EndpointSpec {
+    name: "streamresponse",
+    return_type: serde_json::Value::String(
+        "Stream{Json{Variant:Streamvariant=String,Content:String}}".to_string(),
+    ),
+    params: serde_json::Map::from_iter(vec![
+        (
+            "thread_id".to_string(),
+            serde_json::Value::String("Optional{String}".to_string()),
+        ),
+        (
+            "input".to_string(),
+            serde_json::Value::String("String".to_string()),
+        ),
+        (
+            "auth_key".to_string(),
+            serde_json::Value::String("String".to_string()),
+        ),
+    ]),
+    methods: &[EndpointMethods::Get],
+});
+
+static STOP_SPEC: Lazy<EndpointSpec> = Lazy::new(|| EndpointSpec {
+    name: "stop",
+    return_type: serde_json::Value::String("".to_string()),
+    params: serde_json::Map::from_iter(vec![
+        (
+            "thread_id".to_string(),
+            serde_json::Value::String("String".to_string()),
+        ),
+        (
+            "auth_key".to_string(),
+            serde_json::Value::String("String".to_string()),
+        ),
+    ]),
+    methods: &[EndpointMethods::Get, EndpointMethods::Post],
+});
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+static VERSION_JSON: Lazy<serde_json::Value> = Lazy::new(|| {
+    serde_json::Value::Object(serde_json::Map::from_iter(vec![(
+        "Version".to_string(),
+        serde_json::Value::String(VERSION.to_string()),
+    )]))
+});
+
+// Thanks to strum, there's StreamVariant::VARIANTS;
+static STREAMVARIANTS: Lazy<serde_json::Value> = Lazy::new(|| {
+    serde_json::Value::Array(
+        StreamVariant::VARIANTS
+            .iter()
+            .map(|v| serde_json::Value::String(v.to_string()))
+            .collect(),
+    )
+});
+
+// The entire response object contains the version, streamvariants and all the endpoint specs as a JSON object.
+static RESPONSE: Lazy<serde_json::Value> = Lazy::new(|| {
+    serde_json::Value::Object(serde_json::Map::from_iter(vec![
+        ("Version".to_string(), VERSION_JSON.clone()),
+        ("Streamvariants".to_string(), STREAMVARIANTS.clone()),
+        (
+            "Endpoints".to_string(),
+            serde_json::Value::Array(vec![
+                serde_json::to_value(&*PING_SPEC).expect("Unable to serialize JSON"),
+                serde_json::to_value(&*DOCS_SPEC).expect("Unable to serialize JSON"),
+                serde_json::to_value(&*GETTHREAD_SPEC).expect("Unable to serialize JSON"),
+                serde_json::to_value(&*STREAMRESPONSE_SPEC).expect("Unable to serialize JSON"),
+                serde_json::to_value(&*STOP_SPEC).expect("Unable to serialize JSON"),
+            ]),
+        ),
+    ]))
+});
+
+pub static RESPONSE_STRING: Lazy<String> = Lazy::new(|| {
+    serde_json::to_string_pretty(&*RESPONSE).expect("Unable to serialize JSON")
+});
 
 /// Simply returns a short description of the server's capabilities as well as the backend version.
 /// The first line is always "Version: x.y.z" where x.y.z is the version of the backend. This follows the rules of SemVer.
@@ -28,9 +159,8 @@ pub const RESPONSE: &str = concatcp!(VERSION, STREAMVARIANTS, ALL_SPECS);
 /// NAME:METHOD(S),ARGUMENTS,RETURN_TYPE
 pub async fn ping() -> impl Responder {
     trace!("Ping request received.");
-    HttpResponse::Ok().body(RESPONSE)
+    HttpResponse::Ok().body(RESPONSE_STRING.to_string())
 }
-
 
 /// not_found returns a 404 response
 pub async fn not_found() -> impl Responder {
@@ -44,19 +174,26 @@ const DOCS_DOCS: &str = "\n# DOCS:\n\nReturns the documentation for the API.\n\n
 const GETTHREAD_DOCS: &str = "\n# GETTHREADS:\n\nReturns the content of a thread as a Json of List of Strings. \n\nAs arguments, it takes in a `thread_id` and an `auth_key`.\n\nThe thread id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.\n\nThe auth key needs to match the one on the backend for the request to be authorized.\nTo get the auth key, the user needs to contact the backend administrator.\n\nIf the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.\n\nIf the thread id is not given, a BadRequest response is returned.\n\nIf the thread with the given id is not found, a NotFound response is returned.\n\nIf the thread is found but cannot be read or cannot be displayed, an InternalServerError response is returned.";
 const STREAMRESPONSE_DOCS: &str = "\n# STREAMRESPONSE:\n\nTakes in a thread_id, an input and an auth_key and returns a stream of StreamVariants and their content.\n\nThe thread_id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.\nIf it's empty or not given, a new thread is created.\n\nThe stream consists of StreamVariants and their content. See the different Stream Variants above. \nIf the stream creates a new thread, the new thread_id will be sent as a ServerHint.\nThe stream always ends with a StreamEnd event, unless a server error occurs.\n\nA usual stream cosists mostly of Assistant messages many times a second. This is to give the impression of a real-time conversation.\n\nIf the input is not given, a BadRequest response is returned.\n\nIf the auth_key is not given or does not match the one on the backend, an Unauthorized response is returned.\n\nIf the thread_id does not point to an existing thread, an InternalServerError response is returned.\n\nIf the stream fails due to something else on the backend, an InternalServerError response is returned.";
 const STOP_DOCS: &str = "\n# STOP:\n\nStops the conversation with the given thread ID as soon as possible.\n\nTakes in a `thread_id` and an `auth_key`.\nThe thread_id identifies the conversation to stop.\nThe auth_key needs to match the one on the backend for the request to be authorized.\n\nIf the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.\n\nIf the thread id is not given, a BadRequest response is returned.\n\nIf there is an error stopping the conversation, an InternalServerError response is returned.";
-const ALL_DOCS: &str = concatcp!(PING_DOCS, DOCS_DOCS, GETTHREAD_DOCS, STREAMRESPONSE_DOCS, STOP_DOCS);
+const ALL_DOCS: &str = concatcp!(
+    PING_DOCS,
+    DOCS_DOCS,
+    GETTHREAD_DOCS,
+    STREAMRESPONSE_DOCS,
+    STOP_DOCS
+);
 pub const DOCS: &str = concatcp!(VERSION, STREAMVARIANTS_DOCS, ALL_DOCS);
 
 /// Returns the documentation for the API.
-/// 
+///
 /// Takes no arguments and returns a string with the documentation.
 pub async fn docs() -> impl Responder {
     trace!("Docs request received.");
-    HttpResponse::Ok().body(DOCS) 
+    HttpResponse::Ok().body(DOCS)
 }
 
 /// Simple response to trying to access the old endpoints.
 /// Simple answer that it should be accessed through the /api/chatbot/ endpoint.
 pub async fn moved_permanently() -> impl Responder {
-    HttpResponse::MovedPermanently().body("The Api Endpoints have changed. Instead of using /ping, etc. use /api/chatbot/ping.")
+    HttpResponse::MovedPermanently()
+        .body("The Api Endpoints have changed. Instead of using /ping, etc. use /api/chatbot/ping.")
 }

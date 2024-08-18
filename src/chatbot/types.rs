@@ -59,10 +59,9 @@ pub struct ActiveConversation {
 /// StreamEnd: The Stream ended. Contains a reason as a String. This is always the last message of a stream.
 /// If the last message is not a StreamEnd but the stream ended, it's an error from the server side and needs to be fixed.
 ///
-/// ServerHint: The Server hints something to the client. This is primarily used for giving the thread_id.
-/// The Content is in the format `<key>:<value>`, for now the key is "thread_id" and the value is the thread_id.
-/// Might be used for other things in the future. If the client receives a ServerHint with an unknown key, it should log a warning, but not crash.
-#[derive(Debug, Serialize, Clone, Documented)]
+/// ServerHint: The Server hints something to the client. This is primarily used for giving the thread_id, but also for warnings.
+/// The Content is in JSON format, with the key being the hint and the value being the content. Currently, only the keys "thread_id" and "warning" are used.
+#[derive(Debug, Serialize, Clone, Documented, strum::VariantNames)]
 #[serde(tag = "variant", content = "content")] // Makes it so that the variant names are inside the object and the content is held in the content field.
 pub enum StreamVariant {
     /// The Prompt for the LLM, as JSON; not to be sent to the client.
@@ -104,7 +103,7 @@ impl fmt::Display for StreamVariant {
             Self::OpenAIError(s) => format!("OpenAIError:{s}"),
             Self::CodeError(s) => format!("CodeError:{s}"),
             Self::StreamEnd(s) => format!("StreamEnd:{s}"),
-            Self::ServerHint(s) => format!("ServerHint:{s}"),
+            Self::ServerHint(s) => format!("ServerHint:{s}"), // It's a JSON string, we can just write it as is.
         };
         write!(f, "{result:?}")
     }
@@ -199,8 +198,9 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
             Self::StreamEnd(_) => Err(ConversionError::VariantHide("StreamEnd variants are only for use on the server side, not for the LLM.")),
             Self::ServerHint(s) => {
                 // We do check that only the thread_id is sent. 
-                let first_part = s.splitn(2, ':').collect::<Vec<&str>>()[0];
-                if first_part != "thread_id" {
+                // let first_part = s.splitn(2, ':').collect::<Vec<&str>>()[0];
+                let (first_part, _) = s.split_once(':').unwrap_or(("",""));
+                if first_part != "thread_id" && first_part != "warning" {
                     warn!("ServerHint contained an unknown key: {:?}", first_part);
                     Err(ConversionError::ParseError("ServerHint contained an unknown key."))
             } else {
@@ -354,11 +354,12 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
                             arguments: content,
                         },
                     };
-                    assistant_message_buffer = Some( // Set the tool call in the buffer.
+                    assistant_message_buffer = Some(
+                        // Set the tool call in the buffer.
                         ChatCompletionRequestAssistantMessage {
                             tool_calls: Some(vec![tool_call]),
                             ..buffer
-                        }
+                        },
                     )
                 } else {
                     // If the buffer is empty, we'll initialize it.
@@ -370,13 +371,14 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
                             arguments: content,
                         },
                     };
-                    assistant_message_buffer = Some( // Set the tool call in the buffer.
+                    assistant_message_buffer = Some(
+                        // Set the tool call in the buffer.
                         ChatCompletionRequestAssistantMessage {
                             tool_calls: Some(vec![tool_call]),
-                            content: None, 
+                            content: None,
                             name: Some("frevaGPT".to_string()),
                             ..Default::default() // because else it complain that that field is deprecated.
-                        }
+                        },
                     )
                 }
             }
