@@ -11,11 +11,11 @@ use dotenvy::dotenv;
 use tool_calls::code_interpreter::parse_input::run_code_interpeter;
 use tracing::{error, info, trace};
 
+mod auth; // for basic authentication
 mod chatbot; // for the actual chatbot
 mod cla_parser; // for parsing the command line arguments
 mod logging; // for setting up the logger
 mod static_serve; // for serving static responses // for the actual chatbot
-mod auth; // for basic authentication
 mod tool_calls; // for the tool calls
 
 #[actix_web::main]
@@ -30,7 +30,6 @@ async fn main() -> std::io::Result<()> {
 
     logging::setup_logger(&args);
 
-
     // Read from env file. This loads the environment variables from the .env file into `std::env::var`.
     match dotenv() {
         Ok(env_file) => info!("Reading from env file: {:?}", env_file),
@@ -39,7 +38,6 @@ async fn main() -> std::io::Result<()> {
             eprintln!("Error reading from env file due to error: {e:?}. Note that the search for the env file starts at pwd, not where the executable lies. Falling back to defaults, may not work!");
         }
     }
-
 
     // Server information: host and port
     trace!(
@@ -55,19 +53,28 @@ async fn main() -> std::io::Result<()> {
     });
     let host = std::env::var("HOST").unwrap_or_else(|_| "localhost".to_string());
 
-    // The lazy static STARTING_MESSAGE_JSON can fail if the prompt or messages cannot be converted to a string. 
+    // The lazy static STARTING_MESSAGE_JSON can fail if the prompt or messages cannot be converted to a string.
     // To make sure that this is caught early, we'll just test it here.
     let _ = chatbot::prompting::STARTING_PROMPT_JSON.clone();
-    trace!("Starting messages JSON: {:?}", chatbot::prompting::STARTING_PROMPT_JSON);
+    trace!(
+        "Starting messages JSON: {:?}",
+        chatbot::prompting::STARTING_PROMPT_JSON
+    );
 
     trace!("Ping Response: {:?}", static_serve::RESPONSE_STRING);
 
     // We'll also initialize the authentication here so it's available for the entire server, from the very start.
-    let auth_string = match std::env::var("AUTH_KEY"){
+    let auth_string = match std::env::var("AUTH_KEY") {
         Ok(auth_string) => auth_string,
         Err(e) => {
-            error!("Error reading the authentication string from the environment variables: {:?}", e);
-            eprintln!("Error reading the authentication string from the environment variables: {:?}", e);
+            error!(
+                "Error reading the authentication string from the environment variables: {:?}",
+                e
+            );
+            eprintln!(
+                "Error reading the authentication string from the environment variables: {:?}",
+                e
+            );
             std::process::exit(1);
         }
     };

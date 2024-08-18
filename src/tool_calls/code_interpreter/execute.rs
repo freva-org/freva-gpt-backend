@@ -31,7 +31,9 @@ pub fn execute_code(code: String) -> Result<String, String> {
             Some((rest, last)) => {
                 // We'll have to check the last line
                 let last_line = last.trim();
-                if (last_line.contains('(') || last_line.contains("import"))  && !last_line.contains("plt.show()") {
+                if (last_line.contains('(') || last_line.contains("import"))
+                    && !last_line.contains("plt.show()")
+                {
                     // If the last line contains a "(", it's likely a function call, which we can't evaluate.
                     // If it contains "import", it's likely an import statement, which we also can't evaluate.
                     // The exception is if it's a variable assignment, but we can't really check that.
@@ -61,7 +63,6 @@ pub fn execute_code(code: String) -> Result<String, String> {
         }
 
         if let Some(last_line) = last_line {
-
             // Because we evaluate and don't execute, we have to handle it differently.
             // For example, all LLMs are used to calling plt.show() at the end of their code.
             // It's in all the examples and if you were in a jupyter notebook, you'd need it.
@@ -104,11 +105,7 @@ pub fn execute_code(code: String) -> Result<String, String> {
                         let encoded_image =
                             base64::engine::general_purpose::STANDARD.encode(inner_image);
                         // We'll return the image as a string.
-                        Ok(format!(
-                            "{}\n\nEncoded Image: {}",
-                            content,
-                            encoded_image
-                        ))
+                        Ok(format!("{}\n\nEncoded Image: {}", content, encoded_image))
                     } else {
                         Ok(content.to_string())
                     }

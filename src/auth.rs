@@ -1,8 +1,7 @@
-// For basic authorization. 
+// For basic authorization.
 
 /// For now, we'll just read the auth key from the environment and check it against the key provided in the request.
 pub(crate) static AUTH_KEY: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::new();
-
 
 /// Very simple macro for the API points to call at the beginning to make sure that a request is authorized.
 /// If it isn't, it automatically returns the correct response.
@@ -26,7 +25,7 @@ macro_rules! authorize_or_fail {
                     warn!("Unauthorized request.");
                     return HttpResponse::Unauthorized().body("Unauthorized request.");
                 }
-                // Otherwise, it just worked. 
+                // Otherwise, it just worked.
                 debug!("Authorized request.");
             },
             None => {

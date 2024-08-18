@@ -1,10 +1,12 @@
 use rand::Rng;
-use tracing::{error, trace, warn, debug};
+use tracing::{debug, error, trace, warn};
 
-use crate::chatbot::{types::{ActiveConversation, ConversationState}, ACTIVE_CONVERSATIONS};
+use crate::chatbot::{
+    types::{ActiveConversation, ConversationState},
+    ACTIVE_CONVERSATIONS,
+};
 
 use super::types::StreamVariant;
-
 
 /// Helper function to return an ID for a new conversation.
 /// Currently unused, the thread IDs come from the frontend.
@@ -83,7 +85,6 @@ pub fn conversation_state(thread_id: &str) -> Option<ConversationState> {
             None
         }
     }
-
 }
 
 /// Ends the conversation with the given ID, setting the state to Ended.
@@ -112,7 +113,10 @@ pub fn remove_conversation(thread_id: &str) {
     let conversation = match ACTIVE_CONVERSATIONS.lock() {
         Ok(mut guard) => {
             // If we can lock the mutex, we can check if the value is already in use.
-            guard.iter().position(|x| x.id == thread_id).map(|index| guard.remove(index))
+            guard
+                .iter()
+                .position(|x| x.id == thread_id)
+                .map(|index| guard.remove(index))
         }
         Err(e) => {
             error!("Error locking the mutex: {:?}", e);
@@ -122,7 +126,11 @@ pub fn remove_conversation(thread_id: &str) {
 
     if let Some(conversation) = conversation {
         // If we found the conversation, we'll write it to disk.
-        trace!("Removed conversation with thread_id: {}: {:?}", thread_id, conversation);
+        trace!(
+            "Removed conversation with thread_id: {}: {:?}",
+            thread_id,
+            conversation
+        );
         debug!("Writing conversation to disk.");
 
         // Before we'll write it to disk, we'll fold all the consecutive Assistant messages into one.
@@ -155,7 +163,10 @@ fn concat_variants(input: Vec<StreamVariant>) -> Vec<StreamVariant> {
                     assistant_buffer.clear();
                 }
                 if !code_buffer.0.is_empty() {
-                    output.push(StreamVariant::Code(code_buffer.0.clone(), code_buffer.1.clone()));
+                    output.push(StreamVariant::Code(
+                        code_buffer.0.clone(),
+                        code_buffer.1.clone(),
+                    ));
                     code_buffer.0.clear();
                     code_buffer.1.clear();
                 }
@@ -199,6 +210,6 @@ pub fn get_conversation(thread_id: &str) -> Option<Vec<StreamVariant>> {
         }
     };
 
-    // Because the conversation is stored in the global variable, it might not have concatinated the assistant and code messages yet. 
+    // Because the conversation is stored in the global variable, it might not have concatinated the assistant and code messages yet.
     found_conversation.map(concat_variants) // If the conversation is found, we'll concatenate the messages, else we'll return None.
 }

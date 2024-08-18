@@ -1,9 +1,7 @@
-use tracing::{warn, debug};
-
-
+use tracing::{debug, warn};
 
 /// Checks whether the given code passes the basic safety checks.
-/// The code is should actually be in JSON format, but our checks should be able to handle that. 
+/// The code is should actually be in JSON format, but our checks should be able to handle that.
 pub fn code_is_likely_safe(code: &String) -> bool {
     // For now, we'll implement a simple check: test whether a "dangerous pattern" is present.
 
@@ -35,12 +33,11 @@ pub fn code_is_likely_safe(code: &String) -> bool {
     true
 }
 
-
 /// Sanitizes the code for problems that we want to avoid.
 /// This isn't something like rm rf, but instead things like using the wrong matplotlib backend.
 pub fn sanitize_code(code: String) -> String {
     let mut code = code;
-    // Matplotlib backend selection: we are on a linux server and don't do interactive plotting, 
+    // Matplotlib backend selection: we are on a linux server and don't do interactive plotting,
     // so we enforce the Agg backend.
 
     // If either matplotlib or `plt` is found in the code, we'll add the backend selection.

@@ -7,36 +7,37 @@ use crate::chatbot::types::StreamVariant;
 
 use super::thread_storage::read_thread;
 
-/// Returns the content of a thread as a Json of List of Strings. 
-/// 
+/// Returns the content of a thread as a Json of List of Strings.
+///
 /// As arguments, it takes in a `thread_id` and an `auth_key`.
-/// 
+///
 /// The thread id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
-/// 
+///
 /// The auth key needs to match the one on the backend for the request to be authorized.
 /// To get the auth key, the user needs to contact the backend administrator.
-/// 
+///
 /// If the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.
-/// 
+///
 /// If the thread id is not given, a BadRequest response is returned.
-/// 
+///
 /// If the thread with the given id is not found, a NotFound response is returned.
-/// 
+///
 /// If the thread is found but cannot be read or cannot be displayed, an InternalServerError response is returned.
 #[documented_function] // writes the docstring into a variable called GET_THREAD_DOCS
 pub async fn get_thread(req: HttpRequest) -> impl Responder {
-
     let qstring = QString::from(req.query_string());
 
-    // First try to authorize the user. 
+    // First try to authorize the user.
     crate::auth::authorize_or_fail!(qstring);
 
     // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {
-        None | Some ("") => { // If no thread_id is provided, we'll return a 400
+        None | Some("") => {
+            // If no thread_id is provided, we'll return a 400
             // If the thread ID is not found, we'll return a 400
             warn!("The User requested a thread without a thread ID.");
-            return HttpResponse::BadRequest().body("Thread ID not found. Please provide a thread_id in the query parameters.");
+            return HttpResponse::BadRequest()
+                .body("Thread ID not found. Please provide a thread_id in the query parameters.");
         }
         Some(thread_id) => thread_id,
     };
@@ -50,7 +51,10 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
             match e.kind() {
                 std::io::ErrorKind::NotFound => {
                     // If the file is not found, we'll return a 404
-                    info!("The User requested thread with ID {} that does not exist.", thread_id);
+                    info!(
+                        "The User requested thread with ID {} that does not exist.",
+                        thread_id
+                    );
                     return HttpResponse::NotFound().body("Thread not found.");
                 }
                 std::io::ErrorKind::PermissionDenied => {
@@ -69,7 +73,10 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
     };
 
     // Because we don't want the user to see the prompt when they request the thread, we'll remove it.
-    let result = result.into_iter().filter(|x|! matches!(x, StreamVariant::Prompt(_))).collect::<Vec<_>>();
+    let result = result
+        .into_iter()
+        .filter(|x| !matches!(x, StreamVariant::Prompt(_)))
+        .collect::<Vec<_>>();
 
     // We can now return the content as a JSON response using serde_json
 

@@ -1,6 +1,6 @@
 // For all the things that is needed in the background for the chatbot to work.
 
-// Relays the files from this folder up 
+// Relays the files from this folder up
 
 /// Contains all common types and implementations for the chatbot.
 pub mod types;

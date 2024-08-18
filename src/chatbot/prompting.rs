@@ -16,9 +16,7 @@ pub static STARTING_PROMPT_JSON: Lazy<String> = Lazy::new(|| {
 /// All messages that should be added at the start of a new conversation.
 /// Consists of a starting prompt and a few example conversations.
 pub static STARTING_PROMPT: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::new(|| {
-    let mut messages = vec![ChatCompletionRequestMessage::System(
-        INITIAL_PROMPT.clone(),
-    )];
+    let mut messages = vec![ChatCompletionRequestMessage::System(INITIAL_PROMPT.clone())];
     messages.extend(EXAMPLE_CONVERSATIONS.clone());
     messages
 });

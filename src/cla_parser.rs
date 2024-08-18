@@ -2,7 +2,6 @@
 
 use clap::{self, crate_authors, Parser};
 
-
 #[derive(Parser, Debug)]
 #[command(
     version, // Automatically fills in the version from Cargo.toml
@@ -11,7 +10,6 @@ use clap::{self, crate_authors, Parser};
     author = crate_authors!(),
 )]
 pub struct Args {
-
     /// Make the program verbose, printing debug info too, then trace info. Can be used multiple times.
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,

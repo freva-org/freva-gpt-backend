@@ -6,7 +6,7 @@ use super::code_interpreter::parse_input::start_code_interpeter;
 
 /// Routes a tool call to the appropriate function.
 pub fn route_call(func_name: String, arguments: Option<String>, id: String) -> Vec<StreamVariant> {
-    // Placeholder to disable the code interpreter 
+    // Placeholder to disable the code interpreter
     // let variant = StreamVariant::CodeOutput("The code interpreter was successfully called, but is currently disabled. Please wait for the next major version for it to be stabilized. ".to_string(), id);
     // return vec![variant];
 

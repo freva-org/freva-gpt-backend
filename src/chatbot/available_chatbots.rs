@@ -7,7 +7,7 @@ pub enum AvailableChatbots {
     // Here will be more chatbots, like LLAMA, etc.
 }
 
-impl From<AvailableChatbots> for String{
+impl From<AvailableChatbots> for String {
     fn from(val: AvailableChatbots) -> Self {
         match val {
             AvailableChatbots::OpenAI(model) => match model {
