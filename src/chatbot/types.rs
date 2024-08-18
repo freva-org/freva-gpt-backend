@@ -46,13 +46,13 @@ pub struct ActiveConversation {
 /// CodeOutput: The output of the code that was executed, as a String. Also not formatted.
 ///
 /// Image: An image that was generated during the conversation, as a String. The image is Base64 encoded.
-/// An example of this would be a matplotlib plot.
+/// An example of this would be a matplotlib plot. The image format should always be PNG.
 ///
 /// ServerError: An error that occured on the server(backend) side, as a String. Contains the error message.
-/// The client should realize that this error occured and handle it accordingly; most ServerErrors are immeadiately followed by a StreamEnd.
+/// The client should realize that this error occured and handle it accordingly; ServerErrors should immeadiately be followed by a StreamEnd.
 ///
 /// OpenAI Error: An error that occured on the OpenAI side, as a String. Contains the error message.
-/// These are often for the rate limits, but can also be for other things, i.E. if the API is down.
+/// These are often for the rate limits, but can also be for other things, i.E. if the API is down or a tool call took too long.
 ///
 /// CodeError: The Code from the LLM could not be executed or there was some other error while setting up the code execution.
 ///
@@ -61,6 +61,8 @@ pub struct ActiveConversation {
 ///
 /// ServerHint: The Server hints something to the client. This is primarily used for giving the thread_id, but also for warnings.
 /// The Content is in JSON format, with the key being the hint and the value being the content. Currently, only the keys "thread_id" and "warning" are used.
+/// An example for a ServerHint packet would be `{"variant": "ServerHint", "content": "{\"thread_id\":\"1234\"}"}`. 
+/// That means that the content needs to be parsed as JSON to get the actual content.
 #[derive(Debug, Serialize, Clone, Documented, strum::VariantNames)]
 #[serde(tag = "variant", content = "content")] // Makes it so that the variant names are inside the object and the content is held in the content field.
 pub enum StreamVariant {
@@ -84,8 +86,8 @@ pub enum StreamVariant {
     CodeError(String),
     /// The Stream ended. Contains a reason as a String.
     StreamEnd(String),
-    /// The Server hints something to the client. Primarily used for giving the thread_id. May later be used for other things.
-    /// Syntax of content <key>:<value>, for now key is "thread_id" and value is the thread_id.
+    /// The Server hints something to the client. Primarily used for giving the thread_id or warning the frontend. May later be used for other things.
+    /// The content itself is in JSON format, with the key being the hint and the value being the content.
     ServerHint(String),
 }
 

@@ -1,14 +1,4 @@
 // all available chatbots the backend supports
-
-// use async_openai::{config::OpenAIConfig, Client};
-// /// Prints all available models to the console
-// pub async fn debug_print_all_models() {
-//     let config = OpenAIConfig::new(); // Because dotenvy loads into std::env::var, we don't need to pass the api key here. This only works if the api key is in the .env file and was already loaded.
-//     let client = Client::with_config(config);
-//     let models = client.models().list().await;
-//     println!("Available models:{:?}", models);
-// }
-
 pub static DEFAULTCHATBOT: AvailableChatbots = AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini);
 
 #[derive(Debug, Clone, Copy)]

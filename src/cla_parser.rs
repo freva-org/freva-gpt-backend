@@ -5,9 +5,9 @@ use clap::{self, crate_authors, Parser};
 
 #[derive(Parser, Debug)]
 #[command(
-    version,
+    version, // Automatically fills in the version from Cargo.toml
     about = "Freva-GPT2-backend: Backend for the second version of the Freva-GPT project",
-    long_about = "Freva-GPT2-backend: Starts the backend server for the Rest-like API to be used by the frontend.",
+    long_about = "Freva-GPT2-backend: Starts the backend server for the Rest-like API to be used by the frontend. Serves the chatbot and manages calls of the code_interpreter.",
     author = crate_authors!(),
 )]
 pub struct Args {

@@ -23,7 +23,7 @@ pub fn start_code_interpeter(arguments: Option<String>, id: String) -> Vec<Strea
     if !code_is_likely_safe(&arguments.clone().unwrap_or_default()) {
         // We don't want to give a potential attacker any information about why the code failed.
         return vec![StreamVariant::CodeOutput(
-            "An unexpected error occurred while running the code interpreter. Please try again."
+            "A sudden and unexpected error occurred while running the code interpreter. Please try again."
                 .to_string(),
             id,
         )];

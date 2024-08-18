@@ -24,7 +24,6 @@ async fn main() -> std::io::Result<()> {
     let args = cla_parser::Args::parse();
 
     // If we are in code_interpreter mode, run the code interpreter and have it exit without starting the server.
-    //TODO: Test this! Does it work as expected?
     if let Some(code) = &args.code_interpreter {
         run_code_interpeter(code.clone());
     }
@@ -86,14 +85,6 @@ async fn main() -> std::io::Result<()> {
     // Start the server
     HttpServer::new(|| {
         let services = services![
-            // web::scope("/api/chatbot/ping").route("", web::get().to(static_serve::ping)), // Ping, just reply with a pong
-            // web::scope("/api/chatbot/help").route("", web::get().to(static_serve::ping)), // Also reply with a pong
-            // web::scope("/api/chatbot/stop").route("", web::get().to(chatbot::stop::stop)), // Stop, stop a specific conversation by thread ID.
-            // web::scope("/api/chatbot/stop").route("", web::post().to(chatbot::stop::stop)), // Stop, stop a specific conversation by thread ID. Both post and get are allowed.
-            // web::scope("/api/chatbot/docs").route("", web::get().to(static_serve::docs)), // Docs, return the documentation of the API.
-            // web::scope("/api/chatbot/getthread").route("", web::get().to(chatbot::get_thread::get_thread)), // GetThread, get the thread of a specific conversation by thread ID.
-            // web::scope("/api/chatbot/streamresponse")
-            //     .route("", web::get().to(chatbot::stream_response::stream_response)), // StreamResponse, stream the response of a specific conversation by thread ID.
             web::scope("/api/chatbot")
                 .route("/ping", web::get().to(static_serve::ping)) // Ping, just reply with a pong
                 .route("/help", web::get().to(static_serve::ping)) // Also reply with a pong

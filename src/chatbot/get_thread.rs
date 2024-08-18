@@ -1,4 +1,5 @@
 use actix_web::{HttpRequest, HttpResponse, Responder};
+use documented::documented_function;
 use qstring::QString;
 use tracing::{debug, error, info, trace, warn};
 
@@ -22,6 +23,7 @@ use super::thread_storage::read_thread;
 /// If the thread with the given id is not found, a NotFound response is returned.
 /// 
 /// If the thread is found but cannot be read or cannot be displayed, an InternalServerError response is returned.
+#[documented_function] // writes the docstring into a variable called GET_THREAD_DOCS
 pub async fn get_thread(req: HttpRequest) -> impl Responder {
 
     let qstring = QString::from(req.query_string());

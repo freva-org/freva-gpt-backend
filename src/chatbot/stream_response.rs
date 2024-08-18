@@ -5,6 +5,7 @@ use async_openai::types::{
     ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, CreateChatCompletionRequest,
     CreateChatCompletionRequestArgs,
 };
+use documented::documented_function;
 use futures::{stream, StreamExt};
 use once_cell::sync::Lazy;
 use tracing::{debug, error, info, trace, warn};
@@ -33,7 +34,7 @@ use crate::{
 /// If the stream creates a new thread, the new thread_id will be sent as a ServerHint.
 /// The stream always ends with a StreamEnd event, unless a server error occurs.
 ///
-/// A usual stream cosists mostly of Assistant messages many times a second. This is to give the impression of a real-time conversation.
+/// A usual stream consists mostly of Assistant messages many times a second. This is to give the impression of a real-time conversation.
 ///
 /// If the input is not given, a BadRequest response is returned.
 ///
@@ -42,7 +43,7 @@ use crate::{
 /// If the thread_id does not point to an existing thread, an InternalServerError response is returned.
 ///
 /// If the stream fails due to something else on the backend, an InternalServerError response is returned.
-///
+#[documented_function]
 pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let qstring = qstring::QString::from(req.query_string());
 

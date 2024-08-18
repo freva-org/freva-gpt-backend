@@ -1,6 +1,7 @@
 // Handles the stop request from the client.
 
 use actix_web::{HttpRequest, HttpResponse, Responder};
+use documented::documented_function;
 use tracing::{debug, trace, warn};
 
 use super::{types::ConversationState, ACTIVE_CONVERSATIONS};
@@ -18,6 +19,7 @@ use super::{types::ConversationState, ACTIVE_CONVERSATIONS};
 /// If the thread id is not given, a BadRequest response is returned.
 /// 
 /// If there is an error stopping the conversation, an InternalServerError response is returned.
+#[documented_function]
 pub async fn stop(req: HttpRequest) -> impl Responder {
     #[derive(Debug)]
     enum StopResult {
