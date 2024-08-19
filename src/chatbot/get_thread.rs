@@ -7,6 +7,7 @@ use crate::chatbot::types::StreamVariant;
 
 use super::thread_storage::read_thread;
 
+/// # Get Thread
 /// Returns the content of a thread as a Json of List of Strings.
 ///
 /// As arguments, it takes in a `thread_id` and an `auth_key`.

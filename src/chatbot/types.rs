@@ -66,7 +66,7 @@ pub struct ActiveConversation {
 #[derive(Debug, Serialize, Clone, Documented, strum::VariantNames)]
 #[serde(tag = "variant", content = "content")] // Makes it so that the variant names are inside the object and the content is held in the content field.
 pub enum StreamVariant {
-    /// The Prompt for the LLM, as JSON; not to be sent to the client.
+    /// The Prompt for the LLM, as JSON; not to be displayed to the user.
     Prompt(String),
     /// The Input of the user, as a String
     User(String),

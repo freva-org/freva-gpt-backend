@@ -25,6 +25,7 @@ use crate::{
     tool_calls::{route_call::route_call, ALL_TOOLS},
 };
 
+/// # Stream Response
 /// Takes in a thread_id, an input and an auth_key and returns a stream of StreamVariants and their content.
 ///
 /// The thread_id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.

@@ -105,13 +105,6 @@ static STOP_SPEC: Lazy<EndpointSpec> = Lazy::new(|| EndpointSpec {
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-static VERSION_JSON: Lazy<serde_json::Value> = Lazy::new(|| {
-    serde_json::Value::Object(serde_json::Map::from_iter(vec![(
-        "Version".to_string(),
-        serde_json::Value::String(VERSION.to_string()),
-    )]))
-});
-
 // Thanks to strum, there's StreamVariant::VARIANTS;
 static STREAMVARIANTS: Lazy<serde_json::Value> = Lazy::new(|| {
     serde_json::Value::Array(
@@ -125,10 +118,13 @@ static STREAMVARIANTS: Lazy<serde_json::Value> = Lazy::new(|| {
 // The entire response object contains the version, streamvariants and all the endpoint specs as a JSON object.
 static RESPONSE: Lazy<serde_json::Value> = Lazy::new(|| {
     serde_json::Value::Object(serde_json::Map::from_iter(vec![
-        ("Version".to_string(), VERSION_JSON.clone()),
-        ("Streamvariants".to_string(), STREAMVARIANTS.clone()),
         (
-            "Endpoints".to_string(),
+            "version".to_string(),
+            serde_json::Value::String(VERSION.to_string()),
+        ),
+        ("streamvariants".to_string(), STREAMVARIANTS.clone()),
+        (
+            "endpoints".to_string(),
             serde_json::Value::Array(vec![
                 serde_json::to_value(&*PING_SPEC).expect("Unable to serialize JSON"),
                 serde_json::to_value(&*DOCS_SPEC).expect("Unable to serialize JSON"),
@@ -143,6 +139,7 @@ static RESPONSE: Lazy<serde_json::Value> = Lazy::new(|| {
 pub static RESPONSE_STRING: Lazy<String> =
     Lazy::new(|| serde_json::to_string_pretty(&*RESPONSE).expect("Unable to serialize JSON"));
 
+/// # Ping
 /// Simply returns a short description of the server's capabilities as well as the backend version.
 /// This is in the JSON format and contains three keys: the version, streamvariants and all the endpoint specs in a list.
 ///
@@ -166,14 +163,20 @@ pub async fn not_found() -> impl Responder {
 const STREAMVARIANTS_DOCS: &str = StreamVariant::DOCS;
 // The other docs come from the other modules, directly above the functions.
 const ALL_DOCS: &str = concatcp!(
+    "\n\n",
     PING_DOCS,
+    "\n\n",
     DOCS_DOCS,
+    "\n\n",
     GET_THREAD_DOCS,
+    "\n\n",
     STREAM_RESPONSE_DOCS,
+    "\n\n",
     STOP_DOCS
 );
-pub const DOCS: &str = concatcp!(VERSION, STREAMVARIANTS_DOCS, ALL_DOCS);
+pub const DOCS: &str = concatcp!("Version: ", VERSION, STREAMVARIANTS_DOCS, ALL_DOCS);
 
+/// # Docs
 /// Returns the documentation for the API.
 ///
 /// Takes no arguments and returns a string with the documentation.

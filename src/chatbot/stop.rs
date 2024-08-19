@@ -8,6 +8,7 @@ use super::{types::ConversationState, ACTIVE_CONVERSATIONS};
 
 // TODO: guarentee panic safety
 
+/// # Stop
 /// Stops the conversation with the given thread ID as soon as possible.
 ///
 /// Takes in a `thread_id` and an `auth_key`.
