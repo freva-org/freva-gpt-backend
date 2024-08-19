@@ -20,7 +20,7 @@ pub fn execute_code(code: String) -> Result<String, String> {
         let globals = PyDict::new_bound(py);
 
         // Because we want the last line to be returned, we'll execute all but the last line.
-        let (rest_lines, last_line) = match code.trim().rsplit_once("\n") {
+        let (rest_lines, last_line) = match code.trim().rsplit_once('\n') {
             // We need to decide how to split up the code. If it's just one line, we put it into the last line, since that's ouput is evaluated by us.
             // If that's not the case, we'll split it up into the last line and the rest of the code.
             // That is, unless the last line is not just a variable, but a function call or something else that doesn't return a value.
@@ -52,12 +52,12 @@ pub fn execute_code(code: String) -> Result<String, String> {
             trace!("Executing code: {}", rest_lines);
             // We'll execute the code in the locals.
             match py.run_bound(&rest_lines, Some(&globals), Some(&locals)) {
-                Ok(_) => {
+                Ok(()) => {
                     info!("Code executed successfully.");
                     // But we continue with the last line.
                 }
                 Err(e) => {
-                    return Err(format_pyerr(e, py));
+                    return Err(format_pyerr(&e, py));
                 }
             }
         }
@@ -95,7 +95,7 @@ pub fn execute_code(code: String) -> Result<String, String> {
                     let image = match maybe_plt {
                         Ok(Some(inner)) => {
                             // If we have a plt module, we'll try to get an image from it.
-                            try_get_image(inner)
+                            try_get_image(&inner)
                         }
                         _ => None,
                     };
@@ -105,16 +105,16 @@ pub fn execute_code(code: String) -> Result<String, String> {
                         let encoded_image =
                             base64::engine::general_purpose::STANDARD.encode(inner_image);
                         // We'll return the image as a string.
-                        Ok(format!("{}\n\nEncoded Image: {}", content, encoded_image))
+                        Ok(format!("{content}\n\nEncoded Image: {encoded_image}"))
                     } else {
                         Ok(content.to_string())
                     }
                 }
-                Err(e) => Err(format_pyerr(e, py)),
+                Err(e) => Err(format_pyerr(&e, py)),
             }
         } else {
             // If there is no last line, we'll just return an empty string.
-            Ok("".to_string())
+            Ok(String::new())
         }
     });
 
@@ -123,13 +123,13 @@ pub fn execute_code(code: String) -> Result<String, String> {
     // Before the output is returned, we should flush the stdout and stderr, in case the python code has printed something without flushing.
     // This is important, as we want to make sure that the output is complete.
     match (std::io::stdout().flush(), std::io::stderr().flush()) {
-        (Ok(_), Ok(_)) => {
+        (Ok(()), Ok(())) => {
             // Both flushes were successful.
         }
-        (Err(e), Ok(_)) => {
+        (Err(e), Ok(())) => {
             warn!("Error flushing stdout: {:?}", e);
         }
-        (Ok(_), Err(e)) => {
+        (Ok(()), Err(e)) => {
             warn!("Error flushing stderr: {:?}", e);
         }
         (Err(e1), Err(e2)) => {
@@ -142,7 +142,7 @@ pub fn execute_code(code: String) -> Result<String, String> {
 }
 
 /// Helper function to turn a PyErr into a string for the LLM
-fn format_pyerr(e: PyErr, py: Python) -> String {
+fn format_pyerr(e: &PyErr, py: Python) -> String {
     // The type is "PyErr", which we will just just use to get the traceback.
     trace!("Error executing code: {:?}", e);
     match e.traceback_bound(py) {
@@ -150,21 +150,21 @@ fn format_pyerr(e: PyErr, py: Python) -> String {
             // We'll just return the traceback for now.
             match traceback.format() {
                 Ok(tb_string) => {
-                    info!("Traceback: {}", tb_string);
-                    format!("{}{}", tb_string, e)
+                    info!("Traceback: {tb_string}");
+                    format!("{tb_string}{e}")
                 }
                 Err(inner_e) => {
                     // If we can't get the traceback, we shouldn't just return the error message, because that's about not being able to get the traceback.
                     // Instead, we'll fall back to just the Python error message.
-                    warn!("Error getting traceback: {:?}", inner_e);
-                    format!("(An error occured; no traceback available)\n{}", e)
+                    warn!("Error getting traceback: {inner_e:?}");
+                    format!("(An error occured; no traceback available)\n{e}")
                 }
             }
         }
         None => {
             // That's weird and should never happen, but we can fall back to just printing e.
-            warn!("No traceback found for error: {:?}", e);
-            format!("(An error occured; no traceback available)\n{}", e)
+            warn!("No traceback found for error: {e:?}");
+            format!("(An error occured; no traceback available)\n{e}")
         }
     }
 }
@@ -173,7 +173,7 @@ fn format_pyerr(e: PyErr, py: Python) -> String {
 
 /// Helper function to try to get an image from the plt module.
 /// That means that there is probably a plot that we want to return.
-fn try_get_image(plt: Bound<PyAny>) -> Option<Vec<u8>> {
+fn try_get_image(plt: &Bound<PyAny>) -> Option<Vec<u8>> {
     // I tested this before in a sandbox.
     // First get the string representation of the plt module.
     let name = plt.to_string();
@@ -184,10 +184,7 @@ fn try_get_image(plt: Bound<PyAny>) -> Option<Vec<u8>> {
         match plt.call_method1("savefig", ("/tmp/matplotlib_plt.png",)) {
             Err(e) => {
                 // Something went wrong, but we don't know what.
-                println!(
-                    "Tried to retrieve image from python code, but failed: {:?}",
-                    e
-                );
+                println!("Tried to retrieve image from python code, but failed: {e:?}",);
             }
             Ok(_) => {
                 // The file was saved successfully.
@@ -202,7 +199,7 @@ fn try_get_image(plt: Bound<PyAny>) -> Option<Vec<u8>> {
                     }
                     Err(e) => {
                         // We couldn't read the file.
-                        println!("Tried to retrieve image from python code, but failed to read the file: {:?}", e);
+                        println!("Tried to retrieve image from python code, but failed to read the file: {e:?}");
                         return None;
                     }
                 }

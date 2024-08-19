@@ -21,7 +21,7 @@ pub fn code_is_likely_safe(code: &String) -> bool {
         "__import__",
     ];
 
-    for pattern in DANGEROUS_PATTERNS.iter() {
+    for pattern in &DANGEROUS_PATTERNS {
         if code.contains(pattern) {
             warn!("The code contains a dangerous pattern: {}", pattern);
             debug!("The code is: {}", code);
@@ -42,7 +42,7 @@ pub fn sanitize_code(code: String) -> String {
 
     // If either matplotlib or `plt` is found in the code, we'll add the backend selection.
     if code.contains("matplotlib") || code.contains("plt") {
-        code = format!("import matplotlib\nmatplotlib.use('agg')\n{}", code);
+        code = format!("import matplotlib\nmatplotlib.use('agg')\n{code}");
     }
 
     code

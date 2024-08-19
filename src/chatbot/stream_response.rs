@@ -125,8 +125,8 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     };
 
     // We'll also add a ServerHint about the thread_id to the messages.
-    let server_hint = StreamVariant::ServerHint(format!("{{\"thread_id\": \"{}\"}}", thread_id)); // resolves to {"thread_id": "<thread_id>"}
-                                                                                                  // Also don't forget to add the user's input to the thread file.
+    let server_hint = StreamVariant::ServerHint(format!("{{\"thread_id\": \"{thread_id}\"}}")); // resolves to {"thread_id": "<thread_id>"}
+                                                                                                // Also don't forget to add the user's input to the thread file.
     add_to_conversation(
         &thread_id,
         vec![server_hint, StreamVariant::User(input.clone())],
@@ -212,8 +212,7 @@ async fn create_and_stream(
             // Even higher priority than stopping the stream is sending the thread_id hint.
             if should_hint_thread_id {
                 // If we should hint the thread_id, we'll send a ServerHint event.
-                let hint =
-                    StreamVariant::ServerHint(format!("{{\"thread_id\": \"{}\"}}", thread_id)); // resolves to {"thread_id":"<thread_id>"}
+                let hint = StreamVariant::ServerHint(format!("{{\"thread_id\": \"{thread_id}\"}}")); // resolves to {"thread_id":"<thread_id>"}
                 return Some((
                     Ok::<actix_web::web::Bytes, std::convert::Infallible>(
                         actix_web::web::Bytes::copy_from_slice(
@@ -453,7 +452,7 @@ async fn create_and_stream(
                                                         let arguments = function
                                                             .arguments
                                                             .clone()
-                                                            .unwrap_or("".to_string());
+                                                            .unwrap_or(String::new());
 
                                                         // Because of the genius way OpenAI constructed this very good API, the name of the tool call is only sent in the very first delta.
                                                         // So if the name is not None, we store it in the tool_name variable that is passed to the next iteration of the stream.
@@ -463,7 +462,7 @@ async fn create_and_stream(
                                                                 "New tool call started: {:?}",
                                                                 name
                                                             );
-                                                            tool_name = Some(name.clone());
+                                                            tool_name = Some(name);
                                                         }
 
                                                         // Another things is that the arguments for the tool calls, even though they are strings, are not repeated when the actual tool call is made.
@@ -517,7 +516,7 @@ async fn create_and_stream(
                                     (None, None, None) => {
                                         warn!("No content found in response and no reason to stop given; treating this as an empty Assistant response: {:?}", response);
                                         // vec![StreamVariant::StreamEnd("No content found in response and no reason to stop given.".to_string())]
-                                        vec![StreamVariant::Assistant("".to_string())]
+                                        vec![StreamVariant::Assistant(String::new())]
                                     }
                                     (Some(tool_calls), Some(string_delta), _) => {
                                         warn!("Tool call AND content found in response, the API specified that this couldn't happen: {:?} and {:?}", tool_calls, string_delta);

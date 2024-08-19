@@ -1,7 +1,7 @@
 // For basic authorization.
 
 /// For now, we'll just read the auth key from the environment and check it against the key provided in the request.
-pub(crate) static AUTH_KEY: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::new();
+pub static AUTH_KEY: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::new();
 
 /// Very simple macro for the API points to call at the beginning to make sure that a request is authorized.
 /// If it isn't, it automatically returns the correct response.
@@ -13,13 +13,10 @@ macro_rules! authorize_or_fail {
 
             Some(key) => {
                 // Try to retrieve the key, it should always work.
-                let auth_key = match crate::auth::AUTH_KEY.get() {
-                    Some(key) => key,
-                    None => {
+                let Some(auth_key) = crate::auth::AUTH_KEY.get() else {
                         error!("No key found in the environment. Sending 500.");
                         return HttpResponse::InternalServerError().body("No auth key found in the environment; Authorization failed.");
-                    }
-                };
+                    };
                 // If the key is not the same as the one in the environment, we'll return a 401.
                 if key != auth_key {
                     warn!("Unauthorized request.");

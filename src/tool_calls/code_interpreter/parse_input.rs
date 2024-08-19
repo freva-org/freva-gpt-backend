@@ -127,7 +127,7 @@ pub fn start_code_interpeter(arguments: Option<String>, id: String) -> Vec<Strea
             };
 
             // The LLM probably needs both the stdout and stderr, so we'll return both.
-            let stdout_stderr = format!("{}\n{}", stdout_short, stderr_short);
+            let stdout_stderr = format!("{stdout_short}\n{stderr_short}");
             if stdout_stderr.is_empty() {
                 warn!("The code interpreter returned an empty output.");
             }
@@ -158,8 +158,7 @@ pub fn run_code_interpeter(arguments: String) {
 
     // The LLM wants the output, we'll return it here.
     let output = match output {
-        Ok(output) => output,
-        Err(output) => output, // We'll just return the error message.
+        Err(output) | Ok(output) => output, // We'll just return the error message.
     };
 
     print!("{}", output.trim()); // No trailing newline.

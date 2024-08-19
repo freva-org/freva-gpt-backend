@@ -199,16 +199,32 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
             Self::CodeError(_) | Self::OpenAIError(_) | Self::ServerError(_) => Err(ConversionError::VariantHide("Error variants should not be passed to the LLM, it doesn't need to know about them.")),
             Self::StreamEnd(_) => Err(ConversionError::VariantHide("StreamEnd variants are only for use on the server side, not for the LLM.")),
             Self::ServerHint(s) => {
-                // We do check that only the thread_id is sent. 
-                // let first_part = s.splitn(2, ':').collect::<Vec<&str>>()[0];
-                let (first_part, _) = s.split_once(':').unwrap_or(("",""));
-                if first_part != "thread_id" && first_part != "warning" {
-                    warn!("ServerHint contained an unknown key: {:?}", first_part);
-                    Err(ConversionError::ParseError("ServerHint contained an unknown key."))
-            } else {
-                // The ServerHint is only used to send the thread_id to the client, so we don't need to send it to OpenAI.
-                Err(ConversionError::VariantHide("ServerHint variants are only for use on the server side, not for the LLM."))
-            }
+                // The content is JSON, we check whether it's valid and that its key is either "thread_id" or "warning".
+                let hint: serde_json::Value = match serde_json::from_str(&s) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        warn!("Error parsing ServerHint content, ignoring and passing value to client blindly: {:?}", e);
+                        return Err(ConversionError::ParseError("Error parsing ServerHint content."));
+                    }
+                };
+                // We expect the hint to be of type object
+                if let serde_json::Value::Object(hint) = hint {
+                    
+                    if hint.keys().next().is_none() {
+                        warn!("ServerHint content is empty! Passing to the client nonetheless.");
+                        return Err(ConversionError::ParseError("ServerHint content is empty."));
+                    }
+                    // We now know that the hint is a non-empty JSON object, we can return it.
+                    Ok(vec![ChatCompletionRequestMessage::System(
+                        ChatCompletionRequestSystemMessage {
+                            name: Some("ServerHint".to_string()),
+                            content: s,
+                        },
+                    )])
+                } else {
+                    warn!("ServerHint content is not an object, ignoring and passing value to client blindly.");
+                    Err(ConversionError::ParseError("ServerHint content is not an object."))
+                }
         }
         }
     }
@@ -276,6 +292,8 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
                 };
 
                 // There should never be tool or function calls here
+                #[allow(deprecated)]
+                // We need to match on the function_call, despite it being a deprecated field. This silences that warning.
                 if let (Some(_), _) | (_, Some(_)) = (content.tool_calls, content.function_call) {
                     error!("Tried to convert an Assistant Message that contained a tool or function call. This should not happen and is not supported.");
                     Err("Assistant Message contained a tool or function call. This should not happen and is not supported.")
@@ -347,32 +365,25 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
             }
             Err(ConversionError::CodeCall(content, id)) => {
                 // We need to use the Code Call to update the content of the buffer, or initialize it.
+                let tool_call = ChatCompletionMessageToolCall {
+                    id,
+                    r#type: ChatCompletionToolType::Function,
+                    function: FunctionCall {
+                        name: "code_interpreter".to_string(),
+                        arguments: content,
+                    },
+                };
                 if let Some(buffer) = assistant_message_buffer.clone() {
-                    let tool_call = ChatCompletionMessageToolCall {
-                        id,
-                        r#type: ChatCompletionToolType::Function,
-                        function: FunctionCall {
-                            name: "code_interpreter".to_string(),
-                            arguments: content,
-                        },
-                    };
                     assistant_message_buffer = Some(
                         // Set the tool call in the buffer.
                         ChatCompletionRequestAssistantMessage {
                             tool_calls: Some(vec![tool_call]),
                             ..buffer
                         },
-                    )
+                    );
                 } else {
                     // If the buffer is empty, we'll initialize it.
-                    let tool_call = ChatCompletionMessageToolCall {
-                        id,
-                        r#type: ChatCompletionToolType::Function,
-                        function: FunctionCall {
-                            name: "code_interpreter".to_string(),
-                            arguments: content,
-                        },
-                    };
+
                     assistant_message_buffer = Some(
                         // Set the tool call in the buffer.
                         ChatCompletionRequestAssistantMessage {
@@ -381,7 +392,7 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
                             name: Some("frevaGPT".to_string()),
                             ..Default::default() // because else it complain that that field is deprecated.
                         },
-                    )
+                    );
                 }
             }
             Err(ConversionError::ParseError(e)) => {
@@ -397,7 +408,7 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
     }
 
     // If the buffer is not empty, we need to push it to the output.
-    if let Some(buffer) = assistant_message_buffer.clone() {
+    if let Some(buffer) = assistant_message_buffer {
         all_oai_messages.push(ChatCompletionRequestMessage::Assistant(buffer));
     }
 

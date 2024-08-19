@@ -72,8 +72,7 @@ async fn main() -> std::io::Result<()> {
                 e
             );
             eprintln!(
-                "Error reading the authentication string from the environment variables: {:?}",
-                e
+                "Error reading the authentication string from the environment variables: {e:?}"
             );
             std::process::exit(1);
         }

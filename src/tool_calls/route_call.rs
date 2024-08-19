@@ -14,9 +14,9 @@ pub fn route_call(func_name: String, arguments: Option<String>, id: String) -> V
     if func_name == "code_interpreter" {
         // The functionality lies in the seperate module.
 
-        start_code_interpeter(arguments, id.clone())
+        start_code_interpeter(arguments, id)
     } else {
         // If the function name is not recognized, we'll return an error message.
-        vec![StreamVariant::CodeOutput(format!("The function '{}' is not recognized. Currently, only \"code_interpreter\" is supported.", func_name), id)]
+        vec![StreamVariant::CodeOutput(format!("The function '{func_name}' is not recognized. Currently, only \"code_interpreter\" is supported."), id)]
     }
 }

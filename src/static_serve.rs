@@ -89,7 +89,7 @@ static STREAMRESPONSE_SPEC: Lazy<EndpointSpec> = Lazy::new(|| EndpointSpec {
 
 static STOP_SPEC: Lazy<EndpointSpec> = Lazy::new(|| EndpointSpec {
     name: "stop",
-    return_type: serde_json::Value::String("".to_string()),
+    return_type: serde_json::Value::String(String::new()),
     params: serde_json::Map::from_iter(vec![
         (
             "thread_id".to_string(),
@@ -110,7 +110,7 @@ static STREAMVARIANTS: Lazy<serde_json::Value> = Lazy::new(|| {
     serde_json::Value::Array(
         StreamVariant::VARIANTS
             .iter()
-            .map(|v| serde_json::Value::String(v.to_string()))
+            .map(|v| serde_json::Value::String((*v).to_string()))
             .collect(),
     )
 });
