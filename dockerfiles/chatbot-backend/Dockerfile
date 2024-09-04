@@ -7,6 +7,9 @@ RUN apk add --no-cache rust cargo
 # Install python 3.12
 RUN apk add --no-cache python3
 
+# Install pip
+RUN python3 -m ensurepip
+
 # Copy over the requirements file and install the dependencies
 COPY requirements.txt /python/requirements.txt
 RUN pip install -r /python/requirements.txt
