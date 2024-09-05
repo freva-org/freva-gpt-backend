@@ -1,0 +1,6 @@
+# Directory for the results of the rust compilation. Mounts to the container, significantly cutting down on non-first compile times.
+# Ignore everything in this directory
+*
+# Except this file
+!.gitignore
+

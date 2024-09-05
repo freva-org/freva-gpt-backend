@@ -1,5 +1,5 @@
-/target
-/logs
+/target/*
+/logs/*
 .env
-/threads
+/threads/*
 .DS_Store
