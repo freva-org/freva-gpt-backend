@@ -20,9 +20,9 @@ RUN dnf install -y rust cargo
 
 # Create virtual environment for app
 RUN conda create --name env 
-RUN conda init bash && \
-. /root/.bashrc && \
-conda activate env
+RUN conda init bash 
+RUN echo "conda activate env" >> ~/.bashrc
+RUN source ~/.bashrc && conda activate env
 
 # Install the python packages
 RUN conda install -c conda-forge numpy matplotlib netcdf4 cartopy contourpy pandas xarray
@@ -41,10 +41,11 @@ COPY .env /app/.env
 
 # Add another environment variable so the app can have a valid python instance
 # ENV PYTHONHOME /usr/conda
-ENV PYTHONUSERBASE /opt/conda
+# ENV PYTHONUSERBASE /opt/conda
 # ENV PYTHONPLATLIBDIR lib
 # ENV PATH="$PATH:/usr/conda/lib:/usr/conda/bin"
-ENV PYO3_PYTHON=/opt/conda/bin/python3.12
+ENV PYTHONPATH=/opt/conda/envs/env/lib/python3.12/site-packages
+# ENV PYO3_PYTHON=/opt/conda/bin/python3.12 # might not be needed anymore?
 
 
 # Run the Rust code in very verbose mode
