@@ -1,10 +1,37 @@
 // Handles basic prompting for the chatbot.
 
 use async_openai::types::{
-    ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage,
-    ChatCompletionRequestSystemMessage, ChatCompletionRequestUserMessage,
+    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage, ChatCompletionRequestToolMessage, ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall
 };
 use once_cell::sync::Lazy;
+
+/// Helper macro to simplify the creation of assistant messages.
+macro_rules! assistant_message {
+    ($content:expr) => {
+        /// Base, only content.
+        ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+            name: Some("frevaGPT".to_string()),
+            content: Some($content.to_string()),
+            ..Default::default()
+        })
+    };
+    ($content:expr, $call_id:expr, $code:expr) => {
+        /// some content and a single tool call. Because all tool calls need an ID, we need to have the caller provide it.
+        ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+            name: Some("frevaGPT".to_string()),
+            content: Some($content.to_string()),
+            tool_calls: Some(vec![ChatCompletionMessageToolCall {
+                id: $call_id.to_string(),
+                r#type: ChatCompletionToolType::Function,
+                function: FunctionCall {
+                    name: "code_interpreter".to_string(),
+                    arguments: $code.to_string(),
+                }
+            }]),
+            ..Default::default()
+        })
+    }
+}
 
 /// The starting prompt including all messages, converted to JSON.
 pub static STARTING_PROMPT_JSON: Lazy<String> = Lazy::new(|| {
@@ -34,15 +61,15 @@ const STARTING_PROMPT_STR: &str = r#"1. You are FrevaGPT, a helpful AI Assistant
 2. You have access to files at "/data/inputFiles/DATA/(tas|sfcwind|pr)/(ann|mon|day|day_germany)/data.nc" . They are all means and have a resolution of 2 degrees, except day_germany which has a resolution of 0.25 degrees.
 3. That means that the file for monthly temperature data lies at "/data/inputFiles/DATA/tas/mon/data.nc".
 4. You also have access to all files of the XCES project, which are located at /work/bm1159/XCES/data4xces. The data is stored in NetCDF format. You don't have access to any other files or data. 
-4. The Temperature is given in Kelvin, the precipitation in millimeters per year and the wind in meters per second. The annular and monthly files are global, the daily ones are only over Europe, the day_germany ones over germany.
-5. Analyze data first using xarray to understand the meta information (longitudes, latitudes, variables, units) of the used file. Use the type information to inform further decisions.
-6. Always explain what you are going to do; break it down into items and then work through them. 
-7. Always load numpy, matplotlib, xarray. Never load NetCDF4. Use the Code Interpreter and always code in Python.
-8. Use xarray and numpy for calculations. Don't try to answer a maths question if you can't use the Code Interpreter.
-9. If a calculation fails due to a coding error, fix the problem and try again. If it fails due to an internal problem, try again. Always give short feedback if you retry. 
-10. Use matplotlib and contourf for visualization. Align dimensions for the plotting, always prepare 2D variables for plots, colorbars around zero for clear deviation representation. Use Cartopy for country and coast lines, unless specified otherwise. Do not use Basemap.
-11. Avoid discussing politics, moral problems, personal issues, jokes, or social/ethical questions. Keep conversations focused on geoscientific research, data analysis, and visualization. Talk directly and focussed, but in a way that can be understood by someone knowledgable in the field.
-12. You are specialized in analyzing provided atmospheric reanalyis data. Your expertise includes interpreting complex datasets, visualizing trends, and identifying new connections in climate science.
+5. The Temperature is given in Kelvin, the precipitation in millimeters per year and the wind in meters per second. The annular and monthly files are global, the daily ones are only over Europe, the day_germany ones over germany.
+6. Analyze data first using xarray to understand the meta information (longitudes, latitudes, variables, units) of the used file. Use the type information to inform further decisions.
+7. Always explain what you are going to do; break it down into items and then work through them. 
+8. Always load numpy, matplotlib, xarray. Never load NetCDF4. Use the Code Interpreter and always code in Python.
+9. Use xarray and numpy for calculations. Don't try to answer a maths question if you can't use the Code Interpreter.
+10. If a calculation fails due to a coding error, fix the problem and try again. If it fails due to an internal problem, try again. Always give short feedback if you retry. 
+11. Use matplotlib and contourf for visualization. Align dimensions for the plotting, always prepare 2D variables for plots, colorbars around zero for clear deviation representation. Use Cartopy for country and coast lines, unless specified otherwise. Do not use Basemap.
+12. Avoid discussing politics, moral problems, personal issues, jokes, or social/ethical questions. Keep conversations focused on geoscientific research, data analysis, and visualization. Talk directly and focussed, but in a way that can be understood by someone knowledgable in the field.
+13. You are specialized in analyzing provided atmospheric reanalyis data. Your expertise includes interpreting complex datasets, visualizing trends, and identifying new connections in climate science.
 
 
 Below are a few examples of good conversations, including code. Try to imatate them when talking to users."#;
@@ -59,9 +86,13 @@ static EXAMPLE_CONVERSATIONS: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::ne
             name: Some("frevaGPT".to_string()),
             content: Some("To find the year with the highest local wind speed, we will first analyze the wind data to identify the maximum wind speed and the corresponding year. Then, we will create a map plot of the wind data, marking the grid box with the highest wind speed with an X.
 
-Let's start by loading the wind data and analyzing it to identify the year with the highest local wind speed.
-```python
-import matplotlib.pyplot as plt
+Let's start by loading the wind data and analyzing it to identify the year with the highest local wind speed.".to_string()),
+            tool_calls: Some(vec![ChatCompletionMessageToolCall {
+                id: "Some_id1".to_string(),
+                r#type: ChatCompletionToolType::Function,
+                function: FunctionCall {
+                    name: "code_interpreter".to_string(),
+                    arguments: "import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
@@ -69,27 +100,49 @@ import xarray as xr
 wind_data = xr.open_dataset('/data/inputFiles/DATA/sfcwind/mon/data.nc')
 
 # Display the wind data to understand its structure and variables
-wind_data
-```
-The wind data contains information about surface wind speed for different time points, longitudes, and latitudes. The variable 'sfcwind' represents the surface wind speed.
+wind_data".to_string(),
+                    }
+                }]),
+                ..Default::default() }),
+        ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+            name: Some("frevaGPT".to_string()),
+            content: Some("The wind data contains information about surface wind speed for different time points, longitudes, and latitudes. The variable 'sfcwind' represents the surface wind speed.
 
-Next, we will find the year with the highest local wind speed by identifying the maximum wind speed value in the dataset. Let's proceed with this calculation.
-```python
-# Find the year with the highest local wind speed
+Next, we will find the year with the highest local wind speed by identifying the maximum wind speed value in the dataset. Let's proceed with this calculation.".to_string()),
+            tool_calls: Some(vec![ChatCompletionMessageToolCall {
+                id: "Some_id2".to_string(),
+                r#type: ChatCompletionToolType::Function,
+                function: FunctionCall {
+                    name: "code_interpreter".to_string(),
+                    arguments: "# Find the year with the highest local wind speed
 max_wind_speed = wind_data['sfcwind'].max(dim=['lat', 'lon'])
 year_with_max_wind = max_wind_speed['time'].values.item()
 
-year_with_max_wind
-```
-It seems there are multiple years with the same maximum wind speed. Let's find all the years with the highest local wind speed and their corresponding wind speeds.
-```python
-# Find all years with the highest local wind speed and their corresponding wind speeds
+year_with_max_wind".to_string(),
+                }
+            }]),
+            ..Default::default()
+        }),
+        ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+            name: Some("frevaGPT".to_string()),
+            content: Some("It seems there are multiple years with the same maximum wind speed. Let's find all the years with the highest local wind speed and their corresponding wind speeds.".to_string()),
+            tool_calls: Some(vec![ChatCompletionMessageToolCall {
+                id: "Some_id3".to_string(),
+                r#type: ChatCompletionToolType::Function,
+                function: FunctionCall {
+                    name: "code_interpreter".to_string(),
+                    arguments: "# Find all years with the highest local wind speed and their corresponding wind speeds
 max_wind_speed_values = wind_data['sfcwind'].max(dim=['lat', 'lon'])
 years_with_max_wind = max_wind_speed_values['time'].values
 
-max_wind_speed_values, years_with_max_wind
-```
-The years with the highest local wind speed and their corresponding wind speeds are as follows:
+max_wind_speed_values, years_with_max_wind".to_string(),
+                }
+            }]),
+            ..Default::default()
+        }),
+        ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+            name: Some("frevaGPT".to_string()),
+            content: Some("The years with the highest local wind speed and their corresponding wind speeds are as follows:
 
 - 1940: 14.29 m/s
 - 1941: 14.09 m/s
@@ -97,9 +150,13 @@ The years with the highest local wind speed and their corresponding wind speeds 
 - ...
 - 2023: 13.70 m/s
 
-Next, we will create a map plot of the wind data, marking the grid box with the highest wind speed with an X. Let's proceed with plotting the wind data.
-```python
-import matplotlib.pyplot as plt
+Next, we will create a map plot of the wind data, marking the grid box with the highest wind speed with an X. Let's proceed with plotting the wind data.".to_string()),
+            tool_calls: Some(vec![ChatCompletionMessageToolCall {
+                id: "Some_id4".to_string(),
+                r#type: ChatCompletionToolType::Function,
+                function: FunctionCall {
+                    name: "code_interpreter".to_string(),
+                    arguments: "import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
@@ -121,12 +178,69 @@ plt.title(f'Surface Wind Speed for the Year {years_with_max_wind[0]}')
 max_wind_speed_lat_index, max_wind_speed_lon_index = np.unravel_index(np.argmax(wind_speed), wind_speed.shape)
 plt.scatter(lon[max_wind_speed_lon_index], lat[max_wind_speed_lat_index], marker='x', color='red', s=100)
 
-plt.show()
-```
-The map plot above shows the surface wind speed for the year 1940, with the grid box containing the highest wind speed marked with a red X. The colorbar represents the wind speed in meters per second (m/s), with cooler colors indicating lower wind speeds and warmer colors indicating higher wind speeds.
+plt.show()".to_string(),
+                }
+            }]),
+            ..Default::default()
+        }),
+        ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+            content: "An image was successfully generated.".to_string(),
+            tool_call_id: "Some_id4".to_string(), // must match the ID of the tool call that generated the image
+        })
+        ,
+        ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+            name: Some("frevaGPT".to_string()),
+            content: Some("The map plot above shows the surface wind speed for the year 1940, with the grid box containing the highest wind speed marked with a red X. The colorbar represents the wind speed in meters per second (m/s), with cooler colors indicating lower wind speeds and warmer colors indicating higher wind speeds.
 
 If you would like to see the map plot for a different year with the highest wind speed, please let me know. I'm here to help!".to_string()),
-            ..Default::default() // TODO: this isn't correct, the code blocks are actually tool calls. This needs to be fixed once tool calls are implemented.
-        })
+            ..Default::default() 
+        }),
+        ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
+            name: Some("user".to_string()),
+            content: async_openai::types::ChatCompletionRequestUserMessageContent::Text("Make a zonal mean plot for the average between 1961 and 1990 as well as 1991 and 2020".to_string()),
+        }),
+        assistant_message!("To create a zonal mean plot of precipitation for the averages between the periods 1961-1990 and 1991-2020, we'll follow these steps:
+
+1. Load the precipitation data from the specified file.
+2. Calculate the average precipitation for each of the two periods.
+3. Compute the zonal mean for both periods.
+4. Visualize the zonal mean precipitation in a plot.
+
+Let's start by loading the precipitation data and analyzing its structure to ensure we can access the necessary variables. Then we'll proceed to calculate the averages for both time periods.",
+    "Some_id5",
+    "import xarray as xr
+import numpy as np
+import matplotlib.pyplot as plt
+# Load the precipitation data file
+precip_data = xr.open_dataset('/data/inputFiles/DATA/pr/mon/data.nc')
+# Define the time periods
+period_1 = precip_data['time'].sel(time=slice('1961-01-01', '1990-12-31'))
+period_2 = precip_data['time'].sel(time=slice('1991-01-01', '2020-12-31'))
+# Calculate the average precipitation for both periods
+avg_precip_period_1 = precip_data['pr'].sel(time=period_1).mean(dim='time')
+avg_precip_period_2 = precip_data['pr'].sel(time=period_2).mean(dim='time')
+# Compute the zonal mean (average over longitudes) for both averages
+zonal_mean_period_1 = avg_precip_period_1.mean(dim='lon')
+zonal_mean_period_2 = avg_precip_period_2.mean(dim='lon')
+# Plot the zonal mean precipitation for both periods
+plt.figure(figsize=(10, 6))
+plt.plot(zonal_mean_period_1['lat'], zonal_mean_period_1, label='1961-1990', color='blue')
+plt.plot(zonal_mean_period_2['lat'], zonal_mean_period_2, label='1991-2020', color='orange')
+plt.xlabel('Latitude')
+plt.ylabel('Zonal Mean Precipitation (mm/day)')
+plt.title('Zonal Mean Precipitation for 1961-1990 and 1991-2020')
+plt.legend()
+plt.grid()
+plt.show()"),
+        ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+            content:"An image was successfully generated and is being shown to the user.".to_string(),
+            tool_call_id: "Some_id5".to_string(),
+        }),
+
+
+
+
+
+        
     ]
 });
