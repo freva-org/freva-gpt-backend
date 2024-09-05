@@ -5,7 +5,7 @@ use async_openai::types::{
     ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, CreateChatCompletionRequest,
     CreateChatCompletionRequestArgs,
 };
-use documented::documented_function;
+use documented::docs_const;
 use futures::{stream, StreamExt};
 use once_cell::sync::Lazy;
 use tracing::{debug, error, info, trace, warn};
@@ -44,7 +44,7 @@ use crate::{
 /// If the thread_id does not point to an existing thread, an InternalServerError response is returned.
 ///
 /// If the stream fails due to something else on the backend, an InternalServerError response is returned.
-#[documented_function]
+#[docs_const]
 pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let qstring = qstring::QString::from(req.query_string());
 

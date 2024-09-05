@@ -4,7 +4,7 @@ use std::env;
 
 use actix_web::{HttpResponse, Responder};
 use const_format::concatcp;
-use documented::{documented_function, Documented};
+use documented::{docs_const, Documented};
 use once_cell::sync::Lazy;
 use strum::VariantNames;
 use tracing::{debug, trace};
@@ -148,7 +148,7 @@ pub static RESPONSE_STRING: Lazy<String> =
 /// The Endpoints all have four keys: name, methods, params and return_type.
 ///
 /// This endpoint can be used to check whether the server is running and whether the interal model of the client matches the server's.
-#[documented_function] // constructs the documentation for this function into PING_DOCS
+#[docs_const] // constructs the documentation for this function into PING_DOCS
 pub async fn ping() -> impl Responder {
     trace!("Ping request received.");
     HttpResponse::Ok().body(RESPONSE_STRING.to_string())
@@ -180,7 +180,7 @@ pub const DOCS: &str = concatcp!("Version: ", VERSION, STREAMVARIANTS_DOCS, ALL_
 /// Returns the documentation for the API.
 ///
 /// Takes no arguments and returns a string with the documentation.
-#[documented_function] // constructs the documentation for this function into DOCS_DOCS
+#[docs_const] // constructs the documentation for this function into DOCS_DOCS
 pub async fn docs() -> impl Responder {
     trace!("Docs request received.");
     HttpResponse::Ok().body(DOCS)
