@@ -154,7 +154,7 @@ fn build_request(
         .n(1)
         .messages(messages)
         .stream(true)
-        .max_tokens(500u32)
+        .max_tokens(16000u32)
         .tools(ALL_TOOLS.clone())
         .build()
 }
