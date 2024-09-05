@@ -18,18 +18,6 @@ ENV PATH="/opt/conda/bin:$PATH"
 # First install Rust. As this tends to stay the same, we put it at the beginning of the Dockerfile, so it's cached.
 RUN dnf install -y rust cargo
 
-# Install conda dependiencies
-# RUN dnf install -y bzip2
-
-# Install python
-# RUN dnf install -y python3 conda
-
-# First create and activate the environment because conda needs it.
-# RUN conda create -n env
-# RUN conda init
-# RUN conda activate env
-
-
 # Create virtual environment for app
 RUN conda create --name env 
 RUN conda init bash && \
@@ -38,9 +26,6 @@ conda activate env
 
 # Install the python packages
 RUN conda install -c conda-forge numpy matplotlib netcdf4 cartopy contourpy pandas xarray
-
-
-
 
 # Move over the source code
 COPY src /app/src
@@ -54,13 +39,12 @@ WORKDIR /app
 # Copy over the secrets file to have access to the openai account
 COPY .env /app/.env
 
-# Remove the standard installed python to force the app to choose the conda version
-# RUN rm -r /usr/lib64/python3.12
-
 # Add another environment variable so the app can have a valid python instance
 # ENV PYTHONHOME /usr/conda
+ENV PYTHONUSERBASE /opt/conda
 # ENV PYTHONPLATLIBDIR lib
 # ENV PATH="$PATH:/usr/conda/lib:/usr/conda/bin"
+ENV PYO3_PYTHON=/opt/conda/bin/python3.12
 
 
 # Run the Rust code in very verbose mode
