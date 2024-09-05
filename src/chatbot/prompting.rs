@@ -104,6 +104,25 @@ wind_data".to_string(),
                     }
                 }]),
                 ..Default::default() }),
+        ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+            content: "<xarray.Dataset> Size: 65MB
+Dimensions:  (time: 1008, lon: 180, lat: 90)
+Coordinates:
+  * time     (time) datetime64[ns] 8kB 1940-01-01 1940-02-01 ... 2023-12-01
+  * lon      (lon) float64 1kB -180.0 -178.0 -176.0 -174.0 ... 174.0 176.0 178.0
+  * lat      (lat) float64 720B -89.0 -87.0 -85.0 -83.0 ... 83.0 85.0 87.0 89.0
+Data variables:
+    sfcwind  (time, lat, lon) float32 65MB ...
+Attributes:
+    CDI:            Climate Data Interface version 2.2.4 (https://mpimet.mpg....
+    Conventions:    CF-1.6
+    tracking_id:    d5b13485-16f3-5f65-8dfd-cf03615bcc01
+    creation_date:  2024-01-23T12:31:33Z
+    CDO:            Climate Data Operators version 2.2.2 (https://mpimet.mpg....
+    NCO:            netCDF Operators version 5.0.6 (Homepage = http://nco.sf....
+    history:        Tue May 28 15:33:44 2024: ncatted -O -a history,global,d,...".to_string(),
+            tool_call_id: "Some_id1".to_string(),
+        }),
         ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             name: Some("frevaGPT".to_string()),
             content: Some("The wind data contains information about surface wind speed for different time points, longitudes, and latitudes. The variable 'sfcwind' represents the surface wind speed.
@@ -123,6 +142,12 @@ year_with_max_wind".to_string(),
             }]),
             ..Default::default()
         }),
+        ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+            content: "Traceback (most recent call last):
+  File \"<stdin>\", line 1, in <module>
+ValueError: can only convert an array of size 1 to a Python scalar".to_string(),
+            tool_call_id: "Some_id2".to_string(),
+        }),
         ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             name: Some("frevaGPT".to_string()),
             content: Some("It seems there are multiple years with the same maximum wind speed. Let's find all the years with the highest local wind speed and their corresponding wind speeds.".to_string()),
@@ -139,6 +164,16 @@ max_wind_speed_values, years_with_max_wind".to_string(),
                 }
             }]),
             ..Default::default()
+        }),
+        ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+            content: "<xarray.DataArray 'sfcwind' (time: 1008)> Size: 4kB
+array([11.096766 , 11.897707 , 12.527985 , ..., 13.650877 , 11.2893505,
+       10.917501 ], dtype=float32)
+Coordinates:
+  * time     (time) datetime64[ns] 8kB 1940-01-01 1940-02-01 ... 2023-12-01 ['1940-01-01T00:00:00.000000000' '1940-02-01T00:00:00.000000000'
+ '1940-03-01T00:00:00.000000000' ... '2023-10-01T00:00:00.000000000'
+ '2023-11-01T00:00:00.000000000' '2023-12-01T00:00:00.000000000']".to_string(),
+            tool_call_id: "Some_id3".to_string(),
         }),
         ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             name: Some("frevaGPT".to_string()),
