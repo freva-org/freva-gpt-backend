@@ -12,9 +12,6 @@ RUN curl -o /tmp/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-lat
 # Add Conda to the PATH
 ENV PATH="/opt/conda/bin:$PATH"
 
-# Ensure Conda is initialized properly
-#RUN conda init bash
-
 # First install Rust. As this tends to stay the same, we put it at the beginning of the Dockerfile, so it's cached.
 RUN dnf install -y rust cargo
 
@@ -22,10 +19,10 @@ RUN dnf install -y rust cargo
 RUN conda create --name env 
 RUN conda init bash 
 RUN echo "conda activate env" >> ~/.bashrc
-RUN source ~/.bashrc && conda activate env
+# RUN source ~/.bashrc
 
 # Install the python packages
-RUN conda install -c conda-forge numpy matplotlib netcdf4 cartopy contourpy pandas xarray
+RUN conda install -c conda-forge -n env numpy matplotlib netcdf4 cartopy contourpy pandas xarray
 
 # Move over the source code
 COPY src /app/src
@@ -40,13 +37,15 @@ WORKDIR /app
 COPY .env /app/.env
 
 # Add another environment variable so the app can have a valid python instance
-# ENV PYTHONHOME /usr/conda
-# ENV PYTHONUSERBASE /opt/conda
+# ENV PYTHONHOME /opt/conda/envs/env/
+ENV PYTHONUSERBASE /opt/conda/envs/env
 # ENV PYTHONPLATLIBDIR lib
-# ENV PATH="$PATH:/usr/conda/lib:/usr/conda/bin"
 ENV PYTHONPATH=/opt/conda/envs/env/lib/python3.12/site-packages
-# ENV PYO3_PYTHON=/opt/conda/bin/python3.12 # might not be needed anymore?
+ENV PATH /opt/conda/envs/env/bin/:$PATH
+ENV LD_LIBRARY_PATH /opt/conda/envs/env/lib/:$PATH
 
+# Crashes the build with info about the python environment that will be used. Debug only
+# ENV PYO3_PRINT_CONFIG 1
 
 # Run the Rust code in very verbose mode
 ENTRYPOINT [ "cargo", "run", "--", "-vv"]
