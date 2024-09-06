@@ -16,7 +16,6 @@ macro_rules! assistant_message {
         })
     };
     ($content:expr, $call_id:expr, $code:expr) => {
-        /// some content and a single tool call. Because all tool calls need an ID, we need to have the caller provide it.
         ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             name: Some("frevaGPT".to_string()),
             content: Some($content.to_string()),

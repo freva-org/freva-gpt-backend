@@ -1,19 +1,8 @@
-use flexi_logger::{Age, Cleanup, Criterion, FileSpec, LevelFilter, Logger, LoggerHandle, Naming};
+use flexi_logger::{style, Age, Cleanup, Criterion, FileSpec, LevelFilter, Logger, LoggerHandle, Naming};
 
 use crate::cla_parser; // imports the cla_parser module for the Args struct
 
 pub fn setup_logger(args: &cla_parser::Args) -> LoggerHandle {
-    // let (file, filename) = generate_log_file(); // generates the log file base on the current time in nanoseconds
-
-    // tracing_subscriber::fmt()
-    //     .with_max_level(match &args.verbose {
-    //         0 => tracing::Level::INFO,
-    //         1 => tracing::Level::DEBUG,
-    //         _ => tracing::Level::TRACE, // more than 1 verbose flag
-    //     })
-    //     .with_writer(file)
-    //     .init();
-
     let loglevel = match args.verbose {
         0 => LevelFilter::Info,
         1 => LevelFilter::Debug,
@@ -27,7 +16,8 @@ pub fn setup_logger(args: &cla_parser::Args) -> LoggerHandle {
                 .basename("log")
                 .suffix("txt"),
         )
-        .format(flexi_logger::colored_default_format)
+        .format(format_log_message)
+        .set_palette("b1;3;2;4;6".to_string())
         .rotate(
             Criterion::Age(Age::Hour),
             Naming::Timestamps,
@@ -45,24 +35,12 @@ pub fn setup_logger(args: &cla_parser::Args) -> LoggerHandle {
     logger
 }
 
-fn generate_log_file() -> (std::fs::File, String) {
-    // We want to log all our messages to a file that by convention is named after the current amount of nanoseconds since the Unix epoch.
-    // Since it's inside a docker container, we just write to "/logs/log_NS.txt".
-    // Maybe later we can also write to stdout?
-    let time_ns =
-        if let Ok(time) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-            time.as_nanos()
-        } else {
-            // We can't fail here, but if we do, we'll just return a 404.
-            eprintln!("Error getting the current time in nanoseconds.");
-            404
-        };
-
-    // let log_file = format!("/logs/log_{}.txt", time_ns);
-    let log_file = format!("./logs/log_{time_ns}.txt"); // TODO: Change this back! In production, this needs to be correct.
-
-    let file = std::fs::File::create(&log_file).expect("Error creating the log file. Either the system clock moved backwards or the file system is full.");
-
-    // Returns the file handle and the filename
-    (file, log_file)
+fn format_log_message(write: &mut dyn std::io::Write, now: &mut flexi_logger::DeferredNow, record: &flexi_logger::Record) -> std::io::Result<()> {
+    let level = record.level();
+    write!(write, "[{}]:{} ({}{}) {}", 
+    now.format("%Y-%m-%d %H:%M:%S%.6f"), 
+    style(level).paint(format!("{:7}", format!("[{}]",level))), // paint the level in a color
+    record.module_path().unwrap_or("<unnamed>"), // Module from tracing
+    record.line().unwrap_or(0), // line number can help with debugging
+    record.args()) // the actual message
 }

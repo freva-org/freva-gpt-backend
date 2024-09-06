@@ -61,7 +61,7 @@ pub async fn stop(req: HttpRequest) -> impl Responder {
                             conversation.state = ConversationState::Stopping;
                             StopResult::Found // and return that we found it
                         }
-                        ConversationState::Stopping | ConversationState::Ended(_) => {
+                        ConversationState::Stopping | ConversationState::Ended => {
                             StopResult::NotRunning
                         }
                     };

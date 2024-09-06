@@ -98,7 +98,7 @@ pub fn end_conversation(thread_id: &str) {
             // If we can lock the mutex, we can check if the value is already in use.
             if let Some(conversation) = guard.iter_mut().find(|x| x.id == thread_id) {
                 // If we find the conversation, we'll set the state to Ended.
-                conversation.state = ConversationState::Ended(std::time::Instant::now());
+                conversation.state = ConversationState::Ended;
             }
         }
         Err(e) => {

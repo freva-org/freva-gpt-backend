@@ -1,5 +1,4 @@
 use core::fmt;
-use std::time::Instant;
 
 use async_openai::types::{
     ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage,
@@ -14,7 +13,7 @@ use tracing::{debug, error, trace, warn};
 pub enum ConversationState {
     Streaming,
     Stopping,
-    Ended(Instant),
+    Ended,
 }
 
 /// When a thread is streaming, it is in the Streaming state. If nothing goes wrong, at the end, it will be in the Ended state.
