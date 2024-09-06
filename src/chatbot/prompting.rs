@@ -132,7 +132,14 @@ Next, we will find the year with the highest local wind speed by identifying the
                 r#type: ChatCompletionToolType::Function,
                 function: FunctionCall {
                     name: "code_interpreter".to_string(),
-                    arguments: "# Find the year with the highest local wind speed
+                    arguments: "import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
+# Load the wind data file
+wind_data = xr.open_dataset('/data/inputFiles/DATA/sfcwind/mon/data.nc')
+
+# Find the year with the highest local wind speed
 max_wind_speed = wind_data['sfcwind'].max(dim=['lat', 'lon'])
 year_with_max_wind = max_wind_speed['time'].values.item()
 
@@ -155,7 +162,14 @@ ValueError: can only convert an array of size 1 to a Python scalar".to_string(),
                 r#type: ChatCompletionToolType::Function,
                 function: FunctionCall {
                     name: "code_interpreter".to_string(),
-                    arguments: "# Find all years with the highest local wind speed and their corresponding wind speeds
+                    arguments: "import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
+# Load the wind data file
+wind_data = xr.open_dataset('/data/inputFiles/DATA/sfcwind/mon/data.nc')
+
+# Find all years with the highest local wind speed and their corresponding wind speeds
 max_wind_speed_values = wind_data['sfcwind'].max(dim=['lat', 'lon'])
 years_with_max_wind = max_wind_speed_values['time'].values
 
