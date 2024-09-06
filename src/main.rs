@@ -28,7 +28,7 @@ async fn main() -> std::io::Result<()> {
         run_code_interpeter(code.clone());
     }
 
-    logging::setup_logger(&args);
+    let _logger = logging::setup_logger(&args); // store in a variable to keep the logger alive. If it drops, the logger will stop logging.
 
     // Read from env file. This loads the environment variables from the .env file into `std::env::var`.
     match dotenv() {

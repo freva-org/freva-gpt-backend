@@ -1,19 +1,48 @@
+use flexi_logger::{Age, Cleanup, Criterion, FileSpec, LevelFilter, Logger, LoggerHandle, Naming};
+
 use crate::cla_parser; // imports the cla_parser module for the Args struct
 
-pub fn setup_logger(args: &cla_parser::Args) {
-    let (file, filename) = generate_log_file(); // generates the log file base on the current time in nanoseconds
+pub fn setup_logger(args: &cla_parser::Args) -> LoggerHandle {
+    // let (file, filename) = generate_log_file(); // generates the log file base on the current time in nanoseconds
 
-    tracing_subscriber::fmt()
-        .with_max_level(match &args.verbose {
-            0 => tracing::Level::INFO,
-            1 => tracing::Level::DEBUG,
-            _ => tracing::Level::TRACE, // more than 1 verbose flag
-        })
-        .with_writer(file)
-        .init();
+    // tracing_subscriber::fmt()
+    //     .with_max_level(match &args.verbose {
+    //         0 => tracing::Level::INFO,
+    //         1 => tracing::Level::DEBUG,
+    //         _ => tracing::Level::TRACE, // more than 1 verbose flag
+    //     })
+    //     .with_writer(file)
+    //     .init();
+
+    let loglevel = match args.verbose {
+        0 => LevelFilter::Info,
+        1 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
+    };
+
+    let logger = Logger::with(loglevel)
+        .log_to_file(
+            FileSpec::default()
+                .directory("./logs")
+                .basename("log")
+                .suffix("txt"),
+        )
+        .format(flexi_logger::colored_default_format)
+        .rotate(
+            Criterion::Age(Age::Hour),
+            Naming::Timestamps,
+            Cleanup::KeepLogFiles(7 * 24),
+        ) // rotate every hour, keep logs for a week
+        .write_mode(flexi_logger::WriteMode::Async) // write logs asynchronously to support tracing from multiple threads
+        .duplicate_to_stderr(flexi_logger::Duplicate::Warn) // duplicate warnings and errors to stderr
+        .start()
+        .expect("Error initializing the logger."); // And fail if we can't initialize the logger.
+
+    // to keep the logger alive, we need to return it to the main thread and keep it alive there
 
     tracing::info!("Logger initialized successfully.");
-    println!("Logger initialized successfully. Logs will be written to {filename}");
+    println!("Logger initialized successfully.");
+    logger
 }
 
 fn generate_log_file() -> (std::fs::File, String) {
