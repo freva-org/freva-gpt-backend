@@ -5,7 +5,6 @@
 use std::time::Duration;
 
 use actix_web::{services, web, App, HttpServer};
-use auth::AUTH_KEY;
 use clap::Parser;
 use dotenvy::dotenv;
 use tool_calls::code_interpreter::parse_input::run_code_interpeter;
@@ -15,8 +14,9 @@ mod auth; // for basic authentication
 mod chatbot; // for the actual chatbot
 mod cla_parser; // for parsing the command line arguments
 mod logging; // for setting up the logger
-mod static_serve; // for serving static responses // for the actual chatbot
+mod static_serve; // for serving static responses 
 mod tool_calls; // for the tool calls
+mod runtime_checks; // for the runtime checks
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -53,37 +53,8 @@ async fn main() -> std::io::Result<()> {
     });
     let host = std::env::var("HOST").unwrap_or_else(|_| "localhost".to_string());
 
-    // The lazy static STARTING_MESSAGE_JSON can fail if the prompt or messages cannot be converted to a string.
-    // To make sure that this is caught early, we'll just test it here.
-    let _ = chatbot::prompting::STARTING_PROMPT_JSON.clone();
-    trace!(
-        "Starting messages JSON: {:?}",
-        chatbot::prompting::STARTING_PROMPT_JSON
-    );
-
-    trace!("Ping Response: {:?}", static_serve::RESPONSE_STRING);
-
-    // We'll also initialize the authentication here so it's available for the entire server, from the very start.
-    let auth_string = match std::env::var("AUTH_KEY") {
-        Ok(auth_string) => auth_string,
-        Err(e) => {
-            error!(
-                "Error reading the authentication string from the environment variables: {:?}",
-                e
-            );
-            eprintln!(
-                "Error reading the authentication string from the environment variables: {e:?}"
-            );
-            std::process::exit(1);
-        }
-    };
-    AUTH_KEY.set(auth_string).unwrap_or_else(|_| {
-        error!("Error setting the authentication string. Exiting...");
-        eprintln!("Error setting the authentication string. Exiting...");
-        std::process::exit(1);
-    });
-    info!("Authentication string set successfully.");
-    println!("Authentication string set successfully.");
+    // Run all runtime checks
+    runtime_checks::run_runtime_checks();
 
     info!("Starting server at {host}:{port}");
     println!("Starting server at {host}:{port}");

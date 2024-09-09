@@ -9,7 +9,7 @@ pub fn code_is_likely_safe(code: &String) -> bool {
     // Note that we allow the opening of files, as we'll need that for the code interpreter.
     const DANGEROUS_PATTERNS: [&str; 11] = [
         "import os",
-        "import sys",
+        "import sys", // It might be necessary to disable this when testing, but always enable it in production.
         "exec(",
         "eval(",
         "subprocess",

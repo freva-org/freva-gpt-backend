@@ -11,7 +11,9 @@ use tracing::{debug, info, trace, warn};
 /// REQUIRES: The code has passed the safety checks.
 pub fn execute_code(code: String) -> Result<String, String> {
     trace!("Preparing python interpreter for code execution.");
-    pyo3::prepare_freethreaded_python(); // For now. We'll have to look into this later. FIXME: remove GIL requirement???
+    pyo3::prepare_freethreaded_python();
+    // Fixed: Martin told me that the "global" interpreter lock, is, in fact, not global, but per process.
+    // Because I moved the execution to another process to prevent catastrophic crashes, nothing should be able to interfere with the GIL.
 
     trace!("Starting GIL block.");
     let output = Python::with_gil(|py| {
@@ -25,8 +27,13 @@ pub fn execute_code(code: String) -> Result<String, String> {
             // If that's not the case, we'll split it up into the last line and the rest of the code.
             // That is, unless the last line is not just a variable, but a function call or something else that doesn't return a value.
             None => {
-                // If there is no newline, we'll just execute the whole code.
-                (Some(code), None)
+                // If there is no newline, we'll just eval the whole code, unless an import is present.
+                // If an import is present, we'll have to execute it instead.
+                if code.contains("import") {
+                    (Some(code), None)
+                } else {
+                    (None, Some(code))
+                }
             }
             Some((rest, last)) => {
                 // We'll have to check the last line
@@ -36,7 +43,7 @@ pub fn execute_code(code: String) -> Result<String, String> {
                 {
                     // If the last line contains a "(", it's likely a function call, which we can't evaluate.
                     // If it contains "import", it's likely an import statement, which we also can't evaluate.
-                    // The exception is if it's a variable assignment, but we can't really check that.
+                    // The exception is if it's a variable assignment, but we can't really check that. 
                     // The exception we do check for is if it's a plt.show() call, which we do support.
                     // We'll just execute the whole code.
                     (Some(code), None)
@@ -107,7 +114,13 @@ pub fn execute_code(code: String) -> Result<String, String> {
                         // We'll return the image as a string.
                         Ok(format!("{content}\n\nEncoded Image: {encoded_image}"))
                     } else {
-                        Ok(content.to_string())
+                        // If we got nothing to return (in python, that would be None), we'll just return an empty string.
+                        let rep = content.to_string();
+                        if rep == "None" {
+                            Ok(String::new())
+                        } else {
+                            Ok(content.to_string())
+                        }
                     }
                 }
                 Err(e) => Err(format_pyerr(&e, py)),

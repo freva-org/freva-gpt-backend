@@ -62,7 +62,7 @@ pub struct ActiveConversation {
 /// The Content is in JSON format, with the key being the hint and the value being the content. Currently, only the keys "thread_id" and "warning" are used.
 /// An example for a ServerHint packet would be `{"variant": "ServerHint", "content": "{\"thread_id\":\"1234\"}"}`.
 /// That means that the content needs to be parsed as JSON to get the actual content.
-#[derive(Debug, Serialize, Clone, Documented, strum::VariantNames)]
+#[derive(Debug, Serialize, Clone, Documented, PartialEq, strum::VariantNames)]
 #[serde(tag = "variant", content = "content")] // Makes it so that the variant names are inside the object and the content is held in the content field.
 pub enum StreamVariant {
     /// The Prompt for the LLM, as JSON; not to be displayed to the user.
