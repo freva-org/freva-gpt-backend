@@ -110,18 +110,18 @@ pub fn start_code_interpeter(arguments: Option<String>, id: String) -> Vec<Strea
                 }
             }
 
-            // We might get a problem with the output being too long, so we'll limit it to 1000 characters.
+            // We might get a problem with the output being too long, so we'll limit it to 2000 characters. (1000 was not enough)
             // This is a temporary solution, and we'll have to find a better one later. FIXME
-            let stdout_short = if stdout_without_images.len() > 1000 {
-                warn!("The code interpreter output was too long. Truncating to 1000 characters.");
-                stdout_without_images.chars().take(1000).collect()
+            let stdout_short = if stdout_without_images.len() > 2000 {
+                warn!("The code interpreter output was too long. Truncating to 2000 characters.");
+                stdout_without_images.chars().take(2000).collect()
             } else {
                 stdout_without_images.to_string()
             };
 
-            let stderr_short = if stderr.len() > 1000 {
-                warn!("The code interpreter error output was too long. Truncating to 1000 characters.");
-                stderr.chars().take(1000).collect()
+            let stderr_short = if stderr.len() > 2000 {
+                warn!("The code interpreter error output was too long. Truncating to 2000 characters.");
+                stderr.chars().take(2000).collect()
             } else {
                 stderr.to_string()
             };
