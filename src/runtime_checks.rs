@@ -45,8 +45,11 @@ pub fn run_runtime_checks() {
 
     // Run the basic checks for the code interpreter.
     // Note that those checks need to be runtime, not compiletime, as the code interpreter calles the binary itself.
+    println!("Running runtime checks for the code interpreter.");
+    info!("Running runtime checks for the code interpreter.");
     check_two_plus_two();
     check_print();
+
 
     // Because some python versions are allergic to mac, I'll disable the import checks if the OS is mac.
     check_imports();
@@ -141,8 +144,6 @@ fn check_imports() {
     for library in libraries.iter() {
         check_single_import(library);
     }
-    println!("All imports are available.");
-    info!("All imports are available.");
 }
 
 /// Checks that the code interpreter can import one specific library.

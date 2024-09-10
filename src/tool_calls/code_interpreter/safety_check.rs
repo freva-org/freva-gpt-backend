@@ -45,5 +45,11 @@ pub fn sanitize_code(code: String) -> String {
         code = format!("import matplotlib\nmatplotlib.use('agg')\n{code}");
     }
 
+    // The default mode for xarray printing is html, which means that the output will contains tons of CSS and HTML.
+    // That's not very useful and clutters the context window, so we'll change the default mode to text.
+    if code.contains("xarray") {
+        code = format!("import xarray as xr\nxr.set_options(display_style='text')\n{code}");
+    }
+
     code
 }
