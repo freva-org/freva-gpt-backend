@@ -1,12 +1,16 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, pin::Pin};
 
 use actix_web::{HttpRequest, HttpResponse, Responder};
-use async_openai::types::{
-    ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, CreateChatCompletionRequest,
-    CreateChatCompletionRequestArgs,
+use async_openai::{
+    error::OpenAIError,
+    types::{
+        ChatChoiceStream, ChatCompletionRequestMessage, ChatCompletionRequestUserMessage,
+        CreateChatCompletionRequest, CreateChatCompletionRequestArgs,
+        CreateChatCompletionStreamResponse,
+    },
 };
 use documented::docs_const;
-use futures::{stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use once_cell::sync::Lazy;
 use tracing::{debug, error, info, trace, warn};
 
@@ -283,9 +287,7 @@ async fn create_and_stream(
                     // We need to signal the end of the stream, so we'll have to tell actix to send one last StreamEnd event.
                     end_conversation(&thread_id);
                     Some((
-                        Ok::<actix_web::web::Bytes, std::convert::Infallible>(
-                            STREAM_STOP_CONTENT.clone(),
-                        ),
+                        Ok(STREAM_STOP_CONTENT.clone()),
                         (
                             open_ai_stream,
                             thread_id,
@@ -296,7 +298,7 @@ async fn create_and_stream(
                             tool_arguments,
                             tool_id,
                         ),
-                    )) // The type annotation is necessary because the actix web HttpResponse streaming wants a Result.
+                    ))
                 } else {
                     // If the client didn't send a stop request, we'll continue.
 
@@ -305,247 +307,15 @@ async fn create_and_stream(
 
                     trace!("Polled Stream, got response: {:?}", response);
 
-                    let variants: Vec<StreamVariant> = match response {
-                        Some(Ok(response)) => {
-                            if let Some(choice) = response.choices.first() {
-                                match (
-                                    &choice.delta.tool_calls,
-                                    &choice.delta.content,
-                                    choice.finish_reason,
-                                ) {
-                                    (None, Some(string_delta), _) => {
-                                        trace!("Delta: {}", string_delta);
-                                        vec![StreamVariant::Assistant(string_delta.clone())]
-                                    }
-                                    (_, None, Some(reason)) => {
-                                        trace!("Got stop event from OpenAI: {:?}", reason);
-                                        match reason {
-                                            async_openai::types::FinishReason::Stop => {
-                                                trace!("Stopping stream due to successfull end of generation.");
-                                                vec![StreamVariant::StreamEnd(
-                                                    "Generation complete".to_string(),
-                                                )]
-                                            }
-                                            async_openai::types::FinishReason::Length => {
-                                                info!(
-                                                    "Stopping stream due to reaching max tokens."
-                                                );
-                                                vec![StreamVariant::StreamEnd(
-                                                    "Reached max tokens".to_string(),
-                                                )]
-                                            }
-                                            async_openai::types::FinishReason::ContentFilter => {
-                                                info!("Stopping stream due to content filter.");
-                                                vec![StreamVariant::StreamEnd(
-                                                    "Content filter triggered".to_string(),
-                                                )]
-                                            }
-                                            async_openai::types::FinishReason::FunctionCall => {
-                                                warn!("Stopping stream due to function call. This should not happen, as it it's deprecated and the LLM was instructed not to use them.");
-                                                vec![StreamVariant::StreamEnd("Function call is deprecated, LLM should use Tool call instead.".to_string())]
-                                            }
-                                            async_openai::types::FinishReason::ToolCalls => {
-                                                // We expect there to now be a tool call in the response.
-                                                let temp = choice.delta.tool_calls.clone();
-
-                                                if let Some(content) = temp {
-                                                    // Handle the tool call
-                                                    trace!("Tool call: {:?}", content);
-                                                }
-
-                                                let mut all_generated_variants = vec![];
-
-                                                // There is NOT a tool call there, because that was accumulated in the previous iterations.
-                                                // The stream ending is just OpenAI's way of telling us that the tool call is done and can now be executed.
-                                                if let Some(name) = tool_name {
-                                                    let mut temp = route_call(
-                                                        name,
-                                                        Some(tool_arguments),
-                                                        tool_id,
-                                                    ); // call the tool with the arguments
-                                                    all_generated_variants.append(&mut temp);
-                                                    // Reset the tool_name and tool_arguments
-                                                    tool_name = None;
-                                                    tool_arguments = String::new();
-                                                    tool_id = String::new();
-                                                } else {
-                                                    warn!("Tool call expected, but not found in response: {:?}", response);
-                                                    all_generated_variants.push(StreamVariant::CodeError("Tool call expected, but not found in response.".to_string()));
-                                                }
-
-                                                // Before we can return the generated variants, we need to start a new steam because the old one is done.
-                                                // We need a list of all messages, which we can get from the active conversation global variable.
-                                                match get_conversation(&thread_id) {
-                                                    None => {
-                                                        error!("Tried to restart conversation after tool call, but failed! No active conversation found with thread_id: {}", thread_id);
-                                                        vec![StreamVariant::ServerError("Tried to restart conversation after tool call, but failed! No active conversation found.".to_string())]
-                                                    }
-                                                    Some(messages) => {
-                                                        trace!("Restarting conversation after tool call with messages: {:?}", messages);
-                                                        // the actual messages we need to put there are those plus the generated ones, because the generated one were not added to the conversation yet.
-                                                        let mut all_messages = messages.clone();
-                                                        all_messages.append(
-                                                            &mut all_generated_variants.clone(),
-                                                        );
-
-                                                        // The stream wants a vector of ChatCompletionRequestMessage, so we need to convert the StreamVariants to that.
-                                                        let all_oai_messages =
-                                                            help_convert_sv_ccrm(all_messages);
-
-                                                        trace!(
-                                                            "All messages: {:?}",
-                                                            all_oai_messages
-                                                        );
-
-                                                        // Now we construct a new stream and substitute the old one with it.
-                                                        match build_request(all_oai_messages) {
-                                                            Err(e) => {
-                                                                // If we can't build the request, we'll return a generic error.
-                                                                warn!(
-                                                                    "Error building request: {:?}",
-                                                                    e
-                                                                );
-                                                                vec![StreamVariant::ServerError(
-                                                                    "Error building request."
-                                                                        .to_string(),
-                                                                )]
-                                                            }
-                                                            Ok(request) => {
-                                                                trace!("Request built successfully: {:?}", request);
-                                                                match CLIENT
-                                                                    .chat()
-                                                                    .create_stream(request)
-                                                                    .await
-                                                                {
-                                                                    Err(e) => {
-                                                                        // If we can't create the stream, we'll return a generic error.
-                                                                        warn!("Error creating stream: {:?}", e);
-                                                                        vec![StreamVariant::ServerError("Error creating new stream.".to_string())]
-                                                                    }
-                                                                    Ok(stream) => {
-                                                                        // Everything worked, so we'll return the new stream and the new state.
-                                                                        open_ai_stream = stream;
-                                                                        all_generated_variants
-                                                                        // we need to return the generated variants, because the stream will be restarted with the tool call.
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    (Some(tool_calls), None, None) => {
-                                        debug!("A tool was called, converting the delta to a Code variant: {:?}", tool_calls);
-                                        if tool_calls.len() > 1 {
-                                            warn!("Multiple tool calls found, but only one is supported. All are ignored except the first: {:?}", tool_calls);
-                                        }
-                                        match tool_calls.first() {
-                                            // TODO: This doesn't support multiple tool calls at once yet.
-                                            Some(tool_call) => {
-                                                // We now know that we are sending the delta of a tool call.
-                                                // For the user to see a stream of i.e. the code interpreter's code being written by the LLM, we need to send the code interpreter's code as a stream.
-                                                match &tool_call.function {
-                                                    Some(function) => {
-                                                        // Now we need to check what function was called. For now, we only have the code interpreter.
-                                                        let arguments = function
-                                                            .arguments
-                                                            .clone()
-                                                            .unwrap_or(String::new());
-
-                                                        // Because of the genius way OpenAI constructed this very good API, the name of the tool call is only sent in the very first delta.
-                                                        // So if the name is not None, we store it in the tool_name variable that is passed to the next iteration of the stream.
-                                                        // If the name is None, we try to read the tool_name from the tool_name variable.
-                                                        if let Some(name) = function.name.clone() {
-                                                            debug!(
-                                                                "New tool call started: {:?}",
-                                                                name
-                                                            );
-                                                            tool_name = Some(name);
-                                                        }
-
-                                                        // Another things is that the arguments for the tool calls, even though they are strings, are not repeated when the actual tool call is made.
-                                                        // that means that I need to add another state to the closure to keep track of the tool arguments.
-                                                        tool_arguments.push_str(&arguments);
-
-                                                        // The same thing goes for the tool call id, which is neccessary to be machted later on in the response.
-                                                        match tool_call.id.clone() {
-                                                            Some(id) => {
-                                                                // We need to store the id in the tool_name variable, because the id is not repeated in the response.
-                                                                tool_id = id;
-                                                            }
-                                                            None => {
-                                                                if tool_id.is_empty() {
-                                                                    warn!("Tool call expected id, but not found in response: {:?}", response);
-                                                                }
-                                                            }
-                                                        }
-
-                                                        let name_copy = tool_name.clone(); // because tool_name will be used at the end to pass the tool name to the next iteration of the stream, we need to clone it here.
-                                                        if name_copy
-                                                            != Some("code_interpreter".to_string())
-                                                        {
-                                                            warn!("Tool call expected code_interpreter, but found: {:?}", name_copy);
-                                                            // Instead of ending the stream, we'll just ignore the tool call, but send the user a ServerHint.
-                                                            vec![StreamVariant::ServerHint(format!("{{\"warning\": \"Tool call expected code_interpreter, but found ->{}<-; content: ->{}<-\"}}", name_copy.unwrap_or(String::new()), arguments).to_string())]
-                                                        } else {
-                                                            // We know it's the code interpreter and can send it as a delta.
-                                                            trace!("Tool call: {:?} with arguments: {:?} and id: {}", name_copy, arguments, tool_id);
-                                                            if tool_id.is_empty() {
-                                                                warn!("Tool call expected id, but not set yet: {:?}", response);
-                                                            }
-                                                            vec![StreamVariant::Code(
-                                                                arguments,
-                                                                tool_id.clone(),
-                                                            )]
-                                                        }
-                                                    }
-                                                    None => {
-                                                        warn!("Tool call expected function, but not found in response: {:?}", response);
-                                                        vec![StreamVariant::CodeError("Tool call expected function, but not found in response.".to_string())]
-                                                    }
-                                                }
-                                            }
-                                            None => {
-                                                warn!("Tool call expected, but not found in response: {:?}", response);
-                                                vec![StreamVariant::CodeError("Tool call expected, but not found in response.".to_string())]
-                                            }
-                                        }
-                                    }
-                                    (None, None, None) => {
-                                        warn!("No content found in response and no reason to stop given; treating this as an empty Assistant response: {:?}", response);
-                                        // vec![StreamVariant::StreamEnd("No content found in response and no reason to stop given.".to_string())]
-                                        vec![StreamVariant::Assistant(String::new())]
-                                    }
-                                    (Some(tool_calls), Some(string_delta), _) => {
-                                        warn!("Tool call AND content found in response, the API specified that this couldn't happen: {:?} and {:?}", tool_calls, string_delta);
-                                        vec![StreamVariant::StreamEnd("Tool call AND content found in response, the API specified that this couldn't happen.".to_string())]
-                                    }
-                                }
-                            } else {
-                                debug!("No response found, ending stream.");
-                                vec![StreamVariant::OpenAIError("No response found.".to_string())]
-                            }
-                        }
-                        Some(Err(e)) => {
-                            // If we can't get the response, we'll return a generic error.
-                            warn!("Error getting response: {:?}", e);
-                            vec![StreamVariant::OpenAIError(
-                                "Error getting response.".to_string(),
-                            )]
-                        }
-                        None => {
-                            warn!("Stream ended abruptly and without error. This should not happen; returning StreamEnd.");
-                            vec![StreamVariant::StreamEnd(
-                                "Stream ended abruptly".to_string(),
-                            )]
-
-                            // This does not mean that the stream ended abruptly, I misunderstood.
-                            // It happends when the stream is done on the OpenAI side.
-                            // We need to detect when a StreamEnd was sent by OpenAI and then stop the stream.
-                        }
-                    };
+                    let variants: Vec<StreamVariant> = oai_stream_to_variants(
+                        response,
+                        &mut tool_name,
+                        &mut tool_arguments,
+                        &mut tool_id,
+                        &thread_id,
+                        &mut open_ai_stream,
+                    )
+                    .await;
 
                     // Also add the variants into the active conversation
                     add_to_conversation(&thread_id, variants.clone());
@@ -602,4 +372,285 @@ async fn create_and_stream(
     );
 
     HttpResponse::Ok().streaming(out_stream)
+}
+
+async fn oai_stream_to_variants(
+    response: Option<
+        Result<
+            async_openai::types::CreateChatCompletionStreamResponse,
+            async_openai::error::OpenAIError,
+        >,
+    >,
+    tool_name: &mut Option<String>,
+    tool_arguments: &mut String,
+    tool_id: &mut String,
+    thread_id: &String,
+    open_ai_stream: &mut Pin<
+        Box<dyn Stream<Item = Result<CreateChatCompletionStreamResponse, OpenAIError>> + Send>,
+    >,
+) -> Vec<StreamVariant> {
+    match response {
+        Some(Ok(response)) => {
+            if let Some(choice) = response.choices.first() {
+                match (
+                    &choice.delta.tool_calls,
+                    &choice.delta.content,
+                    choice.finish_reason,
+                ) {
+                    (None, Some(string_delta), _) => {
+                        trace!("Delta: {}", string_delta);
+                        vec![StreamVariant::Assistant(string_delta.clone())]
+                    }
+                    (_, None, Some(reason)) => {
+                        trace!("Got stop event from OpenAI: {:?}", reason);
+                        handle_stop_event(
+                            reason,
+                            choice,
+                            tool_arguments,
+                            tool_name,
+                            tool_id,
+                            thread_id,
+                            open_ai_stream,
+                            &response,
+                        )
+                        .await
+                    }
+                    (Some(tool_calls), None, None) => {
+                        debug!(
+                            "A tool was called, converting the delta to a Code variant: {:?}",
+                            tool_calls
+                        );
+                        if tool_calls.len() > 1 {
+                            warn!("Multiple tool calls found, but only one is supported. All are ignored except the first: {:?}", tool_calls);
+                        }
+                        match tool_calls.first() {
+                            // TODO: This doesn't support multiple tool calls at once yet.
+                            Some(tool_call) => {
+                                // We now know that we are sending the delta of a tool call.
+                                // For the user to see a stream of i.e. the code interpreter's code being written by the LLM, we need to send the code interpreter's code as a stream.
+                                match &tool_call.function {
+                                    Some(function) => {
+                                        // Now we need to check what function was called. For now, we only have the code interpreter.
+                                        let arguments =
+                                            function.arguments.clone().unwrap_or(String::new());
+
+                                        // Because of the genius way OpenAI constructed this very good API, the name of the tool call is only sent in the very first delta.
+                                        // So if the name is not None, we store it in the tool_name variable that is passed to the next iteration of the stream.
+                                        // If the name is None, we try to read the tool_name from the tool_name variable.
+                                        if let Some(name) = function.name.clone() {
+                                            debug!("New tool call started: {:?}", name);
+                                            *tool_name = Some(name);
+                                        }
+
+                                        // Another things is that the arguments for the tool calls, even though they are strings, are not repeated when the actual tool call is made.
+                                        // that means that I need to add another state to the closure to keep track of the tool arguments.
+                                        tool_arguments.push_str(&arguments);
+
+                                        // The same thing goes for the tool call id, which is neccessary to be machted later on in the response.
+                                        match tool_call.id.clone() {
+                                            Some(id) => {
+                                                // We need to store the id in the tool_name variable, because the id is not repeated in the response.
+                                                *tool_id = id;
+                                            }
+                                            None => {
+                                                if tool_id.is_empty() {
+                                                    warn!("Tool call expected id, but not found in response: {:?}", response);
+                                                }
+                                            }
+                                        }
+
+                                        let name_copy = tool_name.clone(); // because tool_name will be used at the end to pass the tool name to the next iteration of the stream, we need to clone it here.
+                                        if name_copy != Some("code_interpreter".to_string()) {
+                                            warn!("Tool call expected code_interpreter, but found: {:?}", name_copy);
+                                            // Instead of ending the stream, we'll just ignore the tool call, but send the user a ServerHint.
+                                            vec![StreamVariant::ServerHint(format!("{{\"warning\": \"Tool call expected code_interpreter, but found ->{}<-; content: ->{}<-\"}}", name_copy.unwrap_or_default(), arguments).to_string())]
+                                        } else {
+                                            // We know it's the code interpreter and can send it as a delta.
+                                            trace!(
+                                                "Tool call: {:?} with arguments: {:?} and id: {}",
+                                                name_copy,
+                                                arguments,
+                                                tool_id
+                                            );
+                                            if tool_id.is_empty() {
+                                                warn!(
+                                                    "Tool call expected id, but not set yet: {:?}",
+                                                    response
+                                                );
+                                            }
+                                            vec![StreamVariant::Code(arguments, tool_id.clone())]
+                                        }
+                                    }
+                                    None => {
+                                        warn!("Tool call expected function, but not found in response: {:?}", response);
+                                        vec![StreamVariant::CodeError("Tool call expected function, but not found in response.".to_string())]
+                                    }
+                                }
+                            }
+                            None => {
+                                warn!(
+                                    "Tool call expected, but not found in response: {:?}",
+                                    response
+                                );
+                                vec![StreamVariant::CodeError(
+                                    "Tool call expected, but not found in response.".to_string(),
+                                )]
+                            }
+                        }
+                    }
+                    (None, None, None) => {
+                        warn!("No content found in response and no reason to stop given; treating this as an empty Assistant response: {:?}", response);
+                        // vec![StreamVariant::StreamEnd("No content found in response and no reason to stop given.".to_string())]
+                        vec![StreamVariant::Assistant(String::new())]
+                    }
+                    (Some(tool_calls), Some(string_delta), _) => {
+                        warn!("Tool call AND content found in response, the API specified that this couldn't happen: {:?} and {:?}", tool_calls, string_delta);
+                        vec![StreamVariant::StreamEnd("Tool call AND content found in response, the API specified that this couldn't happen.".to_string())]
+                    }
+                }
+            } else {
+                debug!("No response found, ending stream.");
+                vec![StreamVariant::OpenAIError("No response found.".to_string())]
+            }
+        }
+        Some(Err(e)) => {
+            // If we can't get the response, we'll return a generic error.
+            warn!("Error getting response: {:?}", e);
+            vec![StreamVariant::OpenAIError(
+                "Error getting response.".to_string(),
+            )]
+        }
+        None => {
+            warn!("Stream ended abruptly and without error. This should not happen; returning StreamEnd.");
+            vec![StreamVariant::StreamEnd(
+                "Stream ended abruptly".to_string(),
+            )]
+
+            // This does not mean that the stream ended abruptly, I misunderstood.
+            // It happends when the stream is done on the OpenAI side.
+            // We need to detect when a StreamEnd was sent by OpenAI and then stop the stream.
+        }
+    }
+}
+
+async fn handle_stop_event(
+    reason: async_openai::types::FinishReason,
+    choice: &ChatChoiceStream,
+    tool_arguments: &mut String,
+    tool_name: &mut Option<String>,
+    tool_id: &mut String,
+    thread_id: &String,
+    open_ai_stream: &mut Pin<
+        Box<dyn Stream<Item = Result<CreateChatCompletionStreamResponse, OpenAIError>> + Send>,
+    >,
+    response: &CreateChatCompletionStreamResponse,
+) -> Vec<StreamVariant> {
+    match reason {
+        async_openai::types::FinishReason::Stop => {
+            trace!("Stopping stream due to successfull end of generation.");
+            vec![StreamVariant::StreamEnd("Generation complete".to_string())]
+        }
+        async_openai::types::FinishReason::Length => {
+            info!("Stopping stream due to reaching max tokens.");
+            vec![StreamVariant::StreamEnd("Reached max tokens".to_string())]
+        }
+        async_openai::types::FinishReason::ContentFilter => {
+            info!("Stopping stream due to content filter.");
+            vec![StreamVariant::StreamEnd(
+                "Content filter triggered".to_string(),
+            )]
+        }
+        async_openai::types::FinishReason::FunctionCall => {
+            warn!("Stopping stream due to function call. This should not happen, as it it's deprecated and the LLM was instructed not to use them.");
+            vec![StreamVariant::StreamEnd(
+                "Function call is deprecated, LLM should use Tool call instead.".to_string(),
+            )]
+        }
+        async_openai::types::FinishReason::ToolCalls => {
+            // We expect there to now be a tool call in the response.
+            let temp = choice.delta.tool_calls.clone();
+
+            if let Some(content) = temp {
+                // Handle the tool call
+                trace!("Tool call: {:?}", content);
+            }
+
+            let mut all_generated_variants = vec![];
+
+            // There is NOT a tool call there, because that was accumulated in the previous iterations.
+            // The stream ending is just OpenAI's way of telling us that the tool call is done and can now be executed.
+            if let Some(name) = tool_name {
+                let mut temp = route_call(
+                    name.to_string(),
+                    Some(tool_arguments.to_string()),
+                    tool_id.to_string(),
+                ); // call the tool with the arguments
+                all_generated_variants.append(&mut temp);
+                // Reset the tool_name and tool_arguments
+                *tool_name = None;
+                *tool_arguments = String::new();
+                *tool_id = String::new();
+            } else {
+                warn!(
+                    "Tool call expected, but not found in response: {:?}",
+                    response
+                );
+                all_generated_variants.push(StreamVariant::CodeError(
+                    "Tool call expected, but not found in response.".to_string(),
+                ));
+            }
+
+            // Before we can return the generated variants, we need to start a new steam because the old one is done.
+            // We need a list of all messages, which we can get from the active conversation global variable.
+            match get_conversation(thread_id) {
+                None => {
+                    error!("Tried to restart conversation after tool call, but failed! No active conversation found with thread_id: {}", thread_id);
+                    vec![StreamVariant::ServerError("Tried to restart conversation after tool call, but failed! No active conversation found.".to_string())]
+                }
+                Some(messages) => {
+                    trace!(
+                        "Restarting conversation after tool call with messages: {:?}",
+                        messages
+                    );
+                    // the actual messages we need to put there are those plus the generated ones, because the generated one were not added to the conversation yet.
+                    let mut all_messages = messages.clone();
+                    all_messages.append(&mut all_generated_variants.clone());
+
+                    // The stream wants a vector of ChatCompletionRequestMessage, so we need to convert the StreamVariants to that.
+                    let all_oai_messages = help_convert_sv_ccrm(all_messages);
+
+                    trace!("All messages: {:?}", all_oai_messages);
+
+                    // Now we construct a new stream and substitute the old one with it.
+                    match build_request(all_oai_messages) {
+                        Err(e) => {
+                            // If we can't build the request, we'll return a generic error.
+                            warn!("Error building request: {:?}", e);
+                            vec![StreamVariant::ServerError(
+                                "Error building request.".to_string(),
+                            )]
+                        }
+                        Ok(request) => {
+                            trace!("Request built successfully: {:?}", request);
+                            match CLIENT.chat().create_stream(request).await {
+                                Err(e) => {
+                                    // If we can't create the stream, we'll return a generic error.
+                                    warn!("Error creating stream: {:?}", e);
+                                    vec![StreamVariant::ServerError(
+                                        "Error creating new stream.".to_string(),
+                                    )]
+                                }
+                                Ok(stream) => {
+                                    // Everything worked, so we'll return the new stream and the new state.
+                                    *open_ai_stream = stream;
+                                    all_generated_variants
+                                    // we need to return the generated variants, because the stream will be restarted with the tool call.
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
