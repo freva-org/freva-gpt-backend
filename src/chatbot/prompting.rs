@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 /// Helper macro to simplify the creation of assistant messages.
 macro_rules! assistant_message {
     ($content:expr) => {
-        /// Base, only content.
+        // Base, only content.
         ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             name: Some("frevaGPT".to_string()),
             content: Some($content.to_string()),
@@ -284,6 +284,60 @@ plt.show()"),
             content:"An image was successfully generated and is being shown to the user.".to_string(),
             tool_call_id: "Some_id5".to_string(),
         }),
+        assistant_message!("The zonal mean plot above shows the average precipitation over the latitude range for the periods 1961-1990 and 1991-2020. The blue line represents the zonal mean precipitation for the period 1961-1990, while the orange line represents the zonal mean precipitation for the period 1991-2020.
+
+If you have any further questions or would like to explore other analyses, feel free to ask. I'm here to help!".to_string()),
+    ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
+        name: Some("user".to_string()),
+        content: async_openai::types::ChatCompletionRequestUserMessageContent::Text("Hi! Could you please open the dataset at /work/bm1159/XCES/data4xces/reanalysis/reanalysis/ECMWF/IFS/ERA5/mon/atmos/tas/r1i1p1/tas_Amon_reanalysis_era5_r1i1p1_20240101-20241231.nc for me and tell me a bit about its content?".to_string()),
+    }),
+    assistant_message!("", "Some_id6", "import xarray as xr
+# Load the specified dataset
+reanalysis_data = xr.open_dataset('/work/bm1159/XCES/data4xces/reanalysis/reanalysis/ECMWF/IFS/ERA5/mon/atmos/tas/r1i1p1/tas_Amon_reanalysis_era5_r1i1p1_20240101-20241231.nc')
+
+# Display the dataset to understand its structure and variables
+reanalysis_data"),
+    ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+        content: "<xarray.Dataset> Size: 30MB
+Dimensions:   (time: 9, lon: 1280, bnds: 2, lat: 640)
+Coordinates:
+  * time      (time) datetime64[ns] 72B 2024-01-01 2024-02-01 ... 2024-09-01
+  * lon       (lon) float64 10kB 0.0 0.2812 0.5625 0.8438 ... 359.2 359.4 359.7
+  * lat       (lat) float64 5kB -89.78 -89.51 -89.23 ... 89.23 89.51 89.78
+Dimensions without coordinates: bnds
+Data variables:
+    lon_bnds  (lon, bnds) float64 20kB ...
+    lat_bnds  (lat, bnds) float64 10kB ...
+    tas       (time, lat, lon) float32 29MB ...
+Attributes:
+    CDI:            Climate Data Interface version 1.9.6 (http://mpimet.mpg.d...
+    history:        Mon Sep 09 00:26:21 2024: cdo -f nc4 -s -mergetime era5dk...
+    institution:    European Centre for Medium-Range Weather Forecasts
+    Conventions:    CF-1.6
+    license:        Contains modified Copernicus Atmosphere Monitoring Servic...
+    tracking_id:    d5b13485-16f3-5f65-8dfd-cf03615bcc01
+    creation_date:  2024-09-09T00:07:07Z
+    CDO:            Climate Data Operators version 1.9.6 (http://mpimet.mpg.d...".
+to_string(),
+        tool_call_id: "Some_id6".to_string(),
+    }),
+    assistant_message!("The dataset you requested contains temperature data (tas) from ERA5 reanalysis for the period from January 1, 2024, to December 31, 2024. Here's a summary of its contents:
+
+- **Dimensions**:
+  - **Time**: 9 time steps corresponding to the monthly averages from January to September 2024.
+  - **Longitude**: 1280 points ranging from 0 to 360 degrees.
+  - **Latitude**: 640 points ranging from approximately -89.78 to 89.78 degrees.
+  - **Bounds**: There are bounds for the longitude and latitude variables.
+
+- **Data Variables**:
+  - **tas**: This variable represents the air temperature and is provided in Kelvin. Its shape is `(time, lat, lon)`, indicating the shape of the data across the different time steps and geographical coordinates.
+  - **lon_bnds**: Longitude boundaries for each longitude point.
+  - **lat_bnds**: Latitude boundaries for each latitude point.
+
+- **Attributes**:
+  - The dataset includes metadata describing the data management and source, including information about the institution (European Centre for Medium-Range Weather Forecasts), the version of the Climate Data Interface (CDI) used, a license notice, and the creation date of the dataset.
+
+If you need further analysis or specific visualizations using this dataset, please let me know!")
 
 
 
