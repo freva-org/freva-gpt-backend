@@ -96,7 +96,6 @@ fn check_imports() {
         "tzdata",
         "six",
         "shapely",
-        "rpm",
         "pytz",
         "shapefile", // This is the pyshp library, but it's called shapefile
         "pyproj",
@@ -107,16 +106,13 @@ fn check_imports() {
         "numpy",
         "netCDF4",
         "matplotlib",
-        "libcomps",
         "kiwisolver",
         "fontTools", // Case sensitive
-        "dnf",
         "cycler",
         "contourpy",
         "cftime",
         "certifi",
         "cartopy", // lowercase
-        "libdnf",
     ];
     #[cfg(target_os = "macos")]
     let libraries = [
@@ -124,7 +120,6 @@ fn check_imports() {
         "tzdata",
         "six",
         "shapely",
-        "rpm",
         "pytz",
         "shapefile", // This is the pyshp library, but it's called shapefile
         "pyproj",
@@ -135,16 +130,13 @@ fn check_imports() {
         "numpy",
         "netCDF4",
         "matplotlib",
-        // "libcomps", // doesn't correctly import on mac
         "kiwisolver",
         "fontTools", // Case sensitive
-        // "dnf", // doesn't correctly import on mac
         "cycler",
         "contourpy",
         "cftime",
         "certifi",
         "cartopy", // lowercase 
-        // "libdnf", // doesn't correctly import on mac
     ];
     for library in libraries.iter() {
         check_single_import(library);
