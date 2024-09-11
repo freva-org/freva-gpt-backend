@@ -1,4 +1,4 @@
-// #![warn(clippy::cargo, clippy::pedantic)]
+// #![warn(clippy::cargo, clippy::pedantic)] // Enable for more warnings.
 
 // Freva-GPT2-backend: Backend for the second version of the Freva-GPT project
 
@@ -7,8 +7,8 @@ use std::time::Duration;
 use actix_web::{services, web, App, HttpServer};
 use clap::Parser;
 use dotenvy::dotenv;
-use tool_calls::code_interpreter::parse_input::run_code_interpeter;
-use tracing::{error, info, trace};
+use tool_calls::code_interpreter::prepare_execution::run_code_interpeter;
+use tracing::{debug, error, info};
 
 mod auth; // for basic authentication
 mod chatbot; // for the actual chatbot
@@ -40,7 +40,7 @@ async fn main() -> std::io::Result<()> {
     }
 
     // Server information: host and port
-    trace!(
+    debug!(
         "Reading host and port from environment variables: {:?}:{:?}",
         std::env::var("HOST"),
         std::env::var("PORT")
@@ -63,8 +63,8 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         let services = services![
             web::scope("/api/chatbot")
-                .route("/ping", web::get().to(static_serve::ping)) // Ping, just reply with a pong
-                .route("/help", web::get().to(static_serve::ping)) // Also reply with a pong
+                .route("/ping", web::get().to(static_serve::ping)) // Ping, return a short description of the API. 
+                .route("/help", web::get().to(static_serve::ping)) // Ping, return a short description of the API. 
                 .route("/stop", web::get().to(chatbot::stop::stop)) // Stop, stop a specific conversation by thread ID.
                 .route("/stop", web::post().to(chatbot::stop::stop)) // Stop, stop a specific conversation by thread ID. Both post and get are allowed.
                 .route("/docs", web::get().to(static_serve::docs)) // Docs, return the documentation of the API.

@@ -17,7 +17,7 @@ pub fn setup_logger(args: &cla_parser::Args) -> LoggerHandle {
                 .suffix("txt"),
         )
         .format(format_log_message)
-        .set_palette("b1;3;2;4;6".to_string())
+        .set_palette("b1;3;2;4;6".to_string()) 
         .rotate(
             Criterion::Age(Age::Hour),
             Naming::Timestamps,
@@ -35,6 +35,7 @@ pub fn setup_logger(args: &cla_parser::Args) -> LoggerHandle {
     logger
 }
 
+/// Custom log message formatter: [timestamp]:[level] (module:line) message
 fn format_log_message(write: &mut dyn std::io::Write, now: &mut flexi_logger::DeferredNow, record: &flexi_logger::Record) -> std::io::Result<()> {
     let level = record.level();
     write!(write, "[{}]:{} ({}:{}) {}", 

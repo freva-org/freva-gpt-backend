@@ -19,7 +19,7 @@ use crate::{
         available_chatbots::DEFAULTCHATBOT,
         handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
-            new_conversation_id, remove_conversation,
+            new_conversation_id, save_and_remove_conversation,
         },
         prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON},
         thread_storage::read_thread,
@@ -45,7 +45,7 @@ use crate::{
 ///
 /// If the auth_key is not given or does not match the one on the backend, an Unauthorized response is returned.
 ///
-/// If the thread_id does not point to an existing thread, an InternalServerError response is returned.
+/// If the thread_id is blank but does not point to an existing thread, an InternalServerError response is returned.
 ///
 /// If the stream fails due to something else on the backend, an InternalServerError response is returned.
 #[docs_const]
@@ -76,7 +76,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         Some(input) => input.to_string(),
     };
 
-    trace!(
+    info!(
         "Starting stream for thread {} with input: {}",
         thread_id,
         input
@@ -88,8 +88,8 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
         trace!("Adding base message to stream.");
 
-        let variant_vec = StreamVariant::Prompt((*STARTING_PROMPT_JSON).clone()); // This is a bit hacky, but it works. (We just dump the base messages into a string.)
-        add_to_conversation(&thread_id, vec![variant_vec]);
+        let starting_prompt = StreamVariant::Prompt((*STARTING_PROMPT_JSON).clone()); 
+        add_to_conversation(&thread_id, vec![starting_prompt]);
 
         let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
             name: Some("user".to_string()),
@@ -100,6 +100,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         base_message.push(user_message);
         base_message
     } else {
+        // Don't create a new thread, but continue the existing one.
         debug!("Expecting there to be a file for thread_id {}", thread_id);
         let content = match read_thread(thread_id.as_str()) {
             Ok(content) => content,
@@ -130,7 +131,8 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     // We'll also add a ServerHint about the thread_id to the messages.
     let server_hint = StreamVariant::ServerHint(format!("{{\"thread_id\": \"{thread_id}\"}}")); // resolves to {"thread_id": "<thread_id>"}
-                                                                                                // Also don't forget to add the user's input to the thread file.
+
+    // Also don't forget to add the user's input to the thread file.
     add_to_conversation(
         &thread_id,
         vec![server_hint, StreamVariant::User(input.clone())],
@@ -164,7 +166,7 @@ fn build_request(
 }
 
 // The last event in the event. Should be sent if the stream is stopped by the client sending a stop request.
-static STREAM_STOP_CONTENT: Lazy<actix_web::web::Bytes> = Lazy::new(|| {
+pub static STREAM_STOP_CONTENT: Lazy<actix_web::web::Bytes> = Lazy::new(|| {
     actix_web::web::Bytes::copy_from_slice(
         serde_json::to_string(&StreamVariant::StreamEnd(
             "Conversation aborted".to_string(),
@@ -176,8 +178,8 @@ static STREAM_STOP_CONTENT: Lazy<actix_web::web::Bytes> = Lazy::new(|| {
 
 /// First creates a stream from the `OpenAI` client.
 /// Then transforms the Stream from the `OpenAI` client into a Stream for Actix.
-/// Note that there will also be added events that don't come from the `OpenAI::Client`, like `ClientHint` events.
-/// This is only possible due to using `Stream::unfold`.
+/// Note that there will also be added events that don't come from the `OpenAI::Client`, like `ServerHint` events.
+/// This is only possible due to using `Stream::unfold`, which allows the manual construction of the stream.
 async fn create_and_stream(
     request: CreateChatCompletionRequest,
     thread_id: String,
@@ -217,6 +219,7 @@ async fn create_and_stream(
             if should_hint_thread_id {
                 // If we should hint the thread_id, we'll send a ServerHint event.
                 let hint = StreamVariant::ServerHint(format!("{{\"thread_id\": \"{thread_id}\"}}")); // resolves to {"thread_id":"<thread_id>"}
+                // return the hint and the new state
                 return Some((
                     Ok::<actix_web::web::Bytes, std::convert::Infallible>(
                         actix_web::web::Bytes::copy_from_slice(
@@ -273,7 +276,7 @@ async fn create_and_stream(
                 // If the stream should stop, we'll simply return None.
                 // We do it in this order to be able to send one last event to the client signaling the end of the stream.
                 trace!("Stream is stopping, sent one last event, removing the conversation from the pool and then aborting stream.");
-                remove_conversation(&thread_id);
+                save_and_remove_conversation(&thread_id);
                 None
             } else {
                 // If the stream should not stop, we'll continue.
@@ -321,25 +324,23 @@ async fn create_and_stream(
                     add_to_conversation(&thread_id, variants.clone());
 
                     // Check whether the stream should end by checking the variants.
-                    // let should_end = matches!(variants, StreamVariant::StreamEnd(_));
                     let should_end = variants
                         .iter()
                         .any(|v| matches!(v, StreamVariant::StreamEnd(_)));
-
-                    // Transform to string and then to actix_web::Bytes
 
                     // The variant to return if there are no variants in the response.
                     let error_variant =
                         StreamVariant::ServerError("No variants found in response.".to_string());
 
                     // Split the variants into the first variant and the rest of the variants.
+                    // This is so we can send the first variant immediately and write the rest to the queue.
                     let mut variants: VecDeque<StreamVariant> = variants.into();
                     let first_variant = variants.pop_front().unwrap_or(error_variant);
 
                     let string_variant = match serde_json::to_string(&first_variant) {
                         Ok(string) => string,
                         Err(e) => {
-                            warn!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
+                            error!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
                             format!(
                                 "{:?}",
                                 StreamVariant::ServerError(format!(
@@ -374,6 +375,7 @@ async fn create_and_stream(
     HttpResponse::Ok().streaming(out_stream)
 }
 
+/// Converts the response from the OpenAI stream into a vector of StreamVariants.
 async fn oai_stream_to_variants(
     response: Option<
         Result<
@@ -391,17 +393,17 @@ async fn oai_stream_to_variants(
 ) -> Vec<StreamVariant> {
     match response {
         Some(Ok(response)) => {
-            if let Some(choice) = response.choices.first() {
+            if let Some(choice) = response.choices.first() { // The choices represent the multiple completions that the LLM can make. We always set n=1, so there is exactly one choice.
                 match (
                     &choice.delta.tool_calls,
                     &choice.delta.content,
                     choice.finish_reason,
                 ) {
-                    (None, Some(string_delta), _) => {
+                    (None, Some(string_delta), _) => { // Basic case: the Assistant sends a text delta.
                         trace!("Delta: {}", string_delta);
                         vec![StreamVariant::Assistant(string_delta.clone())]
                     }
-                    (_, None, Some(reason)) => {
+                    (_, None, Some(reason)) => { // The Assistant sends a stop event.
                         debug!("Got stop event from OpenAI: {:?}", reason);
                         handle_stop_event(
                             reason,
@@ -415,7 +417,7 @@ async fn oai_stream_to_variants(
                         )
                         .await
                     }
-                    (Some(tool_calls), None, None) => {
+                    (Some(tool_calls), None, None) => { // A tool was called. This can include partial completions of the tool call, "tool call deltas", like code fragments.
                         debug!(
                             "A tool was called, converting the delta to a Code variant: {:?}",
                             tool_calls
@@ -431,8 +433,17 @@ async fn oai_stream_to_variants(
                                 match &tool_call.function {
                                     Some(function) => {
                                         // Now we need to check what function was called. For now, we only have the code interpreter.
-                                        let arguments =
+                                        let mut arguments =
                                             function.arguments.clone().unwrap_or(String::new());
+                                        
+                                        // Instead of just storing the arguments as-is, if the arguments contain no code yet, we'll ignore whitespace and newlines.
+                                        // This will effectively trim the arguments.
+                                        if arguments.trim().is_empty() {
+                                            // Only set the arguments to the empty String, if no code was written yet.
+                                            if tool_arguments.is_empty() {
+                                                arguments = String::new();
+                                            }
+                                        }
 
                                         // Because of the genius way OpenAI constructed this very good API, the name of the tool call is only sent in the very first delta.
                                         // So if the name is not None, we store it in the tool_name variable that is passed to the next iteration of the stream.
@@ -446,7 +457,7 @@ async fn oai_stream_to_variants(
                                         // that means that I need to add another state to the closure to keep track of the tool arguments.
                                         tool_arguments.push_str(&arguments);
 
-                                        // The same thing goes for the tool call id, which is neccessary to be machted later on in the response.
+                                        // The same thing goes for the tool call id, which is neccessary to be matched later on in the response.
                                         match tool_call.id.clone() {
                                             Some(id) => {
                                                 // We need to store the id in the tool_name variable, because the id is not repeated in the response.
@@ -463,6 +474,7 @@ async fn oai_stream_to_variants(
                                         if name_copy != Some("code_interpreter".to_string()) {
                                             warn!("Tool call expected code_interpreter, but found: {:?}", name_copy);
                                             // Instead of ending the stream, we'll just ignore the tool call, but send the user a ServerHint.
+                                            // Depending on the implementation of the OpenAI API, this might result in a unspecified Server Error on the LLM side.
                                             vec![StreamVariant::ServerHint(format!("{{\"warning\": \"Tool call expected code_interpreter, but found ->{}<-; content: ->{}<-\"}}", name_copy.unwrap_or_default(), arguments).to_string())]
                                         } else {
                                             // We know it's the code interpreter and can send it as a delta.
@@ -500,7 +512,6 @@ async fn oai_stream_to_variants(
                     }
                     (None, None, None) => {
                         warn!("No content found in response and no reason to stop given; treating this as an empty Assistant response: {:?}", response);
-                        // vec![StreamVariant::StreamEnd("No content found in response and no reason to stop given.".to_string())]
                         vec![StreamVariant::Assistant(String::new())]
                     }
                     (Some(tool_calls), Some(string_delta), _) => {
@@ -525,10 +536,6 @@ async fn oai_stream_to_variants(
             vec![StreamVariant::StreamEnd(
                 "Stream ended abruptly".to_string(),
             )]
-
-            // This does not mean that the stream ended abruptly, I misunderstood.
-            // It happends when the stream is done on the OpenAI side.
-            // We need to detect when a StreamEnd was sent by OpenAI and then stop the stream.
         }
     }
 }
@@ -547,7 +554,7 @@ async fn handle_stop_event(
 ) -> Vec<StreamVariant> {
     match reason {
         async_openai::types::FinishReason::Stop => {
-            trace!("Stopping stream due to successfull end of generation.");
+            debug!("Stopping stream due to successfull end of generation.");
             vec![StreamVariant::StreamEnd("Generation complete".to_string())]
         }
         async_openai::types::FinishReason::Length => {
@@ -568,9 +575,8 @@ async fn handle_stop_event(
         }
         async_openai::types::FinishReason::ToolCalls => {
             // We expect there to now be a tool call in the response.
-            let temp = choice.delta.tool_calls.clone();
-
-            if let Some(content) = temp {
+            
+            if let Some(content) = choice.delta.tool_calls.clone() {
                 // Handle the tool call
                 trace!("Tool call: {:?}", content);
             }

@@ -39,7 +39,7 @@ use types::ActiveConversation;
 pub static ACTIVE_CONVERSATIONS: Lazy<Arc<Mutex<Vec<ActiveConversation>>>> =
     Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
 
-/// Because we shouldn't have to construct a new client for every stream we start, we'll use this static variable to hold the client.
+/// Because we shouldn't have to construct a new OpenAI client for every stream we start, we'll use this static variable to hold the client.
 /// The Lazy is transparent, it can be accessed as-is.
 pub static CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
     let config = async_openai::config::OpenAIConfig::new();

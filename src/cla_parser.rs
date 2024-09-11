@@ -2,6 +2,7 @@
 
 use clap::{self, crate_authors, Parser};
 
+/// Fills in the command line arguments for the program as well as the --help and --version flags.
 #[derive(Parser, Debug)]
 #[command(
     version, // Automatically fills in the version from Cargo.toml

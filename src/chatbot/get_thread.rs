@@ -34,7 +34,6 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
     // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {
         None | Some("") => {
-            // If no thread_id is provided, we'll return a 400
             // If the thread ID is not found, we'll return a 400
             warn!("The User requested a thread without a thread ID.");
             return HttpResponse::BadRequest()

@@ -60,8 +60,6 @@ pub fn start_code_interpeter(arguments: Option<String>, id: String) -> Vec<Strea
         code.code
     );
 
-    // let output = execute_code(code.code);
-
     // Instead of just executing the code in this process, we start a new one.
     // This has several advantages:
     // For one, we can actually read the stdout and stderr of the process, which we can't do if we just execute the code in this process.
@@ -151,8 +149,6 @@ struct CodeInterpreterArguments {
 
 /// The function that is called when the program is started and the code_interpreter argument is passed.
 pub fn run_code_interpeter(arguments: String) {
-    // For testing currently. TODO.
-    // println!("Running the code interpreter with the following arguments: {}", arguments);
 
     let output = execute_code(arguments);
 

@@ -1,7 +1,7 @@
 use tracing::{debug, warn};
 
 /// Checks whether the given code passes the basic safety checks.
-/// The code is should actually be in JSON format, but our checks should be able to handle that.
+/// The code should actually be in JSON format, but our checks should be able to handle that.
 pub fn code_is_likely_safe(code: &String) -> bool {
     // For now, we'll implement a simple check: test whether a "dangerous pattern" is present.
 

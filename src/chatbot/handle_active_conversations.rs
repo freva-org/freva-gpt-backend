@@ -9,7 +9,6 @@ use crate::chatbot::{
 use super::types::StreamVariant;
 
 /// Helper function to return an ID for a new conversation.
-/// Currently unused, the thread IDs come from the frontend.
 pub fn new_conversation_id() -> String {
     trace!("Generating new conversation ID.");
     let value = rand::thread_rng()
@@ -107,8 +106,8 @@ pub fn end_conversation(thread_id: &str) {
     }
 }
 
-/// removes the conversation with the given ID, clearing it from the active conversations and writing it to disk.
-pub fn remove_conversation(thread_id: &str) {
+/// Removes the conversation with the given ID, clearing it from the active conversations and writing it to disk.
+pub fn save_and_remove_conversation(thread_id: &str) {
     trace!("Removing conversation with id: {}", thread_id);
 
     // We extract the conversation from the global variable to minimize the time we lock the mutex.
@@ -143,11 +142,15 @@ pub fn remove_conversation(thread_id: &str) {
     }
 }
 
-/// The assistant and code messages are streamed, so in order to display them without having `Assistant: A`, `Assistant: B`, `Code: A`, `Code: B`, we'll concatenate them.
+/// The assistant and code messages are streamed, so the variants that come from OpenAI contain only one or a few tokens of the message.
+/// This function takes a vector of StreamVariants and concatenates consecutive Assistant messages and the Code messages.
+/// 
+/// So instead of having multiple variants like this: "Assistant": "He", "Assistant": "llo", "Assistant": "!"
+/// we'll have one variant like this: "Assistant": "Hello!". The same goes for the Code messages.
 fn concat_variants(input: Vec<StreamVariant>) -> Vec<StreamVariant> {
     let mut output = Vec::new();
     let mut assistant_buffer = String::new();
-    let mut code_buffer = (String::new(), String::new());
+    let mut code_buffer = (String::new(), String::new()); // content; id
 
     for variant in input {
         match variant {
@@ -190,6 +193,7 @@ fn concat_variants(input: Vec<StreamVariant>) -> Vec<StreamVariant> {
     output
 }
 
+/// Returns the conversation with the given thread_ID, if it exists.
 pub fn get_conversation(thread_id: &str) -> Option<Vec<StreamVariant>> {
     trace!("Getting conversation with id: {}", thread_id);
 

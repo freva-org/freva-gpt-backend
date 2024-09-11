@@ -115,9 +115,8 @@ pub fn execute_code(code: String) -> Result<String, String> {
                         Ok(format!("{content}\n\nEncoded Image: {encoded_image}"))
                     } else {
                         // If we got nothing to return (in python, that would be None), we'll just return an empty string.
-                        let rep = content.to_string();
-                        if rep == "None" {
-                            Ok(String::new())
+                        if content.is_none() {
+                            Ok(String::new()) // else, this would say "None"
                         } else {
                             Ok(content.to_string())
                         }

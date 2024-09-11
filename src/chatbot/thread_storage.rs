@@ -69,7 +69,6 @@ pub fn open_thread(thread_id: &str) -> Option<File> {
         .create(true) // Create if it doesn't exist
         .open(format!("./threads/{thread_id}.txt"))
     {
-        // We want to only append to the file and also to create it if it doesn't exist.
         Ok(file) => {
             trace!("Successfully opened file for conversation.");
             Some(file)

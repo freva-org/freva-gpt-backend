@@ -21,7 +21,7 @@ pub enum ConversationState {
 /// The thread that is streaming will check the state and if it is Stopping, it will stop the streaming and change the state to Ended.
 #[derive(Debug, Clone)]
 pub struct ActiveConversation {
-    pub id: String, // Either the id as given by OpenAI or our internal id, maybe an Enum or `either` later. It's just an identified for while it's streaming, mainly for the stop request.
+    pub id: String, 
 
     pub state: ConversationState,
 
@@ -41,6 +41,8 @@ pub struct ActiveConversation {
 ///
 /// Code: The code that the Assistant generated, as a String. It will be executed on the backend.
 /// Currently, only Python is supported. The content is not formatted.
+/// Due to how the LLM calls the code_interpreter, it will be contained within a json object in the following format:
+/// `{"variant": "Code", "content": "{\"code\":\"LLM Code here\"}"`
 ///
 /// CodeOutput: The output of the code that was executed, as a String. Also not formatted.
 ///
@@ -265,12 +267,6 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
                     }
                     async_openai::types::ChatCompletionRequestUserMessageContent::Array(vector) => {
                         // Unlikely to be used, but we'll handle it.
-                        // let text_vec = vector.into_iter().map(|x| if let async_openai::types::ChatCompletionRequestMessageContentPart::Text(s) = x {
-                        //         Ok(s.text)
-                        //     } else {
-                        //         error!("User Message Array contained a non-Text variant.");
-                        //         Err("User Message Array contained a non-Text variant.")
-                        //     }).collect::<Vec<_>>();
 
                         let mut text_vec = vec![];
                         for elem in vector {
@@ -324,6 +320,7 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
                         content.tool_call_id
                     );
                     // We'll still give it to the assistant, he might need it.
+                    // Depending on the implementation of the OpenAI API, this might result in an error from the LLM as we don't answer the tool call.
                     let retval = content.tool_call_id + ": " + &content.content;
                     Ok(Self::Assistant(retval))
                 }

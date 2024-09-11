@@ -1,4 +1,4 @@
-// all available chatbots the backend supports
+/// The default chatbot that will be used when the user doesn't specify one.
 pub static DEFAULTCHATBOT: AvailableChatbots = AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini);
 
 #[derive(Debug, Clone, Copy)]
@@ -7,6 +7,7 @@ pub enum AvailableChatbots {
     // Here will be more chatbots, like LLAMA, etc.
 }
 
+// Implementing the conversion from the enum to a string
 impl From<AvailableChatbots> for String {
     fn from(val: AvailableChatbots) -> Self {
         match val {
