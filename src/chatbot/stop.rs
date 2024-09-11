@@ -51,7 +51,7 @@ pub async fn stop(req: HttpRequest) -> impl Responder {
     // so we need to store the result in a variable and return outside the guard.
     let result = match ACTIVE_CONVERSATIONS.lock() {
         Ok(mut guard) => {
-            let mut inner_res = StopResult::NotFound; 
+            let mut inner_res = StopResult::NotFound;
             for conversation in guard.iter_mut() {
                 if conversation.id == thread_id {
                     // if any conversation has the same id as the one we want to stop

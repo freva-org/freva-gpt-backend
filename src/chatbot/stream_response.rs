@@ -78,8 +78,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     info!(
         "Starting stream for thread {} with input: {}",
-        thread_id,
-        input
+        thread_id, input
     );
 
     let messages = if create_new {
@@ -88,7 +87,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
         trace!("Adding base message to stream.");
 
-        let starting_prompt = StreamVariant::Prompt((*STARTING_PROMPT_JSON).clone()); 
+        let starting_prompt = StreamVariant::Prompt((*STARTING_PROMPT_JSON).clone());
         add_to_conversation(&thread_id, vec![starting_prompt]);
 
         let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
@@ -219,7 +218,7 @@ async fn create_and_stream(
             if should_hint_thread_id {
                 // If we should hint the thread_id, we'll send a ServerHint event.
                 let hint = StreamVariant::ServerHint(format!("{{\"thread_id\": \"{thread_id}\"}}")); // resolves to {"thread_id":"<thread_id>"}
-                // return the hint and the new state
+                                                                                                     // return the hint and the new state
                 return Some((
                     Ok::<actix_web::web::Bytes, std::convert::Infallible>(
                         actix_web::web::Bytes::copy_from_slice(
@@ -393,17 +392,20 @@ async fn oai_stream_to_variants(
 ) -> Vec<StreamVariant> {
     match response {
         Some(Ok(response)) => {
-            if let Some(choice) = response.choices.first() { // The choices represent the multiple completions that the LLM can make. We always set n=1, so there is exactly one choice.
+            if let Some(choice) = response.choices.first() {
+                // The choices represent the multiple completions that the LLM can make. We always set n=1, so there is exactly one choice.
                 match (
                     &choice.delta.tool_calls,
                     &choice.delta.content,
                     choice.finish_reason,
                 ) {
-                    (None, Some(string_delta), _) => { // Basic case: the Assistant sends a text delta.
+                    (None, Some(string_delta), _) => {
+                        // Basic case: the Assistant sends a text delta.
                         trace!("Delta: {}", string_delta);
                         vec![StreamVariant::Assistant(string_delta.clone())]
                     }
-                    (_, None, Some(reason)) => { // The Assistant sends a stop event.
+                    (_, None, Some(reason)) => {
+                        // The Assistant sends a stop event.
                         debug!("Got stop event from OpenAI: {:?}", reason);
                         handle_stop_event(
                             reason,
@@ -417,7 +419,8 @@ async fn oai_stream_to_variants(
                         )
                         .await
                     }
-                    (Some(tool_calls), None, None) => { // A tool was called. This can include partial completions of the tool call, "tool call deltas", like code fragments.
+                    (Some(tool_calls), None, None) => {
+                        // A tool was called. This can include partial completions of the tool call, "tool call deltas", like code fragments.
                         debug!(
                             "A tool was called, converting the delta to a Code variant: {:?}",
                             tool_calls
@@ -435,7 +438,7 @@ async fn oai_stream_to_variants(
                                         // Now we need to check what function was called. For now, we only have the code interpreter.
                                         let mut arguments =
                                             function.arguments.clone().unwrap_or(String::new());
-                                        
+
                                         // Instead of just storing the arguments as-is, if the arguments contain no code yet, we'll ignore whitespace and newlines.
                                         // This will effectively trim the arguments.
                                         if arguments.trim().is_empty() {
@@ -575,7 +578,7 @@ async fn handle_stop_event(
         }
         async_openai::types::FinishReason::ToolCalls => {
             // We expect there to now be a tool call in the response.
-            
+
             if let Some(content) = choice.delta.tool_calls.clone() {
                 // Handle the tool call
                 trace!("Tool call: {:?}", content);

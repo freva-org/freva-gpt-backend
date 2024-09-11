@@ -1,4 +1,6 @@
-use flexi_logger::{style, Age, Cleanup, Criterion, FileSpec, LevelFilter, Logger, LoggerHandle, Naming};
+use flexi_logger::{
+    style, Age, Cleanup, Criterion, FileSpec, LevelFilter, Logger, LoggerHandle, Naming,
+};
 
 use crate::cla_parser; // imports the cla_parser module for the Args struct
 
@@ -17,7 +19,7 @@ pub fn setup_logger(args: &cla_parser::Args) -> LoggerHandle {
                 .suffix("txt"),
         )
         .format(format_log_message)
-        .set_palette("b1;3;2;4;6".to_string()) 
+        .set_palette("b1;3;2;4;6".to_string())
         .rotate(
             Criterion::Age(Age::Hour),
             Naming::Timestamps,
@@ -36,12 +38,19 @@ pub fn setup_logger(args: &cla_parser::Args) -> LoggerHandle {
 }
 
 /// Custom log message formatter: [timestamp]:[level] (module:line) message
-fn format_log_message(write: &mut dyn std::io::Write, now: &mut flexi_logger::DeferredNow, record: &flexi_logger::Record) -> std::io::Result<()> {
+fn format_log_message(
+    write: &mut dyn std::io::Write,
+    now: &mut flexi_logger::DeferredNow,
+    record: &flexi_logger::Record,
+) -> std::io::Result<()> {
     let level = record.level();
-    write!(write, "[{}]:{} ({}:{}) {}", 
-    now.format("%Y-%m-%d %H:%M:%S%.6f"), 
-    style(level).paint(format!("{:7}", format!("[{}]",level))), // paint the level in a color
-    record.module_path().unwrap_or("<unnamed>"), // Module from tracing
-    record.line().unwrap_or(0), // line number can help with debugging
-    record.args()) // the actual message
+    write!(
+        write,
+        "[{}]:{} ({}:{}) {}",
+        now.format("%Y-%m-%d %H:%M:%S%.6f"),
+        style(level).paint(format!("{:7}", format!("[{}]", level))), // paint the level in a color
+        record.module_path().unwrap_or("<unnamed>"),                 // Module from tracing
+        record.line().unwrap_or(0), // line number can help with debugging
+        record.args()
+    ) // the actual message
 }

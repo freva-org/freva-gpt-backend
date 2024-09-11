@@ -1,7 +1,10 @@
 // Handles basic prompting for the chatbot.
 
 use async_openai::types::{
-    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage, ChatCompletionRequestToolMessage, ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall
+    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage,
+    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
+    ChatCompletionRequestToolMessage, ChatCompletionRequestUserMessage, ChatCompletionToolType,
+    FunctionCall,
 };
 use once_cell::sync::Lazy;
 
@@ -25,11 +28,11 @@ macro_rules! assistant_message {
                 function: FunctionCall {
                     name: "code_interpreter".to_string(),
                     arguments: $code.to_string(),
-                }
+                },
             }]),
             ..Default::default()
         })
-    }
+    };
 }
 
 /// The starting prompt including all messages, converted to JSON.

@@ -28,9 +28,7 @@ pub fn run_runtime_checks() {
     let auth_string = match std::env::var("AUTH_KEY") {
         Ok(auth_string) => auth_string,
         Err(e) => {
-            error!(
-                "Error reading the authentication string from the environment variables: {e:?}",
-            );
+            error!("Error reading the authentication string from the environment variables: {e:?}",);
             eprintln!(
                 "Error reading the authentication string from the environment variables: {e:?}"
             );
@@ -84,7 +82,7 @@ fn check_print() {
             "Hello World!".to_string(),
             "test".to_string()
         )]
-    ); 
+    );
 }
 
 /// Checks that all wanted libraries can be imported.
@@ -113,7 +111,7 @@ fn check_imports() {
         "contourpy",
         "cftime",
         "certifi",
-        "cartopy", // lowercase 
+        "cartopy", // lowercase
     ];
     for library in &libraries {
         check_single_import(library);
@@ -122,7 +120,8 @@ fn check_imports() {
 
 /// Checks that the code interpreter can import one specific library.
 fn check_single_import(library: &str) {
-    let formatted_import_code = format!(r#"{{"code": "import {library};print(\"success!\", flush=True)"}}"#);
+    let formatted_import_code =
+        format!(r#"{{"code": "import {library};print(\"success!\", flush=True)"}}"#);
     debug!(formatted_import_code);
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(formatted_import_code),

@@ -149,7 +149,6 @@ struct CodeInterpreterArguments {
 
 /// The function that is called when the program is started and the code_interpreter argument is passed.
 pub fn run_code_interpeter(arguments: String) {
-
     let output = execute_code(arguments);
 
     // The LLM wants the output, we'll return it here.

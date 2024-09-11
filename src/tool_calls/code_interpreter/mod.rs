@@ -22,13 +22,15 @@ pub static CODE_INTERPRETER_TOOL_TYPE: Lazy<ChatCompletionTool> =
         function: CODE_INTERPRETER_FUNCTION.clone(),
     });
 
-static CODE_INTERPRETER_FUNCTION: Lazy<FunctionObject> = Lazy::new(|| FunctionObject {
+static CODE_INTERPRETER_FUNCTION: Lazy<FunctionObject> = Lazy::new(|| {
+    FunctionObject {
     name: "code_interpreter".to_string(),
     description: Some(
         "Recieves python code, executes it in python kernel, and returns the result. Supports print statements and returning the last line."
             .to_string(),
     ), 
     parameters: Some(CODE_INTERPRETER_PARAMETER.clone()),
+}
 });
 
 static CODE_INTERPRETER_PARAMETER: Lazy<serde_json::Value> = Lazy::new(|| {

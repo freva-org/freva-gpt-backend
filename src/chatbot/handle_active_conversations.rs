@@ -144,7 +144,7 @@ pub fn save_and_remove_conversation(thread_id: &str) {
 
 /// The assistant and code messages are streamed, so the variants that come from OpenAI contain only one or a few tokens of the message.
 /// This function takes a vector of StreamVariants and concatenates consecutive Assistant messages and the Code messages.
-/// 
+///
 /// So instead of having multiple variants like this: "Assistant": "He", "Assistant": "llo", "Assistant": "!"
 /// we'll have one variant like this: "Assistant": "Hello!". The same goes for the Code messages.
 fn concat_variants(input: Vec<StreamVariant>) -> Vec<StreamVariant> {

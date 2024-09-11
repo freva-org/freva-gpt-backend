@@ -43,7 +43,7 @@ pub fn execute_code(code: String) -> Result<String, String> {
                 {
                     // If the last line contains a "(", it's likely a function call, which we can't evaluate.
                     // If it contains "import", it's likely an import statement, which we also can't evaluate.
-                    // The exception is if it's a variable assignment, but we can't really check that. 
+                    // The exception is if it's a variable assignment, but we can't really check that.
                     // The exception we do check for is if it's a plt.show() call, which we do support.
                     // We'll just execute the whole code.
                     (Some(code), None)

@@ -21,7 +21,7 @@ pub enum ConversationState {
 /// The thread that is streaming will check the state and if it is Stopping, it will stop the streaming and change the state to Ended.
 #[derive(Debug, Clone)]
 pub struct ActiveConversation {
-    pub id: String, 
+    pub id: String,
 
     pub state: ConversationState,
 
@@ -233,8 +233,7 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
 /// A simple helper function to "unescape" a string.
 /// This is needed because the prompt is escaped when it is sent to the frontend.
 fn unescape_string(s: &str) -> String {
-    s.replace("\\\"", "\"")
-    .replace("\\\\", "\\")
+    s.replace("\\\"", "\"").replace("\\\\", "\\")
 }
 
 /// A helper function to convert the `ChatCompletionRequestMessage` to a `StreamVariant`.
