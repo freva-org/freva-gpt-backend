@@ -127,7 +127,7 @@ pub fn start_code_interpeter(arguments: Option<String>, id: String) -> Vec<Strea
             };
 
             // The LLM probably needs both the stdout and stderr, so we'll return both.
-            let stdout_stderr = format!("{stdout_short}\n{stderr_short}");
+            let stdout_stderr = format!("{stdout_short}\n{stderr_short}").trim().to_string(); // Because if the stderr is empty, this would add an unnecessary newline.
             if stdout_stderr.is_empty() {
                 warn!("The code interpreter returned an empty output.");
             }

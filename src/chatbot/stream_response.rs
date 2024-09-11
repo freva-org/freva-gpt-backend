@@ -402,7 +402,7 @@ async fn oai_stream_to_variants(
                         vec![StreamVariant::Assistant(string_delta.clone())]
                     }
                     (_, None, Some(reason)) => {
-                        trace!("Got stop event from OpenAI: {:?}", reason);
+                        debug!("Got stop event from OpenAI: {:?}", reason);
                         handle_stop_event(
                             reason,
                             choice,

@@ -66,10 +66,10 @@ fn check_two_plus_two() {
     assert_eq!(
         output,
         vec![StreamVariant::CodeOutput(
-            "4\n\n".to_string(),
+            "4".to_string(),
             "test".to_string()
         )]
-    ); // I still don't know why the code interpreter adds an extra newline.
+    );
 }
 
 /// Checks that the code interpreter can handle printing.
@@ -82,10 +82,10 @@ fn check_print() {
     assert_eq!(
         output,
         vec![StreamVariant::CodeOutput(
-            "Hello World!\n\n".to_string(),
+            "Hello World!".to_string(),
             "test".to_string()
         )]
-    ); // I still don't know why the code interpreter adds an extra newline.
+    ); 
 }
 
 /// Checks that all wanted libraries can be imported.
@@ -148,7 +148,7 @@ fn check_imports() {
 
 /// Checks that the code interpreter can import one specific library.
 fn check_single_import(library: &str) {
-    let formatted_import_code = format!(r#"{{"code": "import {}"}}"#, library);
+    let formatted_import_code = format!(r#"{{"code": "import {};print(\"success!\", flush=True)"}}"#, library);
     debug!(formatted_import_code);
     let output = crate::tool_calls::code_interpreter::parse_input::start_code_interpeter(
         Some(formatted_import_code),
@@ -157,6 +157,6 @@ fn check_single_import(library: &str) {
     assert!(output.len() == 1);
     assert_eq!(
         output[0],
-        StreamVariant::CodeOutput("\n".to_string(), "test".to_string())
+        StreamVariant::CodeOutput("success!".to_string(), "test".to_string())
     );
 }

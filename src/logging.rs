@@ -37,7 +37,7 @@ pub fn setup_logger(args: &cla_parser::Args) -> LoggerHandle {
 
 fn format_log_message(write: &mut dyn std::io::Write, now: &mut flexi_logger::DeferredNow, record: &flexi_logger::Record) -> std::io::Result<()> {
     let level = record.level();
-    write!(write, "[{}]:{} ({}{}) {}", 
+    write!(write, "[{}]:{} ({}:{}) {}", 
     now.format("%Y-%m-%d %H:%M:%S%.6f"), 
     style(level).paint(format!("{:7}", format!("[{}]",level))), // paint the level in a color
     record.module_path().unwrap_or("<unnamed>"), // Module from tracing
