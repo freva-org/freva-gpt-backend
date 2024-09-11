@@ -115,14 +115,14 @@ fn check_imports() {
         "certifi",
         "cartopy", // lowercase 
     ];
-    for library in libraries.iter() {
+    for library in &libraries {
         check_single_import(library);
     }
 }
 
 /// Checks that the code interpreter can import one specific library.
 fn check_single_import(library: &str) {
-    let formatted_import_code = format!(r#"{{"code": "import {};print(\"success!\", flush=True)"}}"#, library);
+    let formatted_import_code = format!(r#"{{"code": "import {library};print(\"success!\", flush=True)"}}"#);
     debug!(formatted_import_code);
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(formatted_import_code),

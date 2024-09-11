@@ -475,7 +475,7 @@ async fn oai_stream_to_variants(
                                             warn!("Tool call expected code_interpreter, but found: {:?}", name_copy);
                                             // Instead of ending the stream, we'll just ignore the tool call, but send the user a ServerHint.
                                             // Depending on the implementation of the OpenAI API, this might result in a unspecified Server Error on the LLM side.
-                                            vec![StreamVariant::ServerHint(format!("{{\"warning\": \"Tool call expected code_interpreter, but found ->{}<-; content: ->{}<-\"}}", name_copy.unwrap_or_default(), arguments).to_string())]
+                                            vec![StreamVariant::ServerHint(format!("{{\"warning\": \"Tool call expected code_interpreter, but found ->{}<-; content: ->{}<-\"}}", name_copy.unwrap_or_default(), arguments))]
                                         } else {
                                             // We know it's the code interpreter and can send it as a delta.
                                             trace!(
