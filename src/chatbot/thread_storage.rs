@@ -134,11 +134,11 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
         trace!("Parts: {:?}", parts);
         if let Some(parts) = parts {
             let to_append = match parts {
-                ("Prompt", s) => StreamVariant::Prompt((*s).to_string()),
-                ("User", s) => StreamVariant::User((*s).to_string()),
-                ("Assistant", s) => StreamVariant::Assistant((*s).to_string()),
+                ("Prompt", s) => StreamVariant::Prompt(unescape(s)),
+                ("User", s) => StreamVariant::User(unescape(s)),
+                ("Assistant", s) => StreamVariant::Assistant(unescape(s)),
                 ("Code", s) => {
-                    if let Some((content, id)) = split_colon_at_end(s) {
+                    if let Some((content, id)) = split_colon_at_end(&unescape(s)) {
                         StreamVariant::Code((*content).to_string(), (*id).to_string())
                     } else {
                         warn!("Error splitting Code variant, skipping.");
@@ -146,19 +146,19 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
                     }
                 }
                 ("CodeOutput", s) => {
-                    if let Some((content, id)) = split_colon_at_end(s) {
+                    if let Some((content, id)) = split_colon_at_end(&unescape(s)) {
                         StreamVariant::CodeOutput((*content).to_string(), (*id).to_string())
                     } else {
                         warn!("Error splitting CodeOutput variant, skipping.");
                         continue;
                     }
                 }
-                ("Image", s) => StreamVariant::Image((*s).to_string()),
-                ("ServerError", s) => StreamVariant::ServerError((*s).to_string()),
-                ("OpenAIError", s) => StreamVariant::OpenAIError((*s).to_string()),
-                ("CodeError", s) => StreamVariant::CodeError((*s).to_string()),
-                ("StreamEnd", s) => StreamVariant::StreamEnd((*s).to_string()),
-                ("ServerHint", s) => StreamVariant::ServerHint((*s).to_string()),
+                ("Image", s) => StreamVariant::Image(unescape(s)),
+                ("ServerError", s) => StreamVariant::ServerError(unescape(s)),
+                ("OpenAIError", s) => StreamVariant::OpenAIError(unescape(s)),
+                ("CodeError", s) => StreamVariant::CodeError(unescape(s)),
+                ("StreamEnd", s) => StreamVariant::StreamEnd(unescape(s)),
+                ("ServerHint", s) => StreamVariant::ServerHint(unescape(s)),
                 // If we do find a line that doesn't match any of the above, we can skip it.
                 (variant, s) => {
                     warn!(
@@ -179,6 +179,13 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
     trace!("Returning number of lines: {}", res.len());
 
     Ok(res)
+}
+
+/// A simple helper function that unescapes a string.
+fn unescape(s: &str) -> String {
+    s.replace("\\\n", "\n")
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
 }
 
 /// Some variants like Code and CodeOutput have more than one field, so this function splits the content at the last colon.

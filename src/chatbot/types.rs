@@ -143,8 +143,7 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     p
                 } else {
                     // it's probably escaped, so we'll unescape it.
-                    let s = s.replace("\\\"", "\"");
-                    let s = s.replace("\\\\", "\\");
+                    let s = unescape_string(&s);
 
                     trace!("Unescaped prompt: {:?}", s);
 
@@ -227,6 +226,13 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
         }
         }
     }
+}
+
+/// A simple helper function to "unescape" a string.
+/// This is needed because the prompt is escaped when it is sent to the frontend.
+fn unescape_string(s: &str) -> String {
+    s.replace("\\\"", "\"")
+    .replace("\\\\", "\\")
 }
 
 /// A helper function to convert the `ChatCompletionRequestMessage` to a `StreamVariant`.
