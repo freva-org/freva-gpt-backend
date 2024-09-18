@@ -111,7 +111,17 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         };
 
         // We have a Vec of StreamVariant, but we want a Vec of ChatCompletionRequestMessage.
-        help_convert_sv_ccrm(content)
+        let mut past_messages = help_convert_sv_ccrm(content);
+        let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
+            name: Some("user".to_string()),
+            content: async_openai::types::ChatCompletionRequestUserMessageContent::Text(
+                input.clone(),
+            ),
+        });
+
+        // We also add the user's input to the past messages.
+        past_messages.push(user_message);
+        past_messages
     };
 
     // We'll also add a ServerHint about the thread_id to the messages.
