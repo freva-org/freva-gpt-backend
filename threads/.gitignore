@@ -3,4 +3,5 @@
 *
 # Except this file
 !.gitignore
-
+# Also copy the test file
+!test.txt

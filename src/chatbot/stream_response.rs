@@ -111,21 +111,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         };
 
         // We have a Vec of StreamVariant, but we want a Vec of ChatCompletionRequestMessage.
-        content
-            .iter()
-            .map(|e| TryInto::<Vec<ChatCompletionRequestMessage>>::try_into(e.clone())) // A single Stream variant, like prompt, might turn into multiple messages.
-            .filter_map(std::result::Result::ok)
-            .flatten()
-            .chain(std::iter::once(ChatCompletionRequestMessage::User(
-                // Add the user's input to the stream so that the chatbot can respond to it.
-                ChatCompletionRequestUserMessage {
-                    name: Some("user".to_string()),
-                    content: async_openai::types::ChatCompletionRequestUserMessageContent::Text(
-                        input.clone(),
-                    ),
-                },
-            )))
-            .collect::<Vec<_>>()
+        help_convert_sv_ccrm(content)
     };
 
     // We'll also add a ServerHint about the thread_id to the messages.
