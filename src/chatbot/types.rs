@@ -415,3 +415,46 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
 
     all_oai_messages
 }
+
+
+#[cfg(test)]
+mod tests {
+
+    use crate::chatbot::prompting::STARTING_PROMPT_JSON;
+
+    // The helper function to convert a StreamVariant to a ChatCompletionRequestMessage
+    // has some problems, we'll test it here.
+    use super::*;
+    #[test]
+    fn test_help_convert_sv_ccrm() {
+        let input = vec![
+            StreamVariant::Prompt(STARTING_PROMPT_JSON.to_string()),
+            StreamVariant::ServerHint("{\"thread_id\": \"wLRFKFPcDgRJdZwSFBF82LWulvAaS5MR\"}".to_string()),            
+            StreamVariant::User("plot a cirlce".to_string()),
+            StreamVariant::Assistant("To plot a circle, we can use the `matplotlib` library to create a simple visualization. Let's create a plot with a circle centered at the origin (0, 0) with a specified radius. I'll use a radius of 1 for this example.\n\nLet's proceed with the code to generate this plot.".to_string()),
+            StreamVariant::Code("{\n    \"code\": \"import matplotlib.pyplot as plt\\nimport numpy as np\\n\\n# Create a new figure\\nplt.figure(figsize=(6, 6))\\n\\n# Parameters for the circle\\nradius = 1\\nangle = np.linspace(0, 2 * np.pi, 100)  # 100 points around the circle\\n\\n# Circle coordinates\\nx = radius * np.cos(angle)\\ny = radius * np.sin(angle)\\n\\n# Plot the circle\\nplt.plot(x, y, label='Circle with radius 1', color='blue')\\nplt.xlim(-1.5, 1.5)\\nplt.ylim(-1.5, 1.5)\\nplt.gca().set_aspect('equal')  # Aspect ratio equal\\nplt.title('Plot of a Circle')\\nplt.xlabel('X-axis')\\nplt.ylabel('Y-axis')\\nplt.axhline(0, color='grey', lw=0.5, ls='--')  # Add x-axis\\nplt.axvline(0, color='grey', lw=0.5, ls='--')  # Add y-axis\\nplt.legend()\\nplt.grid()\\nplt.show()  \\n\"\n    }".to_string(), "call_13RrNWNbaziDd34bvPXpdrMV".to_string()),
+            StreamVariant::CodeOutput("<module 'matplotlib.pyplot' from '/opt/conda/envs/env/lib/python3.12/site-packages/matplotlib/pyplot.py'>:call_13RrNWNbaziDd34bvPXpdrMV".to_string(), "call_13RrNWNbaziDd34bvPXpdrMV".to_string()),
+            StreamVariant::Image("JUST A BASE64 STRING".to_string()),
+            StreamVariant::Assistant("The plot above displays a circle centered at the origin (0, 0) with a radius of 1. The axes are set to be equal, ensuring that the circle appears proportional. \n\nIf you want to plot a circle with different parameters or need further visualizations, just let me know!".to_string()),
+            StreamVariant::StreamEnd("Generation complete".to_string())
+        ];
+        let output = help_convert_sv_ccrm(input);
+        assert_eq!(output.len(), 25);
+        //DEBUG
+        assert_eq!(output[21], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+            content: Some("To plot a circle, we can use the `matplotlib` library to create a simple visualization. Let's create a plot with a circle centered at the origin (0, 0) with a specified radius. I'll use a radius of 1 for this example.\n\nLet's proceed with the code to generate this plot.".to_string()),
+            name: Some("frevaGPT".to_string()),
+            tool_calls: Some(vec![ChatCompletionMessageToolCall{
+                id: "call_13RrNWNbaziDd34bvPXpdrMV".to_string(),
+                r#type: ChatCompletionToolType::Function,
+                function: FunctionCall{
+                    name: "code_interpreter".to_string(),
+                    arguments: "{\n    \"code\": \"import matplotlib.pyplot as plt\\nimport numpy as np\\n\\n# Create a new figure\\nplt.figure(figsize=(6, 6))\\n\\n# Parameters for the circle\\nradius = 1\\nangle = np.linspace(0, 2 * np.pi, 100)  # 100 points around the circle\\n\\n# Circle coordinates\\nx = radius * np.cos(angle)\\ny = radius * np.sin(angle)\\n\\n# Plot the circle\\nplt.plot(x, y, label='Circle with radius 1', color='blue')\\nplt.xlim(-1.5, 1.5)\\nplt.ylim(-1.5, 1.5)\\nplt.gca().set_aspect('equal')  # Aspect ratio equal\\nplt.title('Plot of a Circle')\\nplt.xlabel('X-axis')\\nplt.ylabel('Y-axis')\\nplt.axhline(0, color='grey', lw=0.5, ls='--')  # Add x-axis\\nplt.axvline(0, color='grey', lw=0.5, ls='--')  # Add y-axis\\nplt.legend()\\nplt.grid()\\nplt.show()  \\n\"\n    }".to_string()
+                }
+            }]),
+            ..Default::default()
+        }));
+
+    }
+
+}

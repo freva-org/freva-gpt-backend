@@ -619,13 +619,14 @@ async fn handle_stop_event(
                     vec![StreamVariant::ServerError("Tried to restart conversation after tool call, but failed! No active conversation found.".to_string())]
                 }
                 Some(messages) => {
-                    trace!(
-                        "Restarting conversation after tool call with messages: {:?}",
-                        messages
-                    );
                     // the actual messages we need to put there are those plus the generated ones, because the generated one were not added to the conversation yet.
                     let mut all_messages = messages.clone();
                     all_messages.append(&mut all_generated_variants.clone());
+
+                    trace!(
+                        "Restarting conversation after tool call with messages: {:?}",
+                        all_messages
+                    );
 
                     // The stream wants a vector of ChatCompletionRequestMessage, so we need to convert the StreamVariants to that.
                     let all_oai_messages = help_convert_sv_ccrm(all_messages);
