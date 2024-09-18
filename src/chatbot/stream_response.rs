@@ -154,6 +154,8 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 fn build_request(
     messages: Vec<ChatCompletionRequestMessage>,
 ) -> Result<CreateChatCompletionRequest, async_openai::error::OpenAIError> {
+    // Because some errors occured around here, we'll log the messages.
+    trace!("Messages sending to OpenAI: {:?}", messages);
     CreateChatCompletionRequestArgs::default()
         .model(String::from(DEFAULTCHATBOT))
         .n(1)
