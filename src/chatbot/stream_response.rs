@@ -81,11 +81,14 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     // We also require the freva_config_path to be set. From the frontend, it's called "freva_config".
     let freva_config_path = match qstring.get("freva_config").or_else(|| qstring.get("freva-config")) { // allow both freva_config and freva-config
         None | Some("") => {
-            // If the freva_config is not found, we'll return a 400
             warn!("The User requested a stream without a freva_config path being set.");
-            return HttpResponse::BadRequest().body(
-                "Freva config not found. Please provide a freva_config in the query parameters.",
-            );
+            // // If the freva_config is not found, we'll return a 400
+            // return HttpResponse::BadRequest().body(
+            //     "Freva config not found. Please provide a freva_config in the query parameters.",
+            // );
+
+            // FIXME: remove this temporary fix
+            "/work/ch1187/clint/freva-dev/freva/evaluation_system.conf".to_string()
         }
         Some(freva_config_path) => freva_config_path.to_string(),
     };
