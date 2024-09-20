@@ -22,7 +22,7 @@ RUN conda init bash
 RUN echo "conda activate env" >> ~/.bashrc 
 
 # Install the python packages into the environment
-RUN conda install -c conda-forge -n env numpy matplotlib netcdf4 cartopy contourpy pandas xarray
+RUN conda install -c conda-forge -n env numpy matplotlib netcdf4 cartopy contourpy pandas xarray freva
 
 # Move over the source code
 COPY src /app/src
