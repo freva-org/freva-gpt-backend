@@ -30,11 +30,13 @@ use crate::{
 };
 
 /// # Stream Response
-/// Takes in a thread_id, an input and an auth_key and returns a stream of StreamVariants and their content.
+/// Takes in a thread_id, an input, a path to the freva config file and an auth_key and returns a stream of StreamVariants and their content.
 ///
 /// The thread_id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
 /// If it's empty or not given, a new thread is created.
 ///
+/// The freva config file should be always set, as it's needed for the freva library to work.
+/// 
 /// The stream consists of StreamVariants and their content. See the different Stream Variants above.
 /// If the stream creates a new thread, the new thread_id will be sent as a ServerHint.
 /// The stream always ends with a StreamEnd event, unless a server error occurs.
@@ -76,6 +78,20 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         Some(input) => input.to_string(),
     };
 
+    // We also require the freva_config_path to be set. From the frontend, it's called "freva_config".
+    let freva_config_path = match qstring.get("freva_config").or_else(|| qstring.get("freva-config")) { // allow both freva_config and freva-config
+        None | Some("") => {
+            // If the freva_config is not found, we'll return a 400
+            warn!("The User requested a stream without a freva_config path being set.");
+            return HttpResponse::BadRequest().body(
+                "Freva config not found. Please provide a freva_config in the query parameters.",
+            );
+        }
+        Some(freva_config_path) => freva_config_path.to_string(),
+    };
+
+    // TODO: check whether we can access the freva_config_path???
+
     info!(
         "Starting stream for thread {} with input: {}",
         thread_id, input
@@ -88,7 +104,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         trace!("Adding base message to stream.");
 
         let starting_prompt = StreamVariant::Prompt((*STARTING_PROMPT_JSON).clone());
-        add_to_conversation(&thread_id, vec![starting_prompt]);
+        add_to_conversation(&thread_id, vec![starting_prompt], freva_config_path.clone());
 
         let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
             name: Some("user".to_string()),
@@ -131,6 +147,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     add_to_conversation(
         &thread_id,
         vec![server_hint, StreamVariant::User(input.clone())],
+        freva_config_path.clone(),
     );
 
     let request: CreateChatCompletionRequest = match build_request(messages) {
@@ -143,7 +160,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     };
     trace!("Request built!");
 
-    create_and_stream(request, thread_id).await
+    create_and_stream(request, thread_id, freva_config_path).await
 }
 
 /// A simple helper function to build the stream.
@@ -180,6 +197,7 @@ pub static STREAM_STOP_CONTENT: Lazy<actix_web::web::Bytes> = Lazy::new(|| {
 async fn create_and_stream(
     request: CreateChatCompletionRequest,
     thread_id: String,
+    freva_config_path: String,
 ) -> actix_web::HttpResponse {
     let open_ai_stream = match CLIENT.chat().create_stream(request).await {
         Ok(stream) => stream,
@@ -202,7 +220,7 @@ async fn create_and_stream(
             String::new(),   // the tool arguments,
             String::new(),   // the tool id
         ),
-        |(
+        move |(
             mut open_ai_stream,
             thread_id,
             should_stop,
@@ -211,7 +229,10 @@ async fn create_and_stream(
             mut tool_name,
             mut tool_arguments,
             mut tool_id,
-        )| async move {
+        )| {
+            // It is required to clone the freva_config_path, because it is moved into the closure.
+        let freva_config_path_clone = freva_config_path.clone();
+        async move {
             // Even higher priority than stopping the stream is sending the thread_id hint.
             if should_hint_thread_id {
                 // If we should hint the thread_id, we'll send a ServerHint event.
@@ -318,7 +339,7 @@ async fn create_and_stream(
                     .await;
 
                     // Also add the variants into the active conversation
-                    add_to_conversation(&thread_id, variants.clone());
+                    add_to_conversation(&thread_id, variants.clone(), freva_config_path_clone.clone());
 
                     // Check whether the stream should end by checking the variants.
                     let should_end = variants
@@ -366,7 +387,8 @@ async fn create_and_stream(
                     // Ends if the variant is a StreamEnd
                 }
             }
-        },
+        }
+    },
     );
 
     HttpResponse::Ok().streaming(out_stream)
@@ -591,6 +613,7 @@ async fn handle_stop_event(
                     name.to_string(),
                     Some(tool_arguments.to_string()),
                     tool_id.to_string(),
+                    thread_id.to_string(),
                 ); // call the tool with the arguments
                 all_generated_variants.append(&mut temp);
                 // Reset the tool_name and tool_arguments

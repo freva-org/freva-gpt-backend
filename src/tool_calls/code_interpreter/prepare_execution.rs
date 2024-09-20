@@ -1,9 +1,12 @@
 use std::process::Command;
 
-use tracing::{trace, warn};
+use tracing::{info, trace, warn};
 
 use crate::{
-    chatbot::types::StreamVariant,
+    chatbot::{
+        handle_active_conversations::conversation_state,
+        types::{ConversationState, StreamVariant},
+    },
     tool_calls::code_interpreter::{
         execute::execute_code,
         safety_check::{code_is_likely_safe, sanitize_code},
@@ -13,11 +16,35 @@ use crate::{
 /// The main function to execute the code interpreter.
 /// Takes in the arguments that were passed to the tool call as well as the id of the tool call (for the output).
 /// Returns the output of the code interpreter as a Vector of StreamVariants.
-pub fn start_code_interpeter(arguments: Option<String>, id: String) -> Vec<StreamVariant> {
+/// Requires the thread_id to be set when used by the frontend. It is used to get the freva_config_path.
+pub fn start_code_interpeter(
+    arguments: Option<String>,
+    id: String,
+    thread_id: Option<String>,
+) -> Vec<StreamVariant> {
     trace!(
         "Running the code interpreter with the following arguments: {:?}",
         arguments
     );
+
+    // We also need to get the freva_config_path from the thread_id.
+    let freva_config_path = match thread_id {
+        None => {
+            info!("Thread_id not set, assuming in testing mode. Not setting freva_config_path.");
+            "".to_string()
+        }
+        Some(thread_id) => match conversation_state(&thread_id) {
+            None => {
+                warn!("No conversation state found while trying to run the code interpreter. Not setting freva_config_path, this WILL break any calls to the code interpreter that require it.");
+                "".to_string()
+            }
+            Some(ConversationState::Ended) | Some(ConversationState::Stopping) => {
+                warn!("Trying to run the code interpreter with a conversation that has already ended. Not executing the code interpreter.");
+                return vec![StreamVariant::CodeOutput("The conversation has already ended. Please start a new conversation to use the code interpreter.".to_string(), id)];
+            }
+            Some(ConversationState::Streaming(freva_config_path)) => freva_config_path,
+        },
+    };
 
     // First run the basic safety check.
     if !code_is_likely_safe(&arguments.clone().unwrap_or_default()) {
@@ -69,6 +96,7 @@ pub fn start_code_interpeter(arguments: Option<String>, id: String) -> Vec<Strea
     let output = Command::new("./target/debug/freva-gpt2-backend")
         .arg("--code-interpreter")
         .arg(code.code)
+        .env("EVALUATION_SYSTEM_CONFIG_FILE", freva_config_path)
         .output();
 
     // for now, we'll just return the output as a string. The code interpreter will later be able to return more complex data.

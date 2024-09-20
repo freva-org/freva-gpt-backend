@@ -56,7 +56,7 @@ pub async fn stop(req: HttpRequest) -> impl Responder {
                 if conversation.id == thread_id {
                     // if any conversation has the same id as the one we want to stop
                     inner_res = match conversation.state {
-                        ConversationState::Streaming => {
+                        ConversationState::Streaming(_) => {
                             // if it's streaming, we want to stop it
                             conversation.state = ConversationState::Stopping;
                             StopResult::Found // and return that we found it

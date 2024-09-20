@@ -58,6 +58,7 @@ fn check_two_plus_two() {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(r#"{"code": "2+2"}"#.to_string()),
         "test".to_string(),
+        None, 
     );
     assert_eq!(output.len(), 1);
     assert_eq!(
@@ -74,6 +75,7 @@ fn check_print() {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(r#"{"code": "print('Hello World!', flush=True)"}"#.to_string()),
         "test".to_string(),
+        None,
     );
     assert_eq!(output.len(), 1);
     assert_eq!(
@@ -126,6 +128,7 @@ fn check_single_import(library: &str) {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(formatted_import_code),
         "test".to_string(),
+        None,
     );
     assert!(output.len() == 1);
     assert_eq!(

@@ -11,7 +11,7 @@ use tracing::{debug, error, trace, warn};
 
 #[derive(Debug, Clone)]
 pub enum ConversationState {
-    Streaming,
+    Streaming(String), // The String is the Path to the file of the freva config. 
     Stopping,
     Ended,
 }

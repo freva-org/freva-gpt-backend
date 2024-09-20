@@ -39,7 +39,7 @@ pub fn new_conversation_id() -> String {
 
 /// Adds the given Stream Variants to the conversation with the given ID
 /// or creates a new conversation if the ID is not found.
-pub fn add_to_conversation(thread_id: &str, variant: Vec<StreamVariant>) {
+pub fn add_to_conversation(thread_id: &str, variant: Vec<StreamVariant>, freva_config_path: String) {
     trace!("Adding to conversation with id: {}", thread_id);
 
     match ACTIVE_CONVERSATIONS.lock() {
@@ -53,7 +53,7 @@ pub fn add_to_conversation(thread_id: &str, variant: Vec<StreamVariant>) {
                 guard.push(ActiveConversation {
                     id: thread_id.to_string(),
                     conversation: variant,
-                    state: ConversationState::Streaming,
+                    state: ConversationState::Streaming(freva_config_path),
                 });
             }
         }
