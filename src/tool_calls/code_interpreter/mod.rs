@@ -13,6 +13,7 @@ pub mod execute;
 use async_openai::types::{ChatCompletionTool, ChatCompletionToolType, FunctionObject};
 use once_cell::sync::Lazy;
 use serde_json::json;
+use tracing::{debug, warn};
 
 /// The code interpreter as a tool.
 /// Needed for the LLM to understand how to call the code interpreter.
@@ -45,3 +46,19 @@ static CODE_INTERPRETER_PARAMETER: Lazy<serde_json::Value> = Lazy::new(|| {
         "required" : ["code"]
     })
 });
+
+/// One of the things that the code interpreter needs is the path to the freva config file.
+/// This function gets the path and makes sure we have access to it.
+pub fn verify_can_access(freva_config_path: String) -> bool {
+    // We'll try to read the file to see if we can access it.
+    match std::fs::read_to_string(&freva_config_path) {
+        Ok(content) => {
+            debug!("Successfully read the freva config file: {:?}", content);
+            true
+        },
+        Err(e) => {
+            warn!("Error reading the freva config file: {:?}", e);
+            false
+        }
+    }
+}

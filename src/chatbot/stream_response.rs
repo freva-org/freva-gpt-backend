@@ -26,7 +26,7 @@ use crate::{
         types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
         CLIENT,
     },
-    tool_calls::{route_call::route_call, ALL_TOOLS},
+    tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS},
 };
 
 /// # Stream Response
@@ -90,7 +90,10 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         Some(freva_config_path) => freva_config_path.to_string(),
     };
 
-    // TODO: check whether we can access the freva_config_path???
+    if !verify_can_access(freva_config_path.clone()) {
+        warn!("The User requested a stream with a freva_config path that cannot be accessed. Path: {}", freva_config_path);
+        warn!("Because it is not set, any usage of the freva library will fail.");
+    }
 
     info!(
         "Starting stream for thread {} with input: {}",
