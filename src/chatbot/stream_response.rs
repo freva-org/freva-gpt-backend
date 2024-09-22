@@ -13,6 +13,7 @@ use documented::docs_const;
 use futures::{stream, Stream, StreamExt};
 use once_cell::sync::Lazy;
 use tracing::{debug, error, info, trace, warn};
+use tracing_subscriber::field::debug;
 
 use crate::{
     chatbot::{
@@ -54,6 +55,8 @@ use crate::{
 pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let qstring = qstring::QString::from(req.query_string());
 
+    trace!("Query string: {:?}", qstring);
+
     // First try to authorize the user.
     crate::auth::authorize_or_fail!(qstring);
 
@@ -77,6 +80,8 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         }
         Some(input) => input.to_string(),
     };
+
+    debug!("Thread ID: {}, Input: {}", thread_id, input);
 
     // We also require the freva_config_path to be set. From the frontend, it's called "freva_config".
     let freva_config_path = match qstring.get("freva_config").or_else(|| qstring.get("freva-config")) { // allow both freva_config and freva-config
