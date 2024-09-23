@@ -24,9 +24,6 @@ RUN echo "conda activate env" >> ~/.bashrc
 # Install the python packages into the environment
 RUN conda install -c conda-forge -n env numpy matplotlib netcdf4 cartopy contourpy pandas xarray freva
 
-# Move over the source code
-COPY src /app/src
-
 # Also copy over the Cargo.toml file to be able to start the server
 COPY Cargo.toml /app/Cargo.toml
 
@@ -41,6 +38,9 @@ ENV PYTHONUSERBASE /opt/conda/envs/env
 ENV PYTHONPATH=/opt/conda/envs/env/lib/python3.12/site-packages
 ENV PATH /opt/conda/envs/env/bin/:$PATH
 ENV LD_LIBRARY_PATH /opt/conda/envs/env/lib/:$PATH
+
+# Move over the source code
+COPY src /app/src
 
 # DEBUG: Crashes the build with info about the python environment that will be used. 
 # ENV PYO3_PRINT_CONFIG 1
