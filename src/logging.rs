@@ -33,7 +33,6 @@ pub fn setup_logger(args: &cla_parser::Args) -> LoggerHandle {
     // to keep the logger alive, we need to return it to the main thread and keep it alive there
 
     tracing::info!("Logger initialized successfully.");
-    println!("Logger initialized successfully.");
     logger
 }
 

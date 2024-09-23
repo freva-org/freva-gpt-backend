@@ -13,7 +13,6 @@ use documented::docs_const;
 use futures::{stream, Stream, StreamExt};
 use once_cell::sync::Lazy;
 use tracing::{debug, error, info, trace, warn};
-use tracing_subscriber::field::debug;
 
 use crate::{
     chatbot::{
