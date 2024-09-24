@@ -28,7 +28,7 @@ pub fn start_code_interpeter(
     );
 
     // We also need to get the freva_config_path from the thread_id.
-    let freva_config_path = match thread_id {
+    let freva_config_path = match thread_id.clone() {
         None => {
             info!("Thread_id not set, assuming in testing mode. Not setting freva_config_path.");
             "".to_string()
@@ -87,6 +87,9 @@ pub fn start_code_interpeter(
         code.code
     );
 
+    // The code interpreter also needs the thread_id to retrieve and save the pickle file.
+    // We'll pass it as an environment variable to the code interpreter.
+
     // Instead of just executing the code in this process, we start a new one.
     // This has several advantages:
     // For one, we can actually read the stdout and stderr of the process, which we can't do if we just execute the code in this process.
@@ -97,6 +100,7 @@ pub fn start_code_interpeter(
         .arg("--code-interpreter")
         .arg(code.code)
         .env("EVALUATION_SYSTEM_CONFIG_FILE", freva_config_path)
+        .env("THREAD_ID", thread_id.unwrap_or_default())
         .output();
 
     // for now, we'll just return the output as a string. The code interpreter will later be able to return more complex data.
@@ -155,7 +159,7 @@ pub fn start_code_interpeter(
             // The LLM probably needs both the stdout and stderr, so we'll return both.
             let stdout_stderr = format!("{stdout_short}\n{stderr_short}").trim().to_string(); // Because if the stderr is empty, this would add an unnecessary newline.
             if stdout_stderr.is_empty() {
-                warn!("The code interpreter returned an empty output.");
+                info!("The code interpreter returned an empty output.");
             }
 
             let mut ouput_vec = vec![StreamVariant::CodeOutput(stdout_stderr, id)];
@@ -177,7 +181,21 @@ struct CodeInterpreterArguments {
 
 /// The function that is called when the program is started and the code_interpreter argument is passed.
 pub fn run_code_interpeter(arguments: String) {
-    let output = execute_code(arguments);
+    // Before executing the code, we'll want to retrieve the Thread_id environment variable.
+    // This is needed for the code interpreter to save the pickle file.
+
+    let mut thread_id = match std::env::var("THREAD_ID") {
+        Err(e) => {
+            warn!("Error reading the thread_id environment variable: {:?}", e);
+            None
+        }
+        Ok(thread_id) => Some(thread_id),
+    };
+    if thread_id == Some("".to_string()) {
+        thread_id = None;
+    }
+
+    let output = execute_code(arguments, thread_id);
 
     // The LLM wants the output, we'll return it here.
     let output = match output {

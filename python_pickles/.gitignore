@@ -1,0 +1,6 @@
+# Directory for test data: small files that the chatbot can use to give some examples of what it can do.
+# Ignore everything in this directory
+*
+# Except this file
+!.gitignore
+

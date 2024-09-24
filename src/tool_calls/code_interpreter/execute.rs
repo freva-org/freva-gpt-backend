@@ -9,7 +9,7 @@ use tracing::{debug, info, trace, warn};
 /// Not actually, but we support returning the last line of the code.
 ///
 /// REQUIRES: The code has passed the safety checks.
-pub fn execute_code(code: String) -> Result<String, String> {
+pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, String> {
     trace!("Preparing python interpreter for code execution.");
     pyo3::prepare_freethreaded_python();
     // Fixed: Martin told me that the "global" interpreter lock, is, in fact, not global, but per process.
@@ -18,7 +18,10 @@ pub fn execute_code(code: String) -> Result<String, String> {
     trace!("Starting GIL block.");
     let output = Python::with_gil(|py| {
         // We need a PyDict to store the local and global variables for the call.
-        let locals = PyDict::new_bound(py);
+        let locals = match try_read_locals(py, thread_id.clone()) {
+            Some(locals) => locals,
+            None => PyDict::new_bound(py),
+        };
         let globals = PyDict::new_bound(py);
 
         let result = {
@@ -30,18 +33,16 @@ pub fn execute_code(code: String) -> Result<String, String> {
                 None => {
                     // If there is no newline, we'll just eval the whole code, unless an import is present.
                     // If an import is present, we'll have to execute it instead.
-                    if code.contains("import") {
-                        (Some(code), None)
-                    } else {
+                    if should_eval(&code) {
                         (None, Some(code))
+                    } else {
+                        (Some(code), None)
                     }
                 }
                 Some((rest, last)) => {
                     // We'll have to check the last line
                     let last_line = last.trim();
-                    if (last_line.contains('(') || last_line.contains("import"))
-                        && !last_line.contains("plt.show()")
-                    {
+                    if !should_eval(last_line) {
                         // If the last line contains a "(", it's likely a function call, which we can't evaluate.
                         // If it contains "import", it's likely an import statement, which we also can't evaluate.
                         // The exception is if it's a variable assignment, but we can't really check that.
@@ -142,6 +143,12 @@ pub fn execute_code(code: String) -> Result<String, String> {
             warn!("Error flushing stdout and stderr: {:?}", flush);
         }
 
+        // Additionally, we'll save the locals to a pickle file.
+        // But that's only possible if we have a thread_id.
+        if let Some(thread_id) = thread_id {
+            save_to_pickle_file(py, locals, thread_id);
+        }
+
         result
     });
 
@@ -166,6 +173,15 @@ pub fn execute_code(code: String) -> Result<String, String> {
     }
 
     output
+}
+
+/// Helper function to decide whether a line should be evaluated or executed.
+/// Statements like 2+2 or list expressions should be evaluated,
+/// while function calls, imports, and variable assignments should be executed.
+fn should_eval(line: &str) -> bool {
+    let negative = line.contains("import") || line.contains("(") || line.contains("=");
+    let exceptions = line.contains("plt.show()") || line.contains("item()");
+    !negative || exceptions
 }
 
 /// Helper function to turn a PyErr into a string for the LLM
@@ -235,4 +251,66 @@ fn try_get_image(plt: &Bound<PyAny>) -> Option<Vec<u8>> {
     }
     // If it's not a plt module, we'll just return None.
     None
+}
+
+/// Helper function to read the locals from the pickled file.
+/// (Also the only function where I use the question mark operator.)
+fn try_read_locals(py: Python, thread_id: Option<String>) -> Option<Bound<PyDict>> {
+    // If the thread_id is None, we don't even have to try to read the file.
+    let thread_id = thread_id?; // Unwrap the thread_id.
+    let path = format!("python_pickles/{thread_id}.pickle");
+
+    // empty read on the file means that if we can't read it, nothing happens.
+    std::fs::read(&path).ok()?;
+
+    // The Python code to read the pickle file to a variable named loaded_vars.
+    let code =
+        format!("import pickle\nwith open('{path}', 'rb') as f:\n    loaded_vars = pickle.load(f)");
+    let temp_locals = PyDict::new_bound(py);
+
+    // Run the code; if it doesn't work, we'll just return None.
+    py.run_bound(&code, Some(&PyDict::new_bound(py)), Some(&temp_locals))
+        .ok()?;
+
+    // Now we have the loaded_vars in the locals.
+    // We have to load that into the locals in rust, so we can use it.
+    let loaded_vars = temp_locals.get_item("loaded_vars").ok()??;
+
+    // We expect the loaded_vars to be a dictionary, so we'll try to convert it to one.
+    let locals = loaded_vars.downcast_into::<PyDict>().ok()?;
+
+    Some(locals)
+}
+
+/// Helper function to save the locals to a pickle file.
+fn save_to_pickle_file(py: Python, locals: Bound<PyDict>, thread_id: String) {
+    // First we filter the locals to only include the ones that are actually serializable.
+    // We'll execute some python code to do that.
+    let code = format!(
+        r#"import pickle
+local_items = locals().copy()
+pickleable_vars = {{}}
+for key, value in local_items.items():
+    try:
+        pickle.dumps(value)
+        pickleable_vars[key] = value
+    except Exception as e:
+        pass # We'll just ignore the ones that can't be pickled.
+with open('python_pickles/{thread_id}.pickle', 'wb') as f:
+    pickle.dump(pickleable_vars, f)"#
+    );
+    let locals = locals.clone();
+
+    // We'll run the code.
+    match py.run_bound(&code, Some(&PyDict::new_bound(py)), Some(&locals)) {
+        Ok(()) => {
+            // The code executed successfully.
+            trace!("Successfully saved the locals to a pickle file.");
+        }
+        Err(e) => {
+            // The code didn't execute successfully.
+            warn!("Error saving the locals to a pickle file: {:?}", e);
+            println!("Error saving the locals to a pickle file: {e:?}",);
+        }
+    }
 }

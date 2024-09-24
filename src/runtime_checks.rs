@@ -49,6 +49,7 @@ pub fn run_runtime_checks() {
     // Note that those checks need to be runtime, not compiletime, as the code interpreter calles the binary itself.
     print!("Running runtime checks including library checks for the code interpreter... ");
     info!("Running runtime checks including library checks for the code interpreter.");
+    check_assignments();
     check_two_plus_two();
     check_print();
     check_print_noflush();
@@ -66,7 +67,10 @@ pub fn run_runtime_checks() {
     info!("The code interpreter can handle crashes.");
 
     // Also check that required directories exist.
-    if check_directory("/app/logs") & check_directory("/app/threads") {
+    if check_directory("/app/logs")
+        & check_directory("/app/threads")
+        & check_directory("/app/python_pickles")
+    {
         println!("All required directories exist and are readable.");
         info!("All required directories exist and are readable.");
     } else {
@@ -146,6 +150,24 @@ fn check_print_two() {
             "Hello\nWorld!".to_string(),
             "test".to_string()
         ),]
+    );
+}
+
+/// Check whether simple assignments work.
+fn check_assignments() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "a = 2"}"#.to_string()),
+        "test".to_string(),
+        None,
+    );
+    // The output should be empty, as we're not printing anything.
+    assert_eq!(output.len(), 1);
+    assert_eq!(
+        output,
+        vec![StreamVariant::CodeOutput(
+            "".to_string(),
+            "test".to_string()
+        )]
     );
 }
 
