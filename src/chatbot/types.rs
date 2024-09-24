@@ -6,7 +6,7 @@ use async_openai::types::{
     ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall,
 };
 use documented::Documented;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::{debug, error, trace, warn};
 
 #[derive(Debug, Clone)]
@@ -64,7 +64,7 @@ pub struct ActiveConversation {
 /// The Content is in JSON format, with the key being the hint and the value being the content. Currently, only the keys "thread_id" and "warning" are used.
 /// An example for a ServerHint packet would be `{"variant": "ServerHint", "content": "{\"thread_id\":\"1234\"}"}`.
 /// That means that the content needs to be parsed as JSON to get the actual content.
-#[derive(Debug, Serialize, Clone, Documented, PartialEq, strum::VariantNames)]
+#[derive(Debug, Serialize, Deserialize, Clone, Documented, PartialEq, strum::VariantNames)]
 #[serde(tag = "variant", content = "content")] // Makes it so that the variant names are inside the object and the content is held in the content field.
 pub enum StreamVariant {
     /// The Prompt for the LLM, as JSON; not to be displayed to the user.
@@ -139,7 +139,6 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                 // We cannot just put the prompt in the message, since it's not a valid message.
                 // It consists of multiple messages, so we'll need to unpack them. 
 
-                // Sometimes `s` is escaped, so we'll need to unescape it. 
                 let prompt = if let Ok(p) = serde_json::from_str(&s) {
                     trace!("Input prompt: {:?}", s);
                     p
@@ -229,12 +228,6 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
         }
         }
     }
-}
-
-/// A simple helper function to "unescape" a string.
-/// This is needed because the prompt is escaped when it is sent to the frontend.
-fn unescape_string(s: &str) -> String {
-    s.replace("\\\"", "\"").replace("\\\\", "\\")
 }
 
 /// A helper function to convert the `ChatCompletionRequestMessage` to a `StreamVariant`.
@@ -417,6 +410,12 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
     all_oai_messages
 }
 
+
+/// A simple helper function to "unescape" a string.
+/// This is needed because the prompt is escaped when it is sent to the frontend.
+pub fn unescape_string(s: &str) -> String {
+    s.replace("\\\"", "\"").replace("\\\\", "\\").replace("\\n", "\n")
+}
 
 #[cfg(test)]
 mod tests {

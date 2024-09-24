@@ -72,11 +72,7 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
         }
     };
 
-    // Because we don't want the user to see the prompt when they request the thread, we'll remove it.
-    let result = result
-        .into_iter()
-        .filter(|x| !matches!(x, StreamVariant::Prompt(_)))
-        .collect::<Vec<_>>();
+    let result = post_process(result);
 
     // We can now return the content as a JSON response using serde_json
 
@@ -91,4 +87,12 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
 
     trace!("Returning thread content: {}", json);
     HttpResponse::Ok().body(json)
+}
+
+/// Post-processes the Vector of Stream Variants to be sent to the user.
+/// For now, this only removes the prompt variant.
+fn post_process(v: Vec<StreamVariant>) -> Vec<StreamVariant> {
+    v.into_iter()
+        .filter(|x| !matches!(x, StreamVariant::Prompt(_)))
+        .collect()
 }

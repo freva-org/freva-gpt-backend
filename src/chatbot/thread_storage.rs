@@ -18,7 +18,9 @@ use std::{
     io::{Error, Read, Write},
 };
 
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
+
+use crate::chatbot::types::unescape_string;
 
 use super::types::{Conversation, StreamVariant};
 
@@ -34,7 +36,19 @@ pub fn append_thread(thread_id: &str, content: Conversation) {
     let mut to_write = String::new();
 
     for variant in content {
-        to_write.push_str(&variant.to_string());
+        
+        let to_push = match serde_json::to_string(&variant) {
+            Ok(s) => s, // If it works, we can just use the JSON string.
+            Err(e) => {
+                // If it doesn't, we can fall back to the old encoding. This is very bad, but we can't just not store the conversation.
+                // Besides, according to the signature of `serde_json::to_string`,
+                // this should only be able to fail if the type is not infallibly serializable, which StreamVariant is.
+                error!("Error serializing variant to JSON; falling back to old encoding: {:?}", e);
+                variant.to_string() // This will use the old encoding, see the types.rs file.
+            }
+        };  
+
+        to_write.push_str(to_push.as_str());
         to_write.push('\n');
     }
 
@@ -128,16 +142,29 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
     let mut res = Vec::new();
 
     for line in lines {
+        // First try to use json to deserialize the line.
+        match serde_json::from_str(line) {
+            Ok(variant) => {
+                trace!("Successfully deserialized line: {:?}", variant);
+                res.push(variant);
+                continue;
+            },
+            Err(e) => {
+                // If we can't deserialize the line, we'll assume that it uses the old encoding and try that.
+                info!("Error deserializing line, trying old encoding: {:?}", e);
+            }
+        };
+
         let line = line.trim_matches('\"'); // Remove any quotes that might be there.
         let parts = line.split_once(':');
         trace!("Parts: {:?}", parts);
         if let Some(parts) = parts {
             let to_append = match parts {
-                ("Prompt", s) => StreamVariant::Prompt(unescape(s)),
-                ("User", s) => StreamVariant::User(unescape(s)),
-                ("Assistant", s) => StreamVariant::Assistant(unescape(s)),
+                ("Prompt", s) => StreamVariant::Prompt(unescape_string(s)),
+                ("User", s) => StreamVariant::User(unescape_string(s)),
+                ("Assistant", s) => StreamVariant::Assistant(unescape_string(s)),
                 ("Code", s) => {
-                    if let Some((content, id)) = split_colon_at_end(&unescape(s)) {
+                    if let Some((content, id)) = split_colon_at_end(&unescape_string(s)) {
                         StreamVariant::Code((*content).to_string(), (*id).to_string())
                     } else {
                         warn!("Error splitting Code variant, skipping.");
@@ -145,19 +172,19 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
                     }
                 }
                 ("CodeOutput", s) => {
-                    if let Some((content, id)) = split_colon_at_end(&unescape(s)) {
+                    if let Some((content, id)) = split_colon_at_end(&unescape_string(s)) {
                         StreamVariant::CodeOutput((*content).to_string(), (*id).to_string())
                     } else {
                         warn!("Error splitting CodeOutput variant, skipping.");
                         continue;
                     }
                 }
-                ("Image", s) => StreamVariant::Image(unescape(s)),
-                ("ServerError", s) => StreamVariant::ServerError(unescape(s)),
-                ("OpenAIError", s) => StreamVariant::OpenAIError(unescape(s)),
-                ("CodeError", s) => StreamVariant::CodeError(unescape(s)),
-                ("StreamEnd", s) => StreamVariant::StreamEnd(unescape(s)),
-                ("ServerHint", s) => StreamVariant::ServerHint(unescape(s)),
+                ("Image", s) => StreamVariant::Image(unescape_string(s)),
+                ("ServerError", s) => StreamVariant::ServerError(unescape_string(s)),
+                ("OpenAIError", s) => StreamVariant::OpenAIError(unescape_string(s)),
+                ("CodeError", s) => StreamVariant::CodeError(unescape_string(s)),
+                ("StreamEnd", s) => StreamVariant::StreamEnd(unescape_string(s)),
+                ("ServerHint", s) => StreamVariant::ServerHint(unescape_string(s)),
                 // If we do find a line that doesn't match any of the above, we can skip it.
                 (variant, s) => {
                     warn!(
@@ -180,12 +207,6 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
     Ok(res)
 }
 
-/// A simple helper function that unescapes a string.
-fn unescape(s: &str) -> String {
-    s.replace("\\\n", "\n")
-        .replace("\\\"", "\"")
-        .replace("\\\\", "\\")
-}
 
 /// Some variants like Code and CodeOutput have more than one field, so this function splits the content at the last colon.
 fn split_colon_at_end(s: &str) -> Option<(&str, &str)> {
