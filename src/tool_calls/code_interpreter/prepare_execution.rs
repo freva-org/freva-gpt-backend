@@ -66,7 +66,7 @@ pub fn start_code_interpeter(
 
     // First check whether the arguments are actually present, maybe the LLM forgot to include them.
     let code = if let Some(content) = arguments {
-        previous_code_interpreter_imports + &content
+        content
     } else {
         warn!("No code was found while trying to run the code_interpreter.");
         return vec![StreamVariant::CodeOutput(
@@ -85,7 +85,7 @@ pub fn start_code_interpeter(
         }
     };
 
-    let sanitized_code = sanitize_code(code.code);
+    let sanitized_code = sanitize_code(previous_code_interpreter_imports + &code.code);
     code.code = sanitized_code;
 
     trace!(
@@ -230,7 +230,7 @@ fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> String {
             for variant in conversation {
                 if let StreamVariant::Code(code, _) = variant {
                     // Split the code into lines and only take the lines that start with "import" or start with "from" AND contain "import".
-                    let code_lines = code.lines();
+                    let code_lines = code.split("\\n"); // It's escaped because it's JSON.
                     for line in code_lines {
                         if line.starts_with("import")
                             || (line.starts_with("from") && line.contains("import"))
