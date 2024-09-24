@@ -17,134 +17,132 @@ pub fn execute_code(code: String) -> Result<String, String> {
 
     trace!("Starting GIL block.");
     let output = Python::with_gil(|py| {
-
-
-
         // We need a PyDict to store the local and global variables for the call.
         let locals = PyDict::new_bound(py);
         let globals = PyDict::new_bound(py);
 
         let result = {
+            // Because we want the last line to be returned, we'll execute all but the last line.
+            let (rest_lines, last_line) = match code.trim().rsplit_once('\n') {
+                // We need to decide how to split up the code. If it's just one line, we put it into the last line, since that's ouput is evaluated by us.
+                // If that's not the case, we'll split it up into the last line and the rest of the code.
+                // That is, unless the last line is not just a variable, but a function call or something else that doesn't return a value.
+                None => {
+                    // If there is no newline, we'll just eval the whole code, unless an import is present.
+                    // If an import is present, we'll have to execute it instead.
+                    if code.contains("import") {
+                        (Some(code), None)
+                    } else {
+                        (None, Some(code))
+                    }
+                }
+                Some((rest, last)) => {
+                    // We'll have to check the last line
+                    let last_line = last.trim();
+                    if (last_line.contains('(') || last_line.contains("import"))
+                        && !last_line.contains("plt.show()")
+                    {
+                        // If the last line contains a "(", it's likely a function call, which we can't evaluate.
+                        // If it contains "import", it's likely an import statement, which we also can't evaluate.
+                        // The exception is if it's a variable assignment, but we can't really check that.
+                        // The exception we do check for is if it's a plt.show() call, which we do support.
+                        // We'll just execute the whole code.
+                        (Some(code), None)
+                    } else {
+                        // Otherwise, we'll split it up.
+                        (Some(rest.to_string()), Some(last_line.to_string()))
+                    }
+                }
+            };
 
-
-        // Because we want the last line to be returned, we'll execute all but the last line.
-        let (rest_lines, last_line) = match code.trim().rsplit_once('\n') {
-            // We need to decide how to split up the code. If it's just one line, we put it into the last line, since that's ouput is evaluated by us.
-            // If that's not the case, we'll split it up into the last line and the rest of the code.
-            // That is, unless the last line is not just a variable, but a function call or something else that doesn't return a value.
-            None => {
-                // If there is no newline, we'll just eval the whole code, unless an import is present.
-                // If an import is present, we'll have to execute it instead.
-                if code.contains("import") {
-                    (Some(code), None)
-                } else {
-                    (None, Some(code))
+            if let Some(rest_lines) = rest_lines {
+                debug!("Executing all but the last line.");
+                trace!("Executing code: {}", rest_lines);
+                // We'll execute the code in the locals.
+                match py.run_bound(&rest_lines, Some(&globals), Some(&locals)) {
+                    Ok(()) => {
+                        info!("Code executed successfully.");
+                        // But we continue with the last line.
+                    }
+                    Err(e) => {
+                        return Err(format_pyerr(&e, py));
+                    }
                 }
             }
-            Some((rest, last)) => {
-                // We'll have to check the last line
-                let last_line = last.trim();
-                if (last_line.contains('(') || last_line.contains("import"))
-                    && !last_line.contains("plt.show()")
-                {
-                    // If the last line contains a "(", it's likely a function call, which we can't evaluate.
-                    // If it contains "import", it's likely an import statement, which we also can't evaluate.
-                    // The exception is if it's a variable assignment, but we can't really check that.
-                    // The exception we do check for is if it's a plt.show() call, which we do support.
-                    // We'll just execute the whole code.
-                    (Some(code), None)
-                } else {
-                    // Otherwise, we'll split it up.
-                    (Some(rest.to_string()), Some(last_line.to_string()))
+
+            if let Some(last_line) = last_line {
+                // Because we evaluate and don't execute, we have to handle it differently.
+                // For example, all LLMs are used to calling plt.show() at the end of their code.
+                // It's in all the examples and if you were in a jupyter notebook, you'd need it.
+                // But we don't really support it, because we don't do interactive plotting.
+                // So instead we just pretend that we do and, if the last line contains a `plt.show()`, we'll convert it to `plt`, which is supported.
+                // This is a bit of a hack, but it should work for now.
+
+                let mut last_line = last_line;
+                if last_line.contains("plt.show()") {
+                    // We'll replace plt.show() with plt.
+                    let new_last_line = last_line.replace("plt.show()", "plt");
+                    trace!("Replaced plt.show() with plt in the last line.");
+                    trace!("New last line: {}", new_last_line);
+                    // We'll replace the last line with the new one.
+                    last_line = new_last_line;
                 }
+
+                debug!("Evaluating the last line.");
+                trace!("Last line: {}", last_line);
+                // Now the rest of the lines are executed if they exist.
+                // Now we don't execute, but evaluate the last line.
+                match py.eval_bound(&last_line, Some(&globals), Some(&locals)) {
+                    Ok(content) => {
+                        // We now have a python value in here.
+                        // To return it, we can convert it to a string and return it.
+                        // But before we do so, we check whether the matplotlib plt module was used.
+                        // If it was, we probably want to extract the image and return that too.
+
+                        let maybe_plt = locals.get_item("plt");
+                        let image = match maybe_plt {
+                            Ok(Some(inner)) => {
+                                // If we have a plt module, we'll try to get an image from it.
+                                try_get_image(&inner)
+                            }
+                            _ => None,
+                        };
+                        // We now need to encode the image into the string.
+                        if let Some(inner_image) = image {
+                            // We'll encode the image as base64.
+                            let encoded_image =
+                                base64::engine::general_purpose::STANDARD.encode(inner_image);
+                            // We'll return the image as a string.
+                            Ok(format!("{content}\n\nEncoded Image: {encoded_image}"))
+                        } else {
+                            // If we got nothing to return (in python, that would be None), we'll just return an empty string.
+                            if content.is_none() {
+                                Ok(String::new()) // else, this would say "None"
+                            } else {
+                                Ok(content.to_string())
+                            }
+                        }
+                    }
+                    Err(e) => Err(format_pyerr(&e, py)),
+                }
+            } else {
+                // If there is no last line, we'll just return an empty string.
+                Ok(String::new())
             }
         };
 
-        if let Some(rest_lines) = rest_lines {
-            debug!("Executing all but the last line.");
-            trace!("Executing code: {}", rest_lines);
-            // We'll execute the code in the locals.
-            match py.run_bound(&rest_lines, Some(&globals), Some(&locals)) {
-                Ok(()) => {
-                    info!("Code executed successfully.");
-                    // But we continue with the last line.
-                }
-                Err(e) => {
-                    return Err(format_pyerr(&e, py));
-                }
-            }
+        // Before returning the result, we'll have to flush stdout and stderr IN PYTHON.
+
+        let flush = py.run_bound(
+            "import sys;sys.stdout.flush();sys.stderr.flush()",
+            Some(&globals),
+            Some(&locals),
+        );
+        if flush.is_err() {
+            warn!("Error flushing stdout and stderr: {:?}", flush);
         }
 
-        if let Some(last_line) = last_line {
-            // Because we evaluate and don't execute, we have to handle it differently.
-            // For example, all LLMs are used to calling plt.show() at the end of their code.
-            // It's in all the examples and if you were in a jupyter notebook, you'd need it.
-            // But we don't really support it, because we don't do interactive plotting.
-            // So instead we just pretend that we do and, if the last line contains a `plt.show()`, we'll convert it to `plt`, which is supported.
-            // This is a bit of a hack, but it should work for now.
-
-            let mut last_line = last_line;
-            if last_line.contains("plt.show()") {
-                // We'll replace plt.show() with plt.
-                let new_last_line = last_line.replace("plt.show()", "plt");
-                trace!("Replaced plt.show() with plt in the last line.");
-                trace!("New last line: {}", new_last_line);
-                // We'll replace the last line with the new one.
-                last_line = new_last_line;
-            }
-
-            debug!("Evaluating the last line.");
-            trace!("Last line: {}", last_line);
-            // Now the rest of the lines are executed if they exist.
-            // Now we don't execute, but evaluate the last line.
-            match py.eval_bound(&last_line, Some(&globals), Some(&locals)) {
-                Ok(content) => {
-                    // We now have a python value in here.
-                    // To return it, we can convert it to a string and return it.
-                    // But before we do so, we check whether the matplotlib plt module was used.
-                    // If it was, we probably want to extract the image and return that too.
-
-                    let maybe_plt = locals.get_item("plt");
-                    let image = match maybe_plt {
-                        Ok(Some(inner)) => {
-                            // If we have a plt module, we'll try to get an image from it.
-                            try_get_image(&inner)
-                        }
-                        _ => None,
-                    };
-                    // We now need to encode the image into the string.
-                    if let Some(inner_image) = image {
-                        // We'll encode the image as base64.
-                        let encoded_image =
-                            base64::engine::general_purpose::STANDARD.encode(inner_image);
-                        // We'll return the image as a string.
-                        Ok(format!("{content}\n\nEncoded Image: {encoded_image}"))
-                    } else {
-                        // If we got nothing to return (in python, that would be None), we'll just return an empty string.
-                        if content.is_none() {
-                            Ok(String::new()) // else, this would say "None"
-                        } else {
-                            Ok(content.to_string())
-                        }
-                    }
-                }
-                Err(e) => Err(format_pyerr(&e, py)),
-            }
-        } else {
-            // If there is no last line, we'll just return an empty string.
-            Ok(String::new())
-        }
-    };
-
-    // Before returning the result, we'll have to flush stdout and stderr IN PYTHON. 
-
-    let flush = py.run_bound("import sys;sys.stdout.flush();sys.stderr.flush()", Some(&globals), Some(&locals));
-    if flush.is_err() {
-        warn!("Error flushing stdout and stderr: {:?}", flush);
-    }
-
-    result
-
+        result
     });
 
     trace!("Code execution finished.");

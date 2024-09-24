@@ -36,17 +36,19 @@ pub fn append_thread(thread_id: &str, content: Conversation) {
     let mut to_write = String::new();
 
     for variant in content {
-        
         let to_push = match serde_json::to_string(&variant) {
             Ok(s) => s, // If it works, we can just use the JSON string.
             Err(e) => {
                 // If it doesn't, we can fall back to the old encoding. This is very bad, but we can't just not store the conversation.
                 // Besides, according to the signature of `serde_json::to_string`,
                 // this should only be able to fail if the type is not infallibly serializable, which StreamVariant is.
-                error!("Error serializing variant to JSON; falling back to old encoding: {:?}", e);
+                error!(
+                    "Error serializing variant to JSON; falling back to old encoding: {:?}",
+                    e
+                );
                 variant.to_string() // This will use the old encoding, see the types.rs file.
             }
-        };  
+        };
 
         to_write.push_str(to_push.as_str());
         to_write.push('\n');
@@ -148,7 +150,7 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
                 trace!("Successfully deserialized line: {:?}", variant);
                 res.push(variant);
                 continue;
-            },
+            }
             Err(e) => {
                 // If we can't deserialize the line, we'll assume that it uses the old encoding and try that.
                 info!("Error deserializing line, trying old encoding: {:?}", e);
@@ -206,7 +208,6 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
 
     Ok(res)
 }
-
 
 /// Some variants like Code and CodeOutput have more than one field, so this function splits the content at the last colon.
 fn split_colon_at_end(s: &str) -> Option<(&str, &str)> {

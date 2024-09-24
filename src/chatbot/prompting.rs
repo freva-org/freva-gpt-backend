@@ -244,7 +244,7 @@ plt.show()".to_string(),
             content: Some("The map plot above shows the surface wind speed for the year 1940, with the grid box containing the highest wind speed marked with a red X. The colorbar represents the wind speed in meters per second (m/s), with cooler colors indicating lower wind speeds and warmer colors indicating higher wind speeds.
 
 If you would like to see the map plot for a different year with the highest wind speed, please let me know. I'm here to help!".to_string()),
-            ..Default::default() 
+            ..Default::default()
         }),
         ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
             name: Some("user".to_string()),
@@ -342,10 +342,5 @@ to_string(),
 
 If you need further analysis or specific visualizations using this dataset, please let me know!")
 
-
-
-
-
-        
     ]
 });

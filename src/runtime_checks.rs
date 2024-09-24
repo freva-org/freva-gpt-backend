@@ -66,8 +66,7 @@ pub fn run_runtime_checks() {
     info!("The code interpreter can handle crashes.");
 
     // Also check that required directories exist.
-    if check_directory("/app/logs") &
-    check_directory("/app/threads"){
+    if check_directory("/app/logs") & check_directory("/app/threads") {
         println!("All required directories exist and are readable.");
         info!("All required directories exist and are readable.");
     } else {
@@ -86,7 +85,7 @@ fn check_two_plus_two() {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(r#"{"code": "2+2"}"#.to_string()),
         "test".to_string(),
-        None, 
+        None,
     );
     assert_eq!(output.len(), 1);
     assert_eq!(
@@ -143,15 +142,16 @@ fn check_print_two() {
     assert_eq!(output.len(), 1);
     assert_eq!(
         output,
-        vec![
-            StreamVariant::CodeOutput("Hello\nWorld!".to_string(), "test".to_string()),
-        ]
+        vec![StreamVariant::CodeOutput(
+            "Hello\nWorld!".to_string(),
+            "test".to_string()
+        ),]
     );
 }
 
 /// Checks that all wanted libraries can be imported.
 fn check_imports() {
-        let libraries = [
+    let libraries = [
         "xarray",
         "tzdata",
         "six",
@@ -222,7 +222,6 @@ pub fn check_soft_crash() {
         )]
     );
 }
-
 
 /// Simple helper function that checks whether the given string is a path to a directory we can read from.
 pub fn check_directory(path: &str) -> bool {

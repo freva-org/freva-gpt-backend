@@ -36,7 +36,7 @@ use crate::{
 /// If it's empty or not given, a new thread is created.
 ///
 /// The freva config file should be always set, as it's needed for the freva library to work.
-/// 
+///
 /// The stream consists of StreamVariants and their content. See the different Stream Variants above.
 /// If the stream creates a new thread, the new thread_id will be sent as a ServerHint.
 /// The stream always ends with a StreamEnd event, unless a server error occurs.
@@ -83,7 +83,11 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     debug!("Thread ID: {}, Input: {}", thread_id, input);
 
     // We also require the freva_config_path to be set. From the frontend, it's called "freva_config".
-    let freva_config_path = match qstring.get("freva_config").or_else(|| qstring.get("freva-config")) { // allow both freva_config and freva-config
+    let freva_config_path = match qstring
+        .get("freva_config")
+        .or_else(|| qstring.get("freva-config"))
+    {
+        // allow both freva_config and freva-config
         None | Some("") => {
             warn!("The User requested a stream without a freva_config path being set.");
             // // If the freva_config is not found, we'll return a 400
@@ -241,138 +245,45 @@ async fn create_and_stream(
             mut tool_id,
         )| {
             // It is required to clone the freva_config_path, because it is moved into the closure.
-        let freva_config_path_clone = freva_config_path.clone();
-        async move {
-            // Even higher priority than stopping the stream is sending the thread_id hint.
-            if should_hint_thread_id {
-                // If we should hint the thread_id, we'll send a ServerHint event.
-                let hint = StreamVariant::ServerHint(format!("{{\"thread_id\": \"{thread_id}\"}}")); // resolves to {"thread_id":"<thread_id>"}
-                                                                                                     // return the hint and the new state
-                return Some((
-                    Ok::<actix_web::web::Bytes, std::convert::Infallible>(
-                        actix_web::web::Bytes::copy_from_slice(
-                            serde_json::to_string(&hint)
-                                .expect("ServerHint unable to be converted to actix bytes!")
-                                .as_bytes(),
+            let freva_config_path_clone = freva_config_path.clone();
+            async move {
+                // Even higher priority than stopping the stream is sending the thread_id hint.
+                if should_hint_thread_id {
+                    // If we should hint the thread_id, we'll send a ServerHint event.
+                    let hint =
+                        StreamVariant::ServerHint(format!("{{\"thread_id\": \"{thread_id}\"}}")); // resolves to {"thread_id":"<thread_id>"}
+                                                                                                  // return the hint and the new state
+                    return Some((
+                        Ok::<actix_web::web::Bytes, std::convert::Infallible>(
+                            actix_web::web::Bytes::copy_from_slice(
+                                serde_json::to_string(&hint)
+                                    .expect("ServerHint unable to be converted to actix bytes!")
+                                    .as_bytes(),
+                            ),
                         ),
-                    ),
-                    (
-                        open_ai_stream,
-                        thread_id,
-                        should_stop,
-                        false,
-                        variant_queue,
-                        tool_name,
-                        tool_arguments,
-                        tool_id,
-                    ),
-                ));
-            }
-
-            // After potentially sending a thread_id hint, but before stopping, check whether the variants queue contains something; if so, send it.
-            if let Some(content) = variant_queue.pop_front() {
-                let string_variant = match serde_json::to_string(&content) {
-                    Ok(string) => string,
-                    Err(e) => {
-                        warn!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
-                        format!(
-                            "{:?}",
-                            StreamVariant::ServerError(format!(
-                                "Error converting StreamVariant to string: {content:?}"
-                            ))
-                        )
-                    }
-                };
-
-                let bytes = actix_web::web::Bytes::copy_from_slice(string_variant.as_bytes());
-
-                // Everything worked, so we'll return the bytes and the new state.
-                Some((
-                    Ok(bytes),
-                    (
-                        open_ai_stream,
-                        thread_id,
-                        should_stop,
-                        false,
-                        variant_queue,
-                        tool_name,
-                        tool_arguments,
-                        tool_id,
-                    ),
-                ))
-            } else if should_stop {
-                // If the stream should stop, we'll simply return None.
-                // We do it in this order to be able to send one last event to the client signaling the end of the stream.
-                trace!("Stream is stopping, sent one last event, removing the conversation from the pool and then aborting stream.");
-                save_and_remove_conversation(&thread_id);
-                None
-            } else {
-                // If the stream should not stop, we'll continue.
-
-                // First checks whether it should stop the stream. (This happens if the client sent a stop request.)
-                if matches!(
-                    conversation_state(&thread_id),
-                    Some(ConversationState::Stopping)
-                ) {
-                    debug!("Conversation with thread_id {} has been stopped, sending one last event and then aborting stream.", thread_id);
-                    // We need to signal the end of the stream, so we'll have to tell actix to send one last StreamEnd event.
-                    end_conversation(&thread_id);
-                    Some((
-                        Ok(STREAM_STOP_CONTENT.clone()),
                         (
                             open_ai_stream,
                             thread_id,
-                            true,
+                            should_stop,
                             false,
                             variant_queue,
                             tool_name,
                             tool_arguments,
                             tool_id,
                         ),
-                    ))
-                } else {
-                    // If the client didn't send a stop request, we'll continue.
+                    ));
+                }
 
-                    // gets the response from the OpenAI Stream
-                    let response = open_ai_stream.next().await;
-
-                    trace!("Polled Stream, got response: {:?}", response);
-
-                    let variants: Vec<StreamVariant> = oai_stream_to_variants(
-                        response,
-                        &mut tool_name,
-                        &mut tool_arguments,
-                        &mut tool_id,
-                        &thread_id,
-                        &mut open_ai_stream,
-                    )
-                    .await;
-
-                    // Also add the variants into the active conversation
-                    add_to_conversation(&thread_id, variants.clone(), freva_config_path_clone.clone());
-
-                    // Check whether the stream should end by checking the variants.
-                    let should_end = variants
-                        .iter()
-                        .any(|v| matches!(v, StreamVariant::StreamEnd(_)));
-
-                    // The variant to return if there are no variants in the response.
-                    let error_variant =
-                        StreamVariant::ServerError("No variants found in response.".to_string());
-
-                    // Split the variants into the first variant and the rest of the variants.
-                    // This is so we can send the first variant immediately and write the rest to the queue.
-                    let mut variants: VecDeque<StreamVariant> = variants.into();
-                    let first_variant = variants.pop_front().unwrap_or(error_variant);
-
-                    let string_variant = match serde_json::to_string(&first_variant) {
+                // After potentially sending a thread_id hint, but before stopping, check whether the variants queue contains something; if so, send it.
+                if let Some(content) = variant_queue.pop_front() {
+                    let string_variant = match serde_json::to_string(&content) {
                         Ok(string) => string,
                         Err(e) => {
-                            error!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
+                            warn!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
                             format!(
                                 "{:?}",
                                 StreamVariant::ServerError(format!(
-                                    "Error converting StreamVariant to string: {first_variant:?}"
+                                    "Error converting StreamVariant to string: {content:?}"
                                 ))
                             )
                         }
@@ -386,19 +297,119 @@ async fn create_and_stream(
                         (
                             open_ai_stream,
                             thread_id,
-                            should_end,
+                            should_stop,
                             false,
-                            variants,
+                            variant_queue,
                             tool_name,
                             tool_arguments,
                             tool_id,
                         ),
                     ))
-                    // Ends if the variant is a StreamEnd
+                } else if should_stop {
+                    // If the stream should stop, we'll simply return None.
+                    // We do it in this order to be able to send one last event to the client signaling the end of the stream.
+                    trace!("Stream is stopping, sent one last event, removing the conversation from the pool and then aborting stream.");
+                    save_and_remove_conversation(&thread_id);
+                    None
+                } else {
+                    // If the stream should not stop, we'll continue.
+
+                    // First checks whether it should stop the stream. (This happens if the client sent a stop request.)
+                    if matches!(
+                        conversation_state(&thread_id),
+                        Some(ConversationState::Stopping)
+                    ) {
+                        debug!("Conversation with thread_id {} has been stopped, sending one last event and then aborting stream.", thread_id);
+                        // We need to signal the end of the stream, so we'll have to tell actix to send one last StreamEnd event.
+                        end_conversation(&thread_id);
+                        Some((
+                            Ok(STREAM_STOP_CONTENT.clone()),
+                            (
+                                open_ai_stream,
+                                thread_id,
+                                true,
+                                false,
+                                variant_queue,
+                                tool_name,
+                                tool_arguments,
+                                tool_id,
+                            ),
+                        ))
+                    } else {
+                        // If the client didn't send a stop request, we'll continue.
+
+                        // gets the response from the OpenAI Stream
+                        let response = open_ai_stream.next().await;
+
+                        trace!("Polled Stream, got response: {:?}", response);
+
+                        let variants: Vec<StreamVariant> = oai_stream_to_variants(
+                            response,
+                            &mut tool_name,
+                            &mut tool_arguments,
+                            &mut tool_id,
+                            &thread_id,
+                            &mut open_ai_stream,
+                        )
+                        .await;
+
+                        // Also add the variants into the active conversation
+                        add_to_conversation(
+                            &thread_id,
+                            variants.clone(),
+                            freva_config_path_clone.clone(),
+                        );
+
+                        // Check whether the stream should end by checking the variants.
+                        let should_end = variants
+                            .iter()
+                            .any(|v| matches!(v, StreamVariant::StreamEnd(_)));
+
+                        // The variant to return if there are no variants in the response.
+                        let error_variant = StreamVariant::ServerError(
+                            "No variants found in response.".to_string(),
+                        );
+
+                        // Split the variants into the first variant and the rest of the variants.
+                        // This is so we can send the first variant immediately and write the rest to the queue.
+                        let mut variants: VecDeque<StreamVariant> = variants.into();
+                        let first_variant = variants.pop_front().unwrap_or(error_variant);
+
+                        let string_variant = match serde_json::to_string(&first_variant) {
+                            Ok(string) => string,
+                            Err(e) => {
+                                error!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
+                                format!(
+                                    "{:?}",
+                                    StreamVariant::ServerError(format!(
+                                    "Error converting StreamVariant to string: {first_variant:?}"
+                                ))
+                                )
+                            }
+                        };
+
+                        let bytes =
+                            actix_web::web::Bytes::copy_from_slice(string_variant.as_bytes());
+
+                        // Everything worked, so we'll return the bytes and the new state.
+                        Some((
+                            Ok(bytes),
+                            (
+                                open_ai_stream,
+                                thread_id,
+                                should_end,
+                                false,
+                                variants,
+                                tool_name,
+                                tool_arguments,
+                                tool_id,
+                            ),
+                        ))
+                        // Ends if the variant is a StreamEnd
+                    }
                 }
             }
-        }
-    },
+        },
     );
 
     HttpResponse::Ok().streaming(out_stream)

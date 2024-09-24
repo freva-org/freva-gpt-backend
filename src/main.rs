@@ -14,9 +14,9 @@ mod auth; // for basic authentication
 mod chatbot; // for the actual chatbot
 mod cla_parser; // for parsing the command line arguments
 mod logging; // for setting up the logger
-mod static_serve; // for serving static responses 
-mod tool_calls; // for the tool calls
-mod runtime_checks; // for the runtime checks
+mod runtime_checks;
+mod static_serve; // for serving static responses
+mod tool_calls; // for the tool calls // for the runtime checks
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -65,22 +65,44 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         let services = services![
             web::scope("/api/chatbot")
-                .route("/ping", web::get().to(static_serve::ping)) // Ping, return a short description of the API. 
-                .route("/help", web::get().to(static_serve::ping)) // Ping, return a short description of the API. 
+                .route("/ping", web::get().to(static_serve::ping)) // Ping, return a short description of the API.
+                .route("/help", web::get().to(static_serve::ping)) // Ping, return a short description of the API.
                 .route("/stop", web::get().to(chatbot::stop::stop)) // Stop, stop a specific conversation by thread ID.
                 .route("/stop", web::post().to(chatbot::stop::stop)) // Stop, stop a specific conversation by thread ID. Both post and get are allowed.
                 .route("/docs", web::get().to(static_serve::docs)) // Docs, return the documentation of the API.
                 .route("/getthread", web::get().to(chatbot::get_thread::get_thread)) // GetThread, get the thread of a specific conversation by thread ID.
-                .route("/streamresponse", web::get().to(chatbot::stream_response::stream_response)) // StreamResponse, stream the response of a specific conversation by thread ID.
-            ,
-            // Also, for convenience, all old points without the /api/chatbot, give a "moved permanently" to the new location.
-            web::scope("/ping").route("", actix_web::web::get().to(static_serve::moved_permanently)),
-            web::scope("/help").route("", actix_web::web::get().to(static_serve::moved_permanently)),
-            web::scope("/stop").route("", actix_web::web::get().to(static_serve::moved_permanently)),
-            web::scope("/stop").route("", actix_web::web::post().to(static_serve::moved_permanently)),
-            web::scope("/docs").route("", actix_web::web::get().to(static_serve::moved_permanently)),
-            web::scope("/getthread").route("", actix_web::web::get().to(static_serve::moved_permanently)),
-            web::scope("/streamresponse").route("", actix_web::web::get().to(static_serve::moved_permanently)),
+                .route(
+                    "/streamresponse",
+                    web::get().to(chatbot::stream_response::stream_response)
+                ), // StreamResponse, stream the response of a specific conversation by thread ID.
+            web::scope("/ping").route(
+                "",
+                actix_web::web::get().to(static_serve::moved_permanently)
+            ), // Also, for convenience, all old points without the /api/chatbot, give a "moved permanently" to the new location.
+            web::scope("/help").route(
+                "",
+                actix_web::web::get().to(static_serve::moved_permanently)
+            ),
+            web::scope("/stop").route(
+                "",
+                actix_web::web::get().to(static_serve::moved_permanently)
+            ),
+            web::scope("/stop").route(
+                "",
+                actix_web::web::post().to(static_serve::moved_permanently)
+            ),
+            web::scope("/docs").route(
+                "",
+                actix_web::web::get().to(static_serve::moved_permanently)
+            ),
+            web::scope("/getthread").route(
+                "",
+                actix_web::web::get().to(static_serve::moved_permanently)
+            ),
+            web::scope("/streamresponse").route(
+                "",
+                actix_web::web::get().to(static_serve::moved_permanently)
+            ),
         ];
         App::new()
             .service(services)

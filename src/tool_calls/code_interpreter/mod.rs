@@ -29,7 +29,7 @@ static CODE_INTERPRETER_FUNCTION: Lazy<FunctionObject> = Lazy::new(|| {
     description: Some(
         "Recieves python code, executes it in python kernel, and returns the result. Supports print statements and returning the last line."
             .to_string(),
-    ), 
+    ),
     parameters: Some(CODE_INTERPRETER_PARAMETER.clone()),
 }
 });
@@ -55,7 +55,7 @@ pub fn verify_can_access(freva_config_path: String) -> bool {
         Ok(content) => {
             debug!("Successfully read the freva config file: {:?}", content);
             true
-        },
+        }
         Err(e) => {
             warn!("Error reading the freva config file: {:?}", e);
             false

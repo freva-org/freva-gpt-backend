@@ -11,7 +11,7 @@ use tracing::{debug, error, trace, warn};
 
 #[derive(Debug, Clone)]
 pub enum ConversationState {
-    Streaming(String), // The String is the Path to the file of the freva config. 
+    Streaming(String), // The String is the Path to the file of the freva config.
     Stopping,
     Ended,
 }
@@ -208,7 +208,6 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                 };
                 // We expect the hint to be of type object
                 if let serde_json::Value::Object(hint) = hint {
-                    
                     if hint.keys().next().is_none() {
                         warn!("ServerHint content is empty! Passing to the client nonetheless.");
                         return Err(ConversionError::ParseError("ServerHint content is empty."));
@@ -410,11 +409,12 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
     all_oai_messages
 }
 
-
 /// A simple helper function to "unescape" a string.
 /// This is needed because the prompt is escaped when it is sent to the frontend.
 pub fn unescape_string(s: &str) -> String {
-    s.replace("\\\"", "\"").replace("\\\\", "\\").replace("\\n", "\n")
+    s.replace("\\\"", "\"")
+        .replace("\\\\", "\\")
+        .replace("\\n", "\n")
 }
 
 #[cfg(test)]
@@ -454,15 +454,18 @@ mod tests {
             }]),
             ..Default::default()
         }));
-
     }
 
     #[test]
-    fn test_help_convert_sv_ccrm_real_data(){
+    fn test_help_convert_sv_ccrm_real_data() {
         // Instead of using constructed data, we'll actually read the data from a file.
         // In this case, from a file that, when read, triggered the error this test is supposed to catch.
         let input = read_thread("test");
-        assert!(input.is_ok(), "Error reading test thread file: {:?}", input.err());
+        assert!(
+            input.is_ok(),
+            "Error reading test thread file: {:?}",
+            input.err()
+        );
         let input = input.expect("Error reading test thread file.");
         let output = help_convert_sv_ccrm(input);
         assert_eq!(output.len(), 27);
@@ -483,11 +486,12 @@ mod tests {
             ..Default::default()
         }));
 
-        assert_eq!(output[19], ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage {
-            name: Some("ServerHint".to_string()),
-            content: "{\"thread_id\": \"MHa15G7LoTOCUoAUXsiSHxGbUgYjPpk9\"}".to_string()
-        }));
-
+        assert_eq!(
+            output[19],
+            ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage {
+                name: Some("ServerHint".to_string()),
+                content: "{\"thread_id\": \"MHa15G7LoTOCUoAUXsiSHxGbUgYjPpk9\"}".to_string()
+            })
+        );
     }
-
 }
