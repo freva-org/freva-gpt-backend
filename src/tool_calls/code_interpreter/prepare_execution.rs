@@ -4,7 +4,7 @@ use tracing::{info, trace, warn};
 
 use crate::{
     chatbot::{
-        handle_active_conversations::conversation_state,
+        handle_active_conversations::{conversation_state, get_conversation},
         types::{ConversationState, StreamVariant},
     },
     tool_calls::code_interpreter::{
@@ -56,11 +56,17 @@ pub fn start_code_interpeter(
         )];
     }
 
+    // Also retrieve all previous code interpreter inputs to get all libraries that are needed.
+    let previous_code_interpreter_imports = match thread_id.clone() {
+        None => "".to_string(),
+        Some(thread_id) => retrieve_previous_code_interpreter_imports(&thread_id),
+    };
+
     // Now, we have to convert the arguments from JSON to a struct.
 
     // First check whether the arguments are actually present, maybe the LLM forgot to include them.
     let code = if let Some(content) = arguments {
-        content
+        previous_code_interpreter_imports + &content
     } else {
         warn!("No code was found while trying to run the code_interpreter.");
         return vec![StreamVariant::CodeOutput(
@@ -206,4 +212,36 @@ pub fn run_code_interpeter(arguments: String) {
 
     // Because this is a seperate process, we have to exit it manually.
     std::process::exit(0);
+}
+
+/// Retrieves all previous code interpreter inputs from the conversation state.
+/// Returns a string with all the imports, seperated by newlines.
+fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> String {
+    let this_conversation = get_conversation(thread_id);
+    match this_conversation {
+        None => {
+            warn!(
+                "No conversation found while trying to retrieve previous code interpreter imports."
+            );
+            "".to_string()
+        }
+        Some(conversation) => {
+            let mut imports = String::new();
+            for variant in conversation {
+                if let StreamVariant::Code(code, _) = variant {
+                    // Split the code into lines and only take the lines that start with "import" or start with "from" AND contain "import".
+                    let code_lines = code.lines();
+                    for line in code_lines {
+                        if line.starts_with("import")
+                            || (line.starts_with("from") && line.contains("import"))
+                        {
+                            imports.push_str(line);
+                            imports.push('\n');
+                        }
+                    }
+                }
+            }
+            imports
+        }
+    }
 }
