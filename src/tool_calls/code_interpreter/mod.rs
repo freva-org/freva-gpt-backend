@@ -31,6 +31,8 @@ static CODE_INTERPRETER_FUNCTION: Lazy<FunctionObject> = Lazy::new(|| {
             .to_string(),
     ),
     parameters: Some(CODE_INTERPRETER_PARAMETER.clone()),
+    strict: None, // Structured Output has to either be the entire answer or nothing.
+    // So we can't use that functionality here :(
 }
 });
 

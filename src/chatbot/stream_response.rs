@@ -190,6 +190,9 @@ fn build_request(
         .stream(true)
         .max_tokens(16000u32)
         .tools(ALL_TOOLS.clone())
+        .parallel_tool_calls(false) // No parallel tool calls!
+        .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
+        .temperature(0.4) // The model shouldn't be too creative, but also not too boring.
         .build()
 }
 

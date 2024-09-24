@@ -14,14 +14,22 @@ macro_rules! assistant_message {
         // Base, only content.
         ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             name: Some("frevaGPT".to_string()),
-            content: Some($content.to_string()),
+            content: Some(
+                async_openai::types::ChatCompletionRequestAssistantMessageContent::Text(
+                    $content.to_string(),
+                ),
+            ),
             ..Default::default()
         })
     };
     ($content:expr, $call_id:expr, $code:expr) => {
         ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             name: Some("frevaGPT".to_string()),
-            content: Some($content.to_string()),
+            content: Some(
+                async_openai::types::ChatCompletionRequestAssistantMessageContent::Text(
+                    $content.to_string(),
+                ),
+            ),
             tool_calls: Some(vec![ChatCompletionMessageToolCall {
                 id: $call_id.to_string(),
                 r#type: ChatCompletionToolType::Function,
@@ -55,7 +63,9 @@ pub static STARTING_PROMPT: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::new(
 pub static INITIAL_PROMPT: Lazy<ChatCompletionRequestSystemMessage> =
     Lazy::new(|| ChatCompletionRequestSystemMessage {
         name: Some("prompt".to_string()),
-        content: (STARTING_PROMPT_STR.to_string()),
+        content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(
+            STARTING_PROMPT_STR.to_string(),
+        ),
     });
 
 /// The basic starting prompt as a const of the correct type.
@@ -86,9 +96,9 @@ static EXAMPLE_CONVERSATIONS: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::ne
         }),
         ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             name: Some("frevaGPT".to_string()),
-            content: Some("To find the year with the highest local wind speed, we will first analyze the wind data to identify the maximum wind speed and the corresponding year. Then, we will create a map plot of the wind data, marking the grid box with the highest wind speed with an X.
+            content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("To find the year with the highest local wind speed, we will first analyze the wind data to identify the maximum wind speed and the corresponding year. Then, we will create a map plot of the wind data, marking the grid box with the highest wind speed with an X.
 
-Let's start by loading the wind data and analyzing it to identify the year with the highest local wind speed.".to_string()),
+Let's start by loading the wind data and analyzing it to identify the year with the highest local wind speed.".to_string())),
             tool_calls: Some(vec![ChatCompletionMessageToolCall {
                 id: "Some_id1".to_string(),
                 r#type: ChatCompletionToolType::Function,
@@ -107,7 +117,7 @@ wind_data".to_string(),
                 }]),
                 ..Default::default() }),
         ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
-            content: "<xarray.Dataset> Size: 65MB
+            content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("<xarray.Dataset> Size: 65MB
 Dimensions:  (time: 1008, lon: 180, lat: 90)
 Coordinates:
   * time     (time) datetime64[ns] 8kB 1940-01-01 1940-02-01 ... 2023-12-01
@@ -122,14 +132,14 @@ Attributes:
     creation_date:  2024-01-23T12:31:33Z
     CDO:            Climate Data Operators version 2.2.2 (https://mpimet.mpg....
     NCO:            netCDF Operators version 5.0.6 (Homepage = http://nco.sf....
-    history:        Tue May 28 15:33:44 2024: ncatted -O -a history,global,d,...".to_string(),
+    history:        Tue May 28 15:33:44 2024: ncatted -O -a history,global,d,...".to_string()),
             tool_call_id: "Some_id1".to_string(),
         }),
         ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             name: Some("frevaGPT".to_string()),
-            content: Some("The wind data contains information about surface wind speed for different time points, longitudes, and latitudes. The variable 'sfcwind' represents the surface wind speed.
+            content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("The wind data contains information about surface wind speed for different time points, longitudes, and latitudes. The variable 'sfcwind' represents the surface wind speed.
 
-Next, we will find the year with the highest local wind speed by identifying the maximum wind speed value in the dataset. Let's proceed with this calculation.".to_string()),
+Next, we will find the year with the highest local wind speed by identifying the maximum wind speed value in the dataset. Let's proceed with this calculation.".to_string())),
             tool_calls: Some(vec![ChatCompletionMessageToolCall {
                 id: "Some_id2".to_string(),
                 r#type: ChatCompletionToolType::Function,
@@ -152,14 +162,14 @@ year_with_max_wind".to_string(),
             ..Default::default()
         }),
         ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
-            content: "Traceback (most recent call last):
+            content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("Traceback (most recent call last):
   File \"<stdin>\", line 1, in <module>
-ValueError: can only convert an array of size 1 to a Python scalar".to_string(),
+ValueError: can only convert an array of size 1 to a Python scalar".to_string()),
             tool_call_id: "Some_id2".to_string(),
         }),
         ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             name: Some("frevaGPT".to_string()),
-            content: Some("It seems there are multiple years with the same maximum wind speed. Let's find all the years with the highest local wind speed and their corresponding wind speeds.".to_string()),
+            content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("It seems there are multiple years with the same maximum wind speed. Let's find all the years with the highest local wind speed and their corresponding wind speeds.".to_string())),
             tool_calls: Some(vec![ChatCompletionMessageToolCall {
                 id: "Some_id3".to_string(),
                 r#type: ChatCompletionToolType::Function,
@@ -182,18 +192,18 @@ max_wind_speed_values, years_with_max_wind".to_string(),
             ..Default::default()
         }),
         ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
-            content: "<xarray.DataArray 'sfcwind' (time: 1008)> Size: 4kB
+            content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("<xarray.DataArray 'sfcwind' (time: 1008)> Size: 4kB
 array([11.096766 , 11.897707 , 12.527985 , ..., 13.650877 , 11.2893505,
        10.917501 ], dtype=float32)
 Coordinates:
   * time     (time) datetime64[ns] 8kB 1940-01-01 1940-02-01 ... 2023-12-01 ['1940-01-01T00:00:00.000000000' '1940-02-01T00:00:00.000000000'
  '1940-03-01T00:00:00.000000000' ... '2023-10-01T00:00:00.000000000'
- '2023-11-01T00:00:00.000000000' '2023-12-01T00:00:00.000000000']".to_string(),
+ '2023-11-01T00:00:00.000000000' '2023-12-01T00:00:00.000000000']".to_string()),
             tool_call_id: "Some_id3".to_string(),
         }),
         ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             name: Some("frevaGPT".to_string()),
-            content: Some("The years with the highest local wind speed and their corresponding wind speeds are as follows:
+            content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("The years with the highest local wind speed and their corresponding wind speeds are as follows:
 
 - 1940: 14.29 m/s
 - 1941: 14.09 m/s
@@ -201,7 +211,7 @@ Coordinates:
 - ...
 - 2023: 13.70 m/s
 
-Next, we will create a map plot of the wind data, marking the grid box with the highest wind speed with an X. Let's proceed with plotting the wind data.".to_string()),
+Next, we will create a map plot of the wind data, marking the grid box with the highest wind speed with an X. Let's proceed with plotting the wind data.".to_string())),
             tool_calls: Some(vec![ChatCompletionMessageToolCall {
                 id: "Some_id4".to_string(),
                 r#type: ChatCompletionToolType::Function,
@@ -235,15 +245,15 @@ plt.show()".to_string(),
             ..Default::default()
         }),
         ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
-            content: "An image was successfully generated.".to_string(),
+            content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("An image was successfully generated.".to_string()),
             tool_call_id: "Some_id4".to_string(), // must match the ID of the tool call that generated the image
         })
         ,
         ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             name: Some("frevaGPT".to_string()),
-            content: Some("The map plot above shows the surface wind speed for the year 1940, with the grid box containing the highest wind speed marked with a red X. The colorbar represents the wind speed in meters per second (m/s), with cooler colors indicating lower wind speeds and warmer colors indicating higher wind speeds.
+            content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("The map plot above shows the surface wind speed for the year 1940, with the grid box containing the highest wind speed marked with a red X. The colorbar represents the wind speed in meters per second (m/s), with cooler colors indicating lower wind speeds and warmer colors indicating higher wind speeds.
 
-If you would like to see the map plot for a different year with the highest wind speed, please let me know. I'm here to help!".to_string()),
+If you would like to see the map plot for a different year with the highest wind speed, please let me know. I'm here to help!".to_string())),
             ..Default::default()
         }),
         ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
@@ -284,7 +294,7 @@ plt.legend()
 plt.grid()
 plt.show()"),
         ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
-            content:"An image was successfully generated and is being shown to the user.".to_string(),
+            content:async_openai::types::ChatCompletionRequestToolMessageContent::Text("An image was successfully generated and is being shown to the user.".to_string()),
             tool_call_id: "Some_id5".to_string(),
         }),
         assistant_message!("The zonal mean plot above shows the average precipitation over the latitude range for the periods 1961-1990 and 1991-2020. The blue line represents the zonal mean precipitation for the period 1961-1990, while the orange line represents the zonal mean precipitation for the period 1991-2020.
@@ -301,7 +311,7 @@ reanalysis_data = xr.open_dataset('/work/bm1159/XCES/data4xces/reanalysis/reanal
 # Display the dataset to understand its structure and variables
 reanalysis_data"),
     ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
-        content: "<xarray.Dataset> Size: 30MB
+        content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("<xarray.Dataset> Size: 30MB
 Dimensions:   (time: 9, lon: 1280, bnds: 2, lat: 640)
 Coordinates:
   * time      (time) datetime64[ns] 72B 2024-01-01 2024-02-01 ... 2024-09-01
@@ -321,7 +331,7 @@ Attributes:
     tracking_id:    d5b13485-16f3-5f65-8dfd-cf03615bcc01
     creation_date:  2024-09-09T00:07:07Z
     CDO:            Climate Data Operators version 1.9.6 (http://mpimet.mpg.d...".
-to_string(),
+to_string()),
         tool_call_id: "Some_id6".to_string(),
     }),
     assistant_message!("The dataset you requested contains temperature data (tas) from ERA5 reanalysis for the period from January 1, 2024, to December 31, 2024. Here's a summary of its contents:

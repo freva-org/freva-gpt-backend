@@ -177,7 +177,7 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
             )]),
             Self::Assistant(s) => Ok(vec![ChatCompletionRequestMessage::Assistant(
                 ChatCompletionRequestAssistantMessage {
-                    content: Some(s),
+                    content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text(s)),
                     name: Some("frevaGPT".to_string()),
                     ..Default::default()
                 },
@@ -186,13 +186,13 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
             Self::CodeOutput(s, id) => Ok(vec![ChatCompletionRequestMessage::Tool(
                 async_openai::types::ChatCompletionRequestToolMessage {
                     tool_call_id: id,
-                    content: s,
+                    content: async_openai::types::ChatCompletionRequestToolMessageContent::Text(s),
                 })
             ]),
             Self::Image(_) => Ok(vec![ChatCompletionRequestMessage::System(
                 ChatCompletionRequestSystemMessage {
                     name: Some("Image".to_string()),
-                    content: "An image was successfully generated and is being shown to the user.".to_string(),
+                    content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text("An image was successfully generated and is being shown to the user.".to_string()),
                 },
             )]),
             Self::CodeError(_) | Self::OpenAIError(_) | Self::ServerError(_) => Err(ConversionError::VariantHide("Error variants should not be passed to the LLM, it doesn't need to know about them.")),
@@ -217,7 +217,7 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     Ok(vec![ChatCompletionRequestMessage::System(
                         ChatCompletionRequestSystemMessage {
                             name: Some("ServerHint".to_string()),
-                            content: s,
+                            content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(s),
                         },
                     )])
                 } else {
@@ -243,12 +243,31 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
         match value {
             ChatCompletionRequestMessage::System(content) => {
                 // As of currently, the system messages only contain the prompt and the image.
-                if Some("Prompt".to_string()) == content.name {
-                    Ok(Self::Prompt(content.content))
-                } else if Some("Image".to_string()) == content.name {
-                    Ok(Self::Image(content.content))
-                } else {
-                    Err("Unknown System Message type.")
+                match content.name {
+                    None => {
+                        error!("System Message contained no name.");
+                        Err("System Message contained no name.")
+                    }
+                    Some(text) => {
+                        match text.as_str() {
+                            "Prompt" | "Image" => {
+                                let text = match content.content {
+                                    async_openai::types::ChatCompletionRequestSystemMessageContent::Text(s) => s,
+                                    async_openai::types::ChatCompletionRequestSystemMessageContent::Array(vector) => {
+                                        let mut text_vec = vec![]; // buffer the text fragments
+                                        for elem in vector {
+                                            let async_openai::types::ChatCompletionRequestSystemMessageContentPart::Text(s) = elem;
+                                            text_vec.push(s.text);
+                                            
+                                        }
+                                    text_vec.join("\n")
+                                    }
+                                };
+                                Ok(Self::Prompt(text))
+                            }
+                            _ => Err("Unknown System Message type."),
+                        }
+                    }
                 }
             }
             ChatCompletionRequestMessage::User(content) => {
@@ -262,7 +281,7 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
 
                         let mut text_vec = vec![];
                         for elem in vector {
-                            if let async_openai::types::ChatCompletionRequestMessageContentPart::Text(s) = elem {
+                            if let async_openai::types::ChatCompletionRequestUserMessageContentPart::Text(s) = elem {
                             text_vec.push(s.text);
                             } else {
                                 error!("User Message Array contained a non-Text variant.");
@@ -292,7 +311,31 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
                     Err("Assistant Message contained a tool or function call. This should not happen and is not supported.")
                 } else {
                     match content.content {
-                        Some(s) => Ok(Self::Assistant(s)),
+                        Some(s) => {
+                            match s {
+                                async_openai::types::ChatCompletionRequestAssistantMessageContent::Text(s) => {
+                                    Ok(Self::Assistant(s))
+                                },
+                                async_openai::types::ChatCompletionRequestAssistantMessageContent::Array(vector) => {
+                                    let mut text_vec = vec![];
+                                    for elem in vector {
+                                        // There are two variants, the text and refusal. We handle text as expected, and inform the user about refusal.
+                                        match elem {
+                                            async_openai::types::ChatCompletionRequestAssistantMessageContentPart::Text(s) => {
+                                                text_vec.push(s.text);
+                                            },
+                                            async_openai::types::ChatCompletionRequestAssistantMessageContentPart::Refusal(s) => {
+                                                warn!("Assistant Message contained a refusal: {:?}", s);
+                                                text_vec.push(format!("\n(Assistant refused to generate text: {:?})\n", s));
+                                            }
+                                        }
+                                    }
+                                    let concat = text_vec.join("\n");
+
+                                    Ok(Self::Assistant(concat))
+                                }
+                            }
+                        }
                         None => {
                             warn!("Assistant Message contained no content.");
                             Ok(Self::Assistant(String::new()))
@@ -302,19 +345,41 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
             }
             ChatCompletionRequestMessage::Tool(content) => {
                 // Route the Code Interpreter and Code Interpreter Output to the correct variants.
-                if content.tool_call_id == "Code Interpreter" {
-                    Ok(Self::Code(content.content, content.tool_call_id))
-                } else if content.tool_call_id == "Code Interpreter Output" {
-                    Ok(Self::CodeOutput(content.content, content.tool_call_id))
-                } else {
-                    warn!(
-                        "Tool Message contained an unknown tool_call_id: {:?}",
-                        content.tool_call_id
-                    );
-                    // We'll still give it to the assistant, he might need it.
-                    // Depending on the implementation of the OpenAI API, this might result in an error from the LLM as we don't answer the tool call.
-                    let retval = content.tool_call_id + ": " + &content.content;
-                    Ok(Self::Assistant(retval))
+
+                // As an API change of this library, it can now also be an Array of Texts.
+                let text = match content.content {
+                    async_openai::types::ChatCompletionRequestToolMessageContent::Text(s) => s,
+                    async_openai::types::ChatCompletionRequestToolMessageContent::Array(vector) => {
+                        let mut text_vec = vec![];
+                        for elem in vector {
+                            let async_openai::types::ChatCompletionRequestToolMessageContentPart::Text(s) = elem;
+                            text_vec.push(s.text);
+                        }
+                        text_vec.join("\n")
+                    }
+                };
+
+                match content.tool_call_id.as_str() {
+                    "Code Interpreter" | "Code Interpreter Output" => {
+                        // We also need to check whether the tool_call_id is Code Interpreter or Code Interpreter Output.
+                        match content.tool_call_id.as_str() {
+                            "Code Interpreter" => Ok(Self::Code(text, content.tool_call_id)),
+                            "Code Interpreter Output" => {
+                                Ok(Self::CodeOutput(text, content.tool_call_id))
+                            }
+                            _ => Err("Unknown Tool Call ID."), // This is impossible
+                        }
+                    }
+                    _ => {
+                        warn!(
+                            "Tool Message contained an unknown tool_call_id: {:?}",
+                            content.tool_call_id
+                        );
+                        // We'll still give it to the assistant, he might need it.
+                        // Depending on the implementation of the OpenAI API, this might result in an error from the LLM as we don't answer the tool call.
+                        let retval = content.tool_call_id + ": " + &text;
+                        Ok(Self::Assistant(retval))
+                    }
                 }
             }
             ChatCompletionRequestMessage::Function(content) => {
@@ -442,7 +507,7 @@ mod tests {
         assert_eq!(output.len(), 25);
         //DEBUG
         assert_eq!(output[21], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
-            content: Some("To plot a circle, we can use the `matplotlib` library to create a simple visualization. Let's create a plot with a circle centered at the origin (0, 0) with a specified radius. I'll use a radius of 1 for this example.\n\nLet's proceed with the code to generate this plot.".to_string()),
+            content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("To plot a circle, we can use the `matplotlib` library to create a simple visualization. Let's create a plot with a circle centered at the origin (0, 0) with a specified radius. I'll use a radius of 1 for this example.\n\nLet's proceed with the code to generate this plot.".to_string())),
             name: Some("frevaGPT".to_string()),
             tool_calls: Some(vec![ChatCompletionMessageToolCall{
                 id: "call_13RrNWNbaziDd34bvPXpdrMV".to_string(),
@@ -473,7 +538,7 @@ mod tests {
         // "Assistant:To create an annual mean temperature global map plot for the year 2023 using the provided dataset, we will follow these steps:\n\n1. Load the temperature data for 2023.\n2. Calculate the annual mean temperature for that year.\n3. Create a global map plot of the mean temperature.\n\nLet's start by loading the temperature data and calculating the annual mean temperature for 2023."
         // "Code: {\r\n        \"code\": \"import xarray as xr\\nimport numpy as np\\nimport matplotlib.pyplot as plt\\n\\n# Load the specified dataset for the year 2023\\ntemperature_data = xr.open_dataset('/work/bm1159/XCES/data4xces/reanalysis/reanalysis/ECMWF/IFS/ERA5/mon/atmos/tas/r1i1p1/tas_Amon_reanalysis_era5_r1i1p1_20240101-20241231.nc')\\n\\n# Calculate the annual mean temperature for the year 2023\\ntemperature_mean_2023 = temperature_data['tas'].mean(dim='time')\\n\\n# Extract latitude and longitude for plotting\\nlon = temperature_data['lon']\\nlat = temperature_data['lat']\\n\\n# Create a global map plot of the mean temperature\\nplt.figure(figsize=(12, 6))\\nplt.contourf(lon, lat, temperature_mean_2023, levels=np.linspace(250, 310, 61), cmap='coolwarm', extend='both')\\nplt.colorbar(label='Mean Temperature (K)')\\nplt.title('Annual Mean Temperature (K) for 2023')\\nplt.xlabel('Longitude')\\nplt.ylabel('Latitude')\\nplt.show()\"\r\n    }:call_OgWOIoYgje39a1akMKmRyXeL"
         assert_eq!(output[21], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
-            content: Some("To create an annual mean temperature global map plot for the year 2023 using the provided dataset, we will follow these steps:\\n\\n1. Load the temperature data for 2023.\\n2. Calculate the annual mean temperature for that year.\\n3. Create a global map plot of the mean temperature.\\n\\nLet's start by loading the temperature data and calculating the annual mean temperature for 2023.".to_string()),
+            content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("To create an annual mean temperature global map plot for the year 2023 using the provided dataset, we will follow these steps:\\n\\n1. Load the temperature data for 2023.\\n2. Calculate the annual mean temperature for that year.\\n3. Create a global map plot of the mean temperature.\\n\\nLet's start by loading the temperature data and calculating the annual mean temperature for 2023.".to_string())),
             name: Some("frevaGPT".to_string()),
             tool_calls: Some(vec![ChatCompletionMessageToolCall{
                 id: "call_OgWOIoYgje39a1akMKmRyXeL".to_string(),
@@ -490,7 +555,9 @@ mod tests {
             output[19],
             ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage {
                 name: Some("ServerHint".to_string()),
-                content: "{\"thread_id\": \"MHa15G7LoTOCUoAUXsiSHxGbUgYjPpk9\"}".to_string()
+                content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(
+                    "{\"thread_id\": \"MHa15G7LoTOCUoAUXsiSHxGbUgYjPpk9\"}".to_string()
+                )
             })
         );
     }
