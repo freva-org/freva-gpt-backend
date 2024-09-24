@@ -51,6 +51,8 @@ pub fn run_runtime_checks() {
     info!("Running runtime checks including library checks for the code interpreter.");
     check_two_plus_two();
     check_print();
+    check_print_noflush();
+    check_print_two();
     check_imports();
     println!("Success!");
     info!("Runtime checks for the code interpreter were successful and all required libraries are available.");
@@ -110,6 +112,40 @@ fn check_print() {
             "Hello World!".to_string(),
             "test".to_string()
         )]
+    );
+}
+
+/// We also make sure that the code interpreter doesn't have to flush the stdout.
+fn check_print_noflush() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "print('Hello World!')"}"#.to_string()),
+        "test".to_string(),
+        None,
+    );
+    assert_eq!(output.len(), 1);
+    assert_eq!(
+        output,
+        vec![StreamVariant::CodeOutput(
+            "Hello World!".to_string(),
+            "test".to_string()
+        )]
+    );
+}
+
+/// There was a weird error, this is to check that two print statements are correctly handled...
+/// I don't exactly know why this error occurs, but it's a good test.
+fn check_print_two() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "print('Hello')\nprint('World!')"}"#.to_string()),
+        "test".to_string(),
+        None,
+    );
+    assert_eq!(output.len(), 1);
+    assert_eq!(
+        output,
+        vec![
+            StreamVariant::CodeOutput("Hello\nWorld!".to_string(), "test".to_string()),
+        ]
     );
 }
 

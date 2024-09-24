@@ -17,9 +17,15 @@ pub fn execute_code(code: String) -> Result<String, String> {
 
     trace!("Starting GIL block.");
     let output = Python::with_gil(|py| {
+
+
+
         // We need a PyDict to store the local and global variables for the call.
         let locals = PyDict::new_bound(py);
         let globals = PyDict::new_bound(py);
+
+        let result = {
+
 
         // Because we want the last line to be returned, we'll execute all but the last line.
         let (rest_lines, last_line) = match code.trim().rsplit_once('\n') {
@@ -128,6 +134,17 @@ pub fn execute_code(code: String) -> Result<String, String> {
             // If there is no last line, we'll just return an empty string.
             Ok(String::new())
         }
+    };
+
+    // Before returning the result, we'll have to flush stdout and stderr IN PYTHON. 
+
+    let flush = py.run_bound("import sys;sys.stdout.flush();sys.stderr.flush()", Some(&globals), Some(&locals));
+    if flush.is_err() {
+        warn!("Error flushing stdout and stderr: {:?}", flush);
+    }
+
+    result
+
     });
 
     trace!("Code execution finished.");
