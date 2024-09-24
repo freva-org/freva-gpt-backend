@@ -5,6 +5,7 @@ use tracing::{info, trace, warn};
 use crate::{
     chatbot::{
         handle_active_conversations::{conversation_state, get_conversation},
+        thread_storage::read_thread,
         types::{ConversationState, StreamVariant},
     },
     tool_calls::code_interpreter::{
@@ -217,31 +218,27 @@ pub fn run_code_interpeter(arguments: String) {
 /// Retrieves all previous code interpreter inputs from the conversation state.
 /// Returns a string with all the imports, seperated by newlines.
 fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> String {
-    let this_conversation = get_conversation(thread_id);
-    match this_conversation {
-        None => {
-            warn!(
-                "No conversation found while trying to retrieve previous code interpreter imports."
-            );
-            "".to_string()
-        }
-        Some(conversation) => {
-            let mut imports = String::new();
-            for variant in conversation {
-                if let StreamVariant::Code(code, _) = variant {
-                    // Split the code into lines and only take the lines that start with "import" or start with "from" AND contain "import".
-                    let code_lines = code.split("\\n"); // It's escaped because it's JSON.
-                    for line in code_lines {
-                        if line.starts_with("import")
-                            || (line.starts_with("from") && line.contains("import"))
-                        {
-                            imports.push_str(line);
-                            imports.push('\n');
-                        }
-                    }
+    // The running conversation is in the global variable.
+    let mut this_conversation = get_conversation(thread_id).unwrap_or_default();
+    // The past conversation is stored on disk.
+    let past_conversation = read_thread(thread_id).unwrap_or_default();
+    this_conversation.extend(past_conversation);
+
+    let mut imports = String::new();
+    for variant in this_conversation {
+        if let StreamVariant::Code(code, _) = variant {
+            // Split the code into lines and only take the lines that start with "import" or start with "from" AND contain "import".
+            let code_lines = code.split("\\n"); // It's escaped because it's JSON.
+            for line in code_lines {
+                if line.starts_with("import")
+                    || (line.starts_with("from") && line.contains("import"))
+                {
+                    trace!("Found import line: {}", line);
+                    imports.push_str(line);
+                    imports.push('\n');
                 }
             }
-            imports
         }
     }
+    imports
 }
