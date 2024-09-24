@@ -72,7 +72,7 @@ pub fn run_runtime_checks() {
         println!("Some required directories are missing or not readable");
         error!("Some required directories are missing or not readable");
     }
-    if !check_directory("/data/inputfiles") {
+    if !check_directory("/data/inputFiles") {
         println!("The test data is not accessable. This means that the test data will not be available for the runtime.");
         warn!("The test data is not accessable. This means that the test data will not be available for the runtime.");
     }
