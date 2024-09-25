@@ -525,7 +525,7 @@ mod tests {
     fn test_help_convert_sv_ccrm_real_data() {
         // Instead of using constructed data, we'll actually read the data from a file.
         // In this case, from a file that, when read, triggered the error this test is supposed to catch.
-        let input = read_thread("test");
+        let input = read_thread("test", false);
         assert!(
             input.is_ok(),
             "Error reading test thread file: {:?}",

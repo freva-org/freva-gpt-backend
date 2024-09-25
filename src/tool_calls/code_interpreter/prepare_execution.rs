@@ -221,14 +221,16 @@ fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> String {
     // The running conversation is in the global variable.
     let mut this_conversation = get_conversation(thread_id).unwrap_or_default();
     // The past conversation is stored on disk.
-    let past_conversation = read_thread(thread_id).unwrap_or_default();
+    let past_conversation = read_thread(thread_id, true).unwrap_or_default(); // We don't want to log an error if the file doesn't exist.
     this_conversation.extend(past_conversation);
 
     let mut imports = String::new();
     for variant in this_conversation {
         if let StreamVariant::Code(code, _) = variant {
             // Split the code into lines and only take the lines that start with "import" or start with "from" AND contain "import".
-            let code_lines = code.split("\\n"); // It's escaped because it's JSON.
+            // Start the split at the first occurence of "\":\"" to avoid splitting the code itself and to include the first line.
+            let rest_code = code.split_once("\":\"").unwrap_or_default().1; // If it doesn't work, use the empty string.
+            let code_lines = rest_code.split("\\n"); // It's escaped because it's JSON.
             for line in code_lines {
                 if line.starts_with("import")
                     || (line.starts_with("from") && line.contains("import"))

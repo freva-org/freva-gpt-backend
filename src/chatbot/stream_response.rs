@@ -131,7 +131,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     } else {
         // Don't create a new thread, but continue the existing one.
         debug!("Expecting there to be a file for thread_id {}", thread_id);
-        let content = match read_thread(thread_id.as_str()) {
+        let content = match read_thread(thread_id.as_str(), false) {
             Ok(content) => content,
             Err(e) => {
                 // If we can't read the thread, we'll return a generic error.
