@@ -87,7 +87,8 @@ pub fn start_code_interpeter(
     };
 
     let sanitized_code = sanitize_code(previous_code_interpreter_imports + &code.code);
-    code.code = sanitized_code;
+    let post_processed_code = post_process(sanitized_code);
+    code.code = post_processed_code;
 
     trace!(
         "Running the code interpreter with the following code: {}",
@@ -243,4 +244,17 @@ fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> String {
         }
     }
     imports
+}
+
+/// Post-processes the code before running it.
+/// For now, we'll just add `import freva`, but we might want to add more later.
+fn post_process(code: String) -> String {
+    if code.contains("freva") && !code.contains("import freva") {
+        trace!("Adding import freva to the code.");
+        let mut code = code;
+        code.insert_str(0, "import freva\n");
+        code
+    } else {
+        code
+    }
 }
