@@ -1,6 +1,6 @@
 use std::process::Command;
 
-use tracing::{info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     chatbot::{
@@ -247,14 +247,25 @@ fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> String {
 }
 
 /// Post-processes the code before running it.
-/// For now, we'll just add `import freva`, but we might want to add more later.
+/// Adds freva, numpy, matplotlib and xarray imports if they are not already present.
 fn post_process(code: String) -> String {
-    if code.contains("freva") && !code.contains("import freva") {
-        trace!("Adding import freva to the code.");
-        let mut code = code;
-        code.insert_str(0, "import freva\n");
-        code
-    } else {
-        code
+    let mut code = code;
+
+    // (What should be detected to add it) and (what should be added)
+    let libraries = [
+        ("freva.", "import freva\n"),
+        ("np.", "import numpy as np\n"),
+        ("plt.", "import matplotlib.pyplot as plt\n"),
+        ("xr.", "import xarray as xr\n"),
+    ];
+
+    for (detect, add) in libraries.iter() {
+        // If the code contains the detect string, but not the add string, we'll add the add string.
+        if code.contains(detect) && !code.contains(add) {
+            debug!("Adding the following import to the code: {}", add);
+            code = add.to_string() + &code;
+        }
     }
+
+    code
 }
