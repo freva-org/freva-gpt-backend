@@ -258,14 +258,41 @@ fn try_get_image(plt: &Bound<PyAny>) -> Option<Vec<u8>> {
 fn try_read_locals(py: Python, thread_id: Option<String>) -> Option<Bound<PyDict>> {
     // If the thread_id is None, we don't even have to try to read the file.
     let thread_id = thread_id?; // Unwrap the thread_id.
-    let path = format!("python_pickles/{thread_id}.pickle");
+    let pickleable_path = format!("python_pickles/{thread_id}/pickleable.pickle");
+    let unpickleable_path = format!("python_pickles/{thread_id}/unpickleable.pickle");
 
-    // empty read on the file means that if we can't read it, nothing happens.
-    std::fs::read(&path).ok()?;
+    // Check if pickled files exist
+    if !std::path::Path::new(&pickleable_path).exists() {
+        return None;
+    }
 
     // The Python code to read the pickle file to a variable named loaded_vars.
-    let code =
-        format!("import pickle\nwith open('{path}', 'rb') as f:\n    loaded_vars = pickle.load(f)");
+    let code = format!(
+        r#"import pickle
+import xarray
+import os
+
+# Load picklable variables
+with open('{pickleable_path}', 'rb') as f:
+    loaded_vars = pickle.load(f)
+
+# Load unpickleable variables metadata
+with open('{unpickleable_path}', 'rb') as f:
+    unpickleable_vars = pickle.load(f)
+
+# Reconstruct unpicklable variables
+serialized_data_dir = 'python_pickles/{thread_id}'
+for key, metadata in unpickleable_vars.items():
+    if metadata['type'] == 'xarray.Dataset':
+        netcdf_file = metadata['file']
+        loaded_vars[key] = xarray.open_dataset(netcdf_file)
+    else:
+        # Handle other types or log an error
+        pass
+
+# Now, 'loaded_vars' contains all the variables to be used as locals
+"#
+    );
     let temp_locals = PyDict::new_bound(py);
 
     // Run the code; if it doesn't work, we'll just return None.
@@ -287,17 +314,45 @@ fn save_to_pickle_file(py: Python, locals: Bound<PyDict>, thread_id: String) {
     // First we filter the locals to only include the ones that are actually serializable.
     // We'll execute some python code to do that.
     let code = format!(
-        r#"import pickle
+        r#"import os
+import pickle
+import xarray
+
 local_items = locals().copy()
 pickleable_vars = {{}}
+unpickleable_vars = {{}}
+unhandled_vars = []
+
+# Directory to store serialized data
+serialized_data_dir = 'python_pickles/{thread_id}'
+os.makedirs(serialized_data_dir, exist_ok=True)
+
 for key, value in local_items.items():
     try:
         pickle.dumps(value)
         pickleable_vars[key] = value
-    except Exception as e:
-        pass # We'll just ignore the ones that can't be pickled.
-with open('python_pickles/{thread_id}.pickle', 'wb') as f:
-    pickle.dump(pickleable_vars, f)"#
+    except Exception:
+        # Check if the variable is an xarray.Dataset
+        if isinstance(value, xarray.Dataset):
+            # Serialize xarray dataset to NetCDF file
+            netcdf_file = os.path.join(serialized_data_dir, f'{{key}}.nc')
+            value.to_netcdf(netcdf_file)
+            # Store metadata to reconstruct the variable
+            unpickleable_vars[key] = {{
+                'type': 'xarray.Dataset',
+                'file': netcdf_file
+            }}
+        else:
+            # Variable is unpicklable and unhandled; skip it or log it
+            unhandled_vars.append(key)
+
+# Save picklable variables
+with open('python_pickles/{thread_id}/pickleable.pickle', 'wb') as f:
+    pickle.dump(pickleable_vars, f)
+
+# Save unpickleable variable metadata
+with open('python_pickles/{thread_id}/unpickleable.pickle', 'wb') as f:
+    pickle.dump(unpickleable_vars, f)"#
     );
     let locals = locals.clone();
 

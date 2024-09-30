@@ -257,6 +257,7 @@ fn post_process(code: String) -> String {
         ("np.", "import numpy as np\n"),
         ("plt.", "import matplotlib.pyplot as plt\n"),
         ("xr.", "import xarray as xr\n"),
+        ("pd.", "import pandas as pd\n"),
     ];
 
     for (detect, add) in libraries.iter() {
