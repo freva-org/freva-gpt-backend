@@ -1,6 +1,0 @@
-# Directory for logs from the backend, written to from within the container.
-# Ignore everything in this directory
-*
-# Except this file
-!.gitignore
-

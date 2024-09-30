@@ -1,7 +1,0 @@
-# Directory for the threads the backend generated. Mounted to the container.
-# Ignore everything in this directory
-*
-# Except this file
-!.gitignore
-# Also copy the test file
-!test.txt
