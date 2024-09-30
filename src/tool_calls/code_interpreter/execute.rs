@@ -194,7 +194,7 @@ fn format_pyerr(e: &PyErr, py: Python) -> String {
             match traceback.format() {
                 Ok(tb_string) => {
                     info!("Traceback: {tb_string}");
-                    format!("{tb_string}{e}")
+                    format!("{e}\n{tb_string}") // Writing the error first means that the error message is at the top, so cutting the message off will still show the error.
                 }
                 Err(inner_e) => {
                     // If we can't get the traceback, we shouldn't just return the error message, because that's about not being able to get the traceback.

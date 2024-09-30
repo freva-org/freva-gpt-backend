@@ -239,7 +239,7 @@ pub fn check_soft_crash() {
     assert_eq!(
         output,
         vec![StreamVariant::CodeOutput(
-            "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nZeroDivisionError: division by zero".to_string(),
+            "ZeroDivisionError: division by zero\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>".to_string(),
             "test".to_string()
         )]
     );
