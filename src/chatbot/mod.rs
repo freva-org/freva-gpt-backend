@@ -32,6 +32,7 @@ use std::sync::{Arc, Mutex};
 use async_openai::config::OpenAIConfig;
 use once_cell::sync::Lazy;
 
+use tracing::{trace, warn};
 use types::ActiveConversation;
 
 /// Because multiple threads need to work together and need to know about the conversations, this static variable holds information about all active conversation.
@@ -41,7 +42,50 @@ pub static ACTIVE_CONVERSATIONS: Lazy<Arc<Mutex<Vec<ActiveConversation>>>> =
 
 /// Because we shouldn't have to construct a new OpenAI client for every stream we start, we'll use this static variable to hold the client.
 /// The Lazy is transparent, it can be accessed as-is.
-pub static CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
+static OPENAI_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
     let config = async_openai::config::OpenAIConfig::new();
     async_openai::Client::with_config(config)
 });
+
+/// We also need one for the Ollama client, because the API endpoint is dependent on the client.
+static OLLAMA_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
+    let config = async_openai::config::OpenAIConfig::new().with_api_base("http://localhost:11434");
+    async_openai::Client::with_config(config)
+});
+
+/// We might want to talk to ollama. This is to check whether ollama is up. If it is, it'll return "Ollama is running".
+/// Timeout is 200 milliseconds; it's on localhost:11434, the delay should be minimal.
+pub fn is_ollama_running() -> bool {
+    if let Ok(client) = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_millis(200))
+        .build()
+    {
+        let response = client.get("http://localhost:11434/").send();
+        if let Ok(response) = response {
+            response.status().is_success()
+        } else {
+            false
+        }
+    } else {
+        false
+    }
+}
+
+/// Selects the correct client based on the chatbot that is requested.
+pub fn select_client(
+    chatbot: available_chatbots::AvailableChatbots,
+) -> &'static async_openai::Client<OpenAIConfig> {
+    match chatbot {
+        available_chatbots::AvailableChatbots::OpenAI(_) => {
+            trace!("Selecting OpenAI client");
+            &OPENAI_CLIENT
+        }
+        available_chatbots::AvailableChatbots::Ollama(_) => {
+            trace!("Selecting Ollama client");
+            if !is_ollama_running() {
+                warn!("Ollama is not running, but ollama couldn't be found! This might fail!");
+            }
+            &OLLAMA_CLIENT
+        }
+    }
+}

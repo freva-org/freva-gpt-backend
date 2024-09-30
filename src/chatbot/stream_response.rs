@@ -22,9 +22,9 @@ use crate::{
             new_conversation_id, save_and_remove_conversation,
         },
         prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON},
+        select_client,
         thread_storage::read_thread,
         types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
-        CLIENT,
     },
     tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS},
 };
@@ -216,7 +216,11 @@ async fn create_and_stream(
     thread_id: String,
     freva_config_path: String,
 ) -> actix_web::HttpResponse {
-    let open_ai_stream = match CLIENT.chat().create_stream(request).await {
+    let open_ai_stream = match select_client(DEFAULTCHATBOT)
+        .chat()
+        .create_stream(request)
+        .await
+    {
         Ok(stream) => stream,
         Err(e) => {
             // If we can't create the stream, we'll return a generic error.
@@ -473,7 +477,7 @@ async fn oai_stream_to_variants(
                             warn!("Multiple tool calls found, but only one is supported. All are ignored except the first: {:?}", tool_calls);
                         }
                         match tool_calls.first() {
-                            // TODO: This doesn't support multiple tool calls at once yet.
+                            // This doesn't support multiple tool calls at once, but they are disabled in the request.
                             Some(tool_call) => {
                                 // We now know that we are sending the delta of a tool call.
                                 // For the user to see a stream of i.e. the code interpreter's code being written by the LLM, we need to send the code interpreter's code as a stream.
@@ -687,7 +691,11 @@ async fn handle_stop_event(
                         }
                         Ok(request) => {
                             trace!("Request built successfully: {:?}", request);
-                            match CLIENT.chat().create_stream(request).await {
+                            match select_client(DEFAULTCHATBOT)
+                                .chat()
+                                .create_stream(request)
+                                .await
+                            {
                                 Err(e) => {
                                     // If we can't create the stream, we'll return a generic error.
                                     warn!("Error creating stream: {:?}", e);

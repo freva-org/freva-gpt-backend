@@ -4,7 +4,7 @@ pub static DEFAULTCHATBOT: AvailableChatbots = AvailableChatbots::OpenAI(OpenAIM
 #[derive(Debug, Clone, Copy)]
 pub enum AvailableChatbots {
     OpenAI(OpenAIModels),
-    // Here will be more chatbots, like LLAMA, etc.
+    Ollama(OllamaModels),
 }
 
 // Implementing the conversion from the enum to a string
@@ -14,6 +14,10 @@ impl From<AvailableChatbots> for String {
             AvailableChatbots::OpenAI(model) => match model {
                 OpenAIModels::gpt_4o => "gpt-4o".to_string(),
                 OpenAIModels::gpt_4o_mini => "gpt-4o-mini".to_string(),
+            },
+            AvailableChatbots::Ollama(model) => match model {
+                OllamaModels::llama3_2_3B => "llama3.2:1b".to_string(),
+                OllamaModels::llama3_1_70B => "llama3.1:70b".to_string(),
             },
         }
     }
@@ -25,4 +29,12 @@ pub enum OpenAIModels {
     gpt_4o,
     #[allow(non_camel_case_types)]
     gpt_4o_mini,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum OllamaModels {
+    #[allow(non_camel_case_types)]
+    llama3_2_3B,
+    #[allow(non_camel_case_types)]
+    llama3_1_70B,
 }
