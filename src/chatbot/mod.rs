@@ -49,10 +49,18 @@ static OPENAI_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
 
 /// We also need one for the Ollama client, because the API endpoint is dependent on the client.
 static OLLAMA_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
+    let address = OLLAMA_ADDRESS.clone();
+    let api_base = format!("{address}/v1"); // format doesn't automatically dereference the variable, so we need to do it manually.
     let config = async_openai::config::OpenAIConfig::new()
-        .with_api_base("http://localhost:11434/v1")
+        .with_api_base(api_base)
         .with_api_key("ollama");
     async_openai::Client::with_config(config)
+});
+
+/// The address of the Ollama server.
+static OLLAMA_ADDRESS: Lazy<String> = Lazy::new(|| {
+    std::env::var("OLLAMA_ADDRESS").unwrap_or_else(|_| "http://localhost:11434".to_string())
+    // Default to localhost
 });
 
 /// We might want to talk to ollama. This is to check whether ollama is up. If it is, it'll return "Ollama is running".
@@ -62,7 +70,7 @@ pub async fn is_ollama_running() -> bool {
         .timeout(std::time::Duration::from_millis(200))
         .build()
     {
-        let response = client.get("http://localhost:11434").send().await;
+        let response = client.get(OLLAMA_ADDRESS.to_string()).send().await;
         if let Ok(response) = response {
             response.status().is_success()
         } else {
