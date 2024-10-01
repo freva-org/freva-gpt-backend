@@ -1,5 +1,5 @@
 /// The default chatbot that will be used when the user doesn't specify one.
-pub static DEFAULTCHATBOT: AvailableChatbots = AvailableChatbots::Ollama(OllamaModels::llama3_2_3B);
+pub static DEFAULTCHATBOT: AvailableChatbots = AvailableChatbots::Ollama(OllamaModels::llama3_1_70B);
 
 #[derive(Debug, Clone, Copy)]
 pub enum AvailableChatbots {

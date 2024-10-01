@@ -32,7 +32,7 @@ use std::sync::{Arc, Mutex};
 use async_openai::config::OpenAIConfig;
 use once_cell::sync::Lazy;
 
-use tracing::{trace, warn};
+use tracing::{trace, warn, debug};
 use types::ActiveConversation;
 
 /// Because multiple threads need to work together and need to know about the conversations, this static variable holds information about all active conversation.
@@ -59,6 +59,8 @@ static OLLAMA_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
 
 /// The address of the Ollama server.
 static OLLAMA_ADDRESS: Lazy<String> = Lazy::new(|| {
+    println!("OLLAMA_ADDRESS: {:?}", std::env::var("OLLAMA_ADDRESS"));
+    debug!("OLLAMA_ADDRESS: {:?}", std::env::var("OLLAMA_ADDRESS"));
     std::env::var("OLLAMA_ADDRESS").unwrap_or_else(|_| "http://localhost:11434".to_string())
     // Default to localhost
 });
