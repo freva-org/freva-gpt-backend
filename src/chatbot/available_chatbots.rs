@@ -1,5 +1,5 @@
 /// The default chatbot that will be used when the user doesn't specify one.
-pub static DEFAULTCHATBOT: AvailableChatbots = AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini);
+pub static DEFAULTCHATBOT: AvailableChatbots = AvailableChatbots::Ollama(OllamaModels::llama3_2_3B);
 
 #[derive(Debug, Clone, Copy)]
 pub enum AvailableChatbots {
@@ -16,7 +16,7 @@ impl From<AvailableChatbots> for String {
                 OpenAIModels::gpt_4o_mini => "gpt-4o-mini".to_string(),
             },
             AvailableChatbots::Ollama(model) => match model {
-                OllamaModels::llama3_2_3B => "llama3.2:1b".to_string(),
+                OllamaModels::llama3_2_3B => "llama3.2".to_string(),
                 OllamaModels::llama3_1_70B => "llama3.1:70b".to_string(),
             },
         }

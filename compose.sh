@@ -1,6 +1,6 @@
 #!/bin/bash
 # Not a real compose file, but a script to compose the (currently just one) image. 
-podman run -d --name freva-gpt-2-backend-instance -p 8502:8502 -v /work:/work:ro -v ./logs:/app/logs -v ./threads:/app/threads -v ./target:/app/target -v ./testdata:/data/inputFiles -v ./python_pickles:/app/python_pickles freva-gpt2-backend 
+podman run -d --name freva-gpt-2-backend-instance -p 8502:8502 -v /work:/work:ro -v ./logs:/app/logs -v ./threads:/app/threads -v ./target:/app/target -v ./testdata:/data/inputFiles -v ./python_pickles:/app/python_pickles -p 11434:11434 freva-gpt2-backend 
 #          ^    	    ^				^           ^             ^                   ^                         ^                       ^                               ^                                      ^ 
 # Runs the Image            | 				|           |             |                   |                         |                       |                               |                                      | 
 #          |                | 				|           |             |                   |                         |                       |                               ^ Access to the persistant data for the|code_interpreter

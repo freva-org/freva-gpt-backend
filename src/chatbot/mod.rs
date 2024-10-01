@@ -49,7 +49,7 @@ static OPENAI_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
 
 /// We also need one for the Ollama client, because the API endpoint is dependent on the client.
 static OLLAMA_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
-    let config = async_openai::config::OpenAIConfig::new().with_api_base("http://localhost:11434");
+    let config = async_openai::config::OpenAIConfig::new().with_api_base("http://localhost:11434/v1").with_api_key("ollama");
     async_openai::Client::with_config(config)
 });
 
