@@ -55,6 +55,9 @@ pub static STARTING_PROMPT_JSON: Lazy<String> = Lazy::new(|| {
 pub static STARTING_PROMPT: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::new(|| {
     let mut messages = vec![ChatCompletionRequestMessage::System(INITIAL_PROMPT.clone())];
     messages.extend(EXAMPLE_CONVERSATIONS.clone());
+    messages.push(ChatCompletionRequestMessage::System(
+        SUMMARY_SYSTEM_PROMPT.clone(),
+    ));
     messages
 });
 
@@ -403,4 +406,15 @@ exact_size_mb"#.to_string()),
         assistant_message!("The exact size of the dataset is approximately 4500.61 MB."),
 
         ]
+});
+
+/// Some LLMs, especially Llama seem to require another prompt after the example conversations.
+static SUMMARY_SYSTEM_PROMPT: Lazy<ChatCompletionRequestSystemMessage> = Lazy::new(|| {
+    ChatCompletionRequestSystemMessage {
+        name: Some("prompt".to_string()),
+        content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text("To summarize, you are FrevaGPT, a helpful AI Assistant at the German Centre for Climate Computing (DKRZ). You specialize in analyzing provided atmospheric reanalysis data, interpreting complex datasets, visualizing trends, and identifying new connections in climate science.
+To answer the users requests, use the code_interpreter tool (NOT FUNCTION!) to execute code if neccessary. DO NOT USE IT IF IT'S NOT NECCESSARY!
+Focus on using the freva library within the code_interpreter, when possible. 
+Be helpful and answer in plain text if the question from the user doesn't require the code_interpreter tool".to_string()),
+    }
 });
