@@ -6,7 +6,7 @@ use async_openai::{
     types::{
         ChatChoiceStream, ChatCompletionRequestMessage, ChatCompletionRequestUserMessage,
         CreateChatCompletionRequest, CreateChatCompletionRequestArgs,
-        CreateChatCompletionStreamResponse,
+        CreateChatCompletionStreamResponse, ChatCompletionToolChoiceOption,
     },
 };
 use documented::docs_const;
@@ -192,6 +192,7 @@ fn build_request(
         .tools(ALL_TOOLS.clone())
         .parallel_tool_calls(false) // No parallel tool calls!
         .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
+        .tool_choice(ChatCompletionToolChoiceOption::Auto) // Explicitly set to auto, because the LLM should be free to choose the tool.
         .temperature(0.4) // The model shouldn't be too creative, but also not too boring.
         .build()
 }
