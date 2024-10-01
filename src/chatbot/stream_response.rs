@@ -217,6 +217,7 @@ async fn create_and_stream(
     freva_config_path: String,
 ) -> actix_web::HttpResponse {
     let open_ai_stream = match select_client(DEFAULTCHATBOT)
+        .await
         .chat()
         .create_stream(request)
         .await
@@ -692,6 +693,7 @@ async fn handle_stop_event(
                         Ok(request) => {
                             trace!("Request built successfully: {:?}", request);
                             match select_client(DEFAULTCHATBOT)
+                                .await
                                 .chat()
                                 .create_stream(request)
                                 .await

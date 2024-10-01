@@ -49,18 +49,20 @@ static OPENAI_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
 
 /// We also need one for the Ollama client, because the API endpoint is dependent on the client.
 static OLLAMA_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
-    let config = async_openai::config::OpenAIConfig::new().with_api_base("http://localhost:11434/v1").with_api_key("ollama");
+    let config = async_openai::config::OpenAIConfig::new()
+        .with_api_base("http://localhost:11434/v1")
+        .with_api_key("ollama");
     async_openai::Client::with_config(config)
 });
 
 /// We might want to talk to ollama. This is to check whether ollama is up. If it is, it'll return "Ollama is running".
 /// Timeout is 200 milliseconds; it's on localhost:11434, the delay should be minimal.
-pub fn is_ollama_running() -> bool {
-    if let Ok(client) = reqwest::blocking::Client::builder()
+pub async fn is_ollama_running() -> bool {
+    if let Ok(client) = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(200))
         .build()
     {
-        let response = client.get("http://localhost:11434/").send();
+        let response = client.get("http://localhost:11434").send().await;
         if let Ok(response) = response {
             response.status().is_success()
         } else {
@@ -72,7 +74,7 @@ pub fn is_ollama_running() -> bool {
 }
 
 /// Selects the correct client based on the chatbot that is requested.
-pub fn select_client(
+pub async fn select_client(
     chatbot: available_chatbots::AvailableChatbots,
 ) -> &'static async_openai::Client<OpenAIConfig> {
     match chatbot {
@@ -82,7 +84,7 @@ pub fn select_client(
         }
         available_chatbots::AvailableChatbots::Ollama(_) => {
             trace!("Selecting Ollama client");
-            if !is_ollama_running() {
+            if !is_ollama_running().await {
                 warn!("Ollama is not running, but ollama couldn't be found! This might fail!");
             }
             &OLLAMA_CLIENT
