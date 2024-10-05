@@ -74,7 +74,12 @@ async fn main() -> std::io::Result<()> {
                 .route(
                     "/streamresponse",
                     web::get().to(chatbot::stream_response::stream_response)
-                ), // StreamResponse, stream the response of a specific conversation by thread ID.
+                ) // StreamResponse, stream the response of a specific conversation by thread ID.
+                .route(
+                    "/availablechatbots",
+                    web::get()
+                        .to(chatbot::available_chatbots_endpoint::available_chatbots_endpoint)
+                ), // AvailableChatbots, get the available chatbots.
             web::scope("/ping").route(
                 "",
                 actix_web::web::get().to(static_serve::moved_permanently)

@@ -25,6 +25,9 @@ pub mod handle_active_conversations;
 /// Defines the prompts for the chatbot
 pub mod prompting;
 
+/// The endpoint for returning the available chatbots
+pub mod available_chatbots_endpoint;
+
 // Defines a few useful static variables that are used throughout the chatbot.
 
 use std::sync::{Arc, Mutex};
@@ -32,7 +35,7 @@ use std::sync::{Arc, Mutex};
 use async_openai::config::OpenAIConfig;
 use once_cell::sync::Lazy;
 
-use tracing::{trace, warn, debug};
+use tracing::{debug, trace, warn};
 use types::ActiveConversation;
 
 /// Because multiple threads need to work together and need to know about the conversations, this static variable holds information about all active conversation.

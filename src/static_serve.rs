@@ -10,8 +10,8 @@ use strum::VariantNames;
 use tracing::{debug, trace};
 
 use crate::chatbot::{
-    get_thread::GET_THREAD_DOCS, stop::STOP_DOCS, stream_response::STREAM_RESPONSE_DOCS,
-    types::StreamVariant,
+    available_chatbots_endpoint::AVAILABLE_CHATBOTS_ENDPOINT_DOCS, get_thread::GET_THREAD_DOCS,
+    stop::STOP_DOCS, stream_response::STREAM_RESPONSE_DOCS, types::StreamVariant,
 };
 
 /// The valid methods for an endpoint.
@@ -172,7 +172,9 @@ const ALL_DOCS: &str = concatcp!(
     "\n\n",
     STREAM_RESPONSE_DOCS,
     "\n\n",
-    STOP_DOCS
+    STOP_DOCS,
+    "\n\n",
+    AVAILABLE_CHATBOTS_ENDPOINT_DOCS,
 );
 pub const DOCS: &str = concatcp!("Version: ", VERSION, STREAMVARIANTS_DOCS, ALL_DOCS);
 

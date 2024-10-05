@@ -1,5 +1,15 @@
+/// The list of available chatbots that the user can choose from.
+/// The first one is the default chatbot.
+pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_4o),
+    AvailableChatbots::Ollama(OllamaModels::llama3_2_3B),
+    AvailableChatbots::Ollama(OllamaModels::llama3_1_70B),
+];
+
 /// The default chatbot that will be used when the user doesn't specify one.
-pub static DEFAULTCHATBOT: AvailableChatbots = AvailableChatbots::Ollama(OllamaModels::llama3_2_3B);
+/// It's always the first one in the list of available chatbots.
+pub static DEFAULTCHATBOT: AvailableChatbots = AVAILABLE_CHATBOTS[0];
 
 #[derive(Debug, Clone, Copy)]
 pub enum AvailableChatbots {
