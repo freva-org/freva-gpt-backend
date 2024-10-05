@@ -25,15 +25,18 @@ pub static CODE_INTERPRETER_TOOL_TYPE: Lazy<ChatCompletionTool> =
 
 static CODE_INTERPRETER_FUNCTION: Lazy<FunctionObject> = Lazy::new(|| {
     FunctionObject {
-    name: "code_interpreter".to_string(),
-    description: Some(
-        "Recieves python code, executes it in python kernel, and returns the result. Supports print statements and returning the last line."
-            .to_string(),
-    ),
-    parameters: Some(CODE_INTERPRETER_PARAMETER.clone()),
-    strict: None, // Structured Output has to either be the entire answer or nothing.
-    // So we can't use that functionality here :(
-}
+        name: "code_interpreter".to_string(),
+        description: Some(
+            "Recieves python code, executes it in a jupyter kernel, and returns the result.
+If Matplotlib generates a plot, the plot will be shown to the user.
+Stores the variables from previous executions, so you can use them in later executions.
+DOES NOT AUTO-IMPORT ANYTHING. You need to import the libraries you need yourself."
+                .to_string(),
+        ),
+        parameters: Some(CODE_INTERPRETER_PARAMETER.clone()),
+        strict: None, // Structured Output has to either be the entire answer or nothing.
+                      // So we can't use that functionality here :(
+    }
 });
 
 static CODE_INTERPRETER_PARAMETER: Lazy<serde_json::Value> = Lazy::new(|| {
