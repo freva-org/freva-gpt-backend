@@ -5,8 +5,8 @@ use async_openai::{
     error::OpenAIError,
     types::{
         ChatChoiceStream, ChatCompletionRequestMessage, ChatCompletionRequestUserMessage,
-        CreateChatCompletionRequest, CreateChatCompletionRequestArgs,
-        CreateChatCompletionStreamResponse, ChatCompletionToolChoiceOption,
+        ChatCompletionToolChoiceOption, CreateChatCompletionRequest,
+        CreateChatCompletionRequestArgs, CreateChatCompletionStreamResponse,
     },
 };
 use documented::docs_const;
@@ -29,13 +29,18 @@ use crate::{
     tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS},
 };
 
+use super::available_chatbots::AvailableChatbots;
+
 /// # Stream Response
-/// Takes in a thread_id, an input, a path to the freva config file and an auth_key and returns a stream of StreamVariants and their content.
+/// Takes in a thread_id, an input, a path to the freva config file, an auth_key and a chatbot and returns a stream of StreamVariants and their content.
 ///
 /// The thread_id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
 /// If it's empty or not given, a new thread is created.
 ///
 /// The freva config file should be always set, as it's needed for the freva library to work.
+///
+/// The chatbot parameter can be one of the possibilities as described in the /availablechatbots endpoint.
+/// If it's not set, the default chatbot is used, which is the first one in the list.
 ///
 /// The stream consists of StreamVariants and their content. See the different Stream Variants above.
 /// If the stream creates a new thread, the new thread_id will be sent as a ServerHint.
@@ -106,6 +111,21 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         warn!("Because it is not set, any usage of the freva library will fail.");
     }
 
+    // Set chatbot to the one the user requested or the default one.
+    let chatbot = match qstring.get("chatbot") {
+        None | Some("") => {
+            debug!("Using default chatbot as user didn't supply one.");
+            DEFAULTCHATBOT
+        }
+        Some(chatbot) => match String::try_into(chatbot.to_owned()) {
+            Ok(chatbot) => chatbot,
+            Err(e) => {
+                warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", e);
+                return HttpResponse::BadRequest().body("Chatbot not found. Consult the /availablechatbots endpoint for available chatbots.");
+            }
+        },
+    };
+
     info!(
         "Starting stream for thread {} with input: {}",
         thread_id, input
@@ -164,7 +184,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         freva_config_path.clone(),
     );
 
-    let request: CreateChatCompletionRequest = match build_request(messages) {
+    let request: CreateChatCompletionRequest = match build_request(messages, chatbot) {
         Ok(request) => request,
         Err(e) => {
             // If we can't build the request, we'll return a generic error.
@@ -174,17 +194,18 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     };
     trace!("Request built!");
 
-    create_and_stream(request, thread_id, freva_config_path).await
+    create_and_stream(request, thread_id, freva_config_path, chatbot).await
 }
 
 /// A simple helper function to build the stream.
 fn build_request(
     messages: Vec<ChatCompletionRequestMessage>,
+    chatbot: AvailableChatbots,
 ) -> Result<CreateChatCompletionRequest, async_openai::error::OpenAIError> {
     // Because some errors occured around here, we'll log the messages.
     trace!("Messages sending to OpenAI: {:?}", messages);
     CreateChatCompletionRequestArgs::default()
-        .model(String::from(DEFAULTCHATBOT))
+        .model(String::from(chatbot))
         .n(1)
         .messages(messages)
         .stream(true)
@@ -216,8 +237,9 @@ async fn create_and_stream(
     request: CreateChatCompletionRequest,
     thread_id: String,
     freva_config_path: String,
+    chatbot: AvailableChatbots,
 ) -> actix_web::HttpResponse {
-    let open_ai_stream = match select_client(DEFAULTCHATBOT)
+    let open_ai_stream = match select_client(chatbot)
         .await
         .chat()
         .create_stream(request)
@@ -359,6 +381,7 @@ async fn create_and_stream(
                             &mut tool_id,
                             &thread_id,
                             &mut open_ai_stream,
+                            chatbot,
                         )
                         .await;
 
@@ -439,6 +462,7 @@ async fn oai_stream_to_variants(
     open_ai_stream: &mut Pin<
         Box<dyn Stream<Item = Result<CreateChatCompletionStreamResponse, OpenAIError>> + Send>,
     >,
+    chatbot: AvailableChatbots,
 ) -> Vec<StreamVariant> {
     match response {
         Some(Ok(response)) => {
@@ -466,6 +490,7 @@ async fn oai_stream_to_variants(
                             thread_id,
                             open_ai_stream,
                             &response,
+                            chatbot,
                         )
                         .await
                     }
@@ -604,6 +629,7 @@ async fn handle_stop_event(
         Box<dyn Stream<Item = Result<CreateChatCompletionStreamResponse, OpenAIError>> + Send>,
     >,
     response: &CreateChatCompletionStreamResponse,
+    chatbot: AvailableChatbots,
 ) -> Vec<StreamVariant> {
     match reason {
         async_openai::types::FinishReason::Stop => {
@@ -683,7 +709,7 @@ async fn handle_stop_event(
                     trace!("All messages: {:?}", all_oai_messages);
 
                     // Now we construct a new stream and substitute the old one with it.
-                    match build_request(all_oai_messages) {
+                    match build_request(all_oai_messages, chatbot) {
                         Err(e) => {
                             // If we can't build the request, we'll return a generic error.
                             warn!("Error building request: {:?}", e);
@@ -693,7 +719,7 @@ async fn handle_stop_event(
                         }
                         Ok(request) => {
                             trace!("Request built successfully: {:?}", request);
-                            match select_client(DEFAULTCHATBOT)
+                            match select_client(chatbot)
                                 .await
                                 .chat()
                                 .create_stream(request)

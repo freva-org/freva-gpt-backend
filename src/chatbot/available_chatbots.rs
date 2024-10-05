@@ -1,3 +1,5 @@
+use tracing::debug;
+
 /// The list of available chatbots that the user can choose from.
 /// The first one is the default chatbot.
 pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
@@ -30,6 +32,25 @@ impl From<AvailableChatbots> for String {
                 OllamaModels::llama3_1_70B => "llama3.1:70b".to_string(),
             },
         }
+    }
+}
+
+// Implementing the conversion from a string to the enum
+// This one is fallible, because the string might not be a valid chatbot.
+impl TryInto<AvailableChatbots> for String {
+    type Error = (); // We have just one error (invalid string), so we can use a unit type
+    fn try_into(self) -> Result<AvailableChatbots, Self::Error> {
+        // To be forwards compatible, instead of matching on the input string, we'll try out all the possibilities.
+        // If any available chatbot to String matches the input string, we'll return that chatbot.
+        // If none of them match, we'll return an error.
+        for chatbot in AVAILABLE_CHATBOTS {
+            if String::from(*chatbot) == self {
+                return Ok(*chatbot);
+            }
+        }
+        // No chatbot matched the input string, so we return an error.
+        debug!("Invalid chatbot: {}", self);
+        Err(())
     }
 }
 
