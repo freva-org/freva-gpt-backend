@@ -485,7 +485,7 @@ pub fn unescape_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
 
-    use crate::chatbot::{prompting::STARTING_PROMPT_JSON, thread_storage::read_thread};
+    use crate::chatbot::{prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON}, thread_storage::read_thread};
 
     // The helper function to convert a StreamVariant to a ChatCompletionRequestMessage
     // has some problems, we'll test it here.
@@ -504,9 +504,8 @@ mod tests {
             StreamVariant::StreamEnd("Generation complete".to_string())
         ];
         let output = help_convert_sv_ccrm(input);
-        assert_eq!(output.len(), 25);
-        //DEBUG
-        assert_eq!(output[21], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+        assert_eq!(output.len(), STARTING_PROMPT.len() + 6); // The length is dependant on the prompt, so we'll have to make it depend on the prompt's length.
+        assert_eq!(output[STARTING_PROMPT.len() + 2], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("To plot a circle, we can use the `matplotlib` library to create a simple visualization. Let's create a plot with a circle centered at the origin (0, 0) with a specified radius. I'll use a radius of 1 for this example.\n\nLet's proceed with the code to generate this plot.".to_string())),
             name: Some("frevaGPT".to_string()),
             tool_calls: Some(vec![ChatCompletionMessageToolCall{
@@ -525,38 +524,38 @@ mod tests {
     fn test_help_convert_sv_ccrm_real_data() {
         // Instead of using constructed data, we'll actually read the data from a file.
         // In this case, from a file that, when read, triggered the error this test is supposed to catch.
-        let input = read_thread("test", false);
+        let input = read_thread("testthread", false);
         assert!(
             input.is_ok(),
             "Error reading test thread file: {:?}",
             input.err()
         );
-        let input = input.expect("Error reading test thread file.");
+        let input = input.expect("Error reading test thread file. Did you copy over the `testthread.txt` file to the threads folder?");
         let output = help_convert_sv_ccrm(input);
-        assert_eq!(output.len(), 27);
+        assert_eq!(output.len(), 38);
 
         // "Assistant:To create an annual mean temperature global map plot for the year 2023 using the provided dataset, we will follow these steps:\n\n1. Load the temperature data for 2023.\n2. Calculate the annual mean temperature for that year.\n3. Create a global map plot of the mean temperature.\n\nLet's start by loading the temperature data and calculating the annual mean temperature for 2023."
         // "Code: {\r\n        \"code\": \"import xarray as xr\\nimport numpy as np\\nimport matplotlib.pyplot as plt\\n\\n# Load the specified dataset for the year 2023\\ntemperature_data = xr.open_dataset('/work/bm1159/XCES/data4xces/reanalysis/reanalysis/ECMWF/IFS/ERA5/mon/atmos/tas/r1i1p1/tas_Amon_reanalysis_era5_r1i1p1_20240101-20241231.nc')\\n\\n# Calculate the annual mean temperature for the year 2023\\ntemperature_mean_2023 = temperature_data['tas'].mean(dim='time')\\n\\n# Extract latitude and longitude for plotting\\nlon = temperature_data['lon']\\nlat = temperature_data['lat']\\n\\n# Create a global map plot of the mean temperature\\nplt.figure(figsize=(12, 6))\\nplt.contourf(lon, lat, temperature_mean_2023, levels=np.linspace(250, 310, 61), cmap='coolwarm', extend='both')\\nplt.colorbar(label='Mean Temperature (K)')\\nplt.title('Annual Mean Temperature (K) for 2023')\\nplt.xlabel('Longitude')\\nplt.ylabel('Latitude')\\nplt.show()\"\r\n    }:call_OgWOIoYgje39a1akMKmRyXeL"
-        assert_eq!(output[21], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
-            content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("To create an annual mean temperature global map plot for the year 2023 using the provided dataset, we will follow these steps:\\n\\n1. Load the temperature data for 2023.\\n2. Calculate the annual mean temperature for that year.\\n3. Create a global map plot of the mean temperature.\\n\\nLet's start by loading the temperature data and calculating the annual mean temperature for 2023.".to_string())),
+        assert_eq!(output[35], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+            content: None,
             name: Some("frevaGPT".to_string()),
             tool_calls: Some(vec![ChatCompletionMessageToolCall{
-                id: "call_OgWOIoYgje39a1akMKmRyXeL".to_string(),
+                id: "call_7utCmjpQd9Jhys17aVRCyDFo".to_string(),
                 r#type: ChatCompletionToolType::Function,
                 function: FunctionCall{
                     name: "code_interpreter".to_string(),
-                    arguments: " {\\r\\n        \"code\": \"import xarray as xr\\nimport numpy as np\\nimport matplotlib.pyplot as plt\\n\\n# Load the specified dataset for the year 2023\\ntemperature_data = xr.open_dataset('/work/bm1159/XCES/data4xces/reanalysis/reanalysis/ECMWF/IFS/ERA5/mon/atmos/tas/r1i1p1/tas_Amon_reanalysis_era5_r1i1p1_20240101-20241231.nc')\\n\\n# Calculate the annual mean temperature for the year 2023\\ntemperature_mean_2023 = temperature_data['tas'].mean(dim='time')\\n\\n# Extract latitude and longitude for plotting\\nlon = temperature_data['lon']\\nlat = temperature_data['lat']\\n\\n# Create a global map plot of the mean temperature\\nplt.figure(figsize=(12, 6))\\nplt.contourf(lon, lat, temperature_mean_2023, levels=np.linspace(250, 310, 61), cmap='coolwarm', extend='both')\\nplt.colorbar(label='Mean Temperature (K)')\\nplt.title('Annual Mean Temperature (K) for 2023')\\nplt.xlabel('Longitude')\\nplt.ylabel('Latitude')\\nplt.show()\"\\r\\n    }".to_string()
+                    arguments: "{\"code\":\"4 * 3\"}".to_string()
                 }
             }]),
             ..Default::default()
         }));
 
         assert_eq!(
-            output[19],
+            output[28],
             ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage {
                 name: Some("ServerHint".to_string()),
                 content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(
-                    "{\"thread_id\": \"MHa15G7LoTOCUoAUXsiSHxGbUgYjPpk9\"}".to_string()
+                    "{\"thread_id\": \"XhBvWHg1w4Q8w5pnZARtEUGVEo50yHOg\"}".to_string()
                 )
             })
         );
