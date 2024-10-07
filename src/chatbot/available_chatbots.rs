@@ -5,8 +5,14 @@ use tracing::debug;
 pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini),
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4o),
+    AvailableChatbots::OpenAI(OpenAIModels::o1_mini),
     AvailableChatbots::Ollama(OllamaModels::llama3_2_3B),
     AvailableChatbots::Ollama(OllamaModels::llama3_1_70B),
+    AvailableChatbots::Ollama(OllamaModels::llama3_1_7B),
+    AvailableChatbots::Ollama(OllamaModels::gemma2),
+    AvailableChatbots::Ollama(OllamaModels::qwen2_5_3B),
+    AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B),
+    AvailableChatbots::Ollama(OllamaModels::qwen2_5_32B),
 ];
 
 /// The default chatbot that will be used when the user doesn't specify one.
@@ -26,10 +32,16 @@ impl From<AvailableChatbots> for String {
             AvailableChatbots::OpenAI(model) => match model {
                 OpenAIModels::gpt_4o => "gpt-4o".to_string(),
                 OpenAIModels::gpt_4o_mini => "gpt-4o-mini".to_string(),
+                OpenAIModels::o1_mini => "o1-mini".to_string(),
             },
             AvailableChatbots::Ollama(model) => match model {
                 OllamaModels::llama3_2_3B => "llama3.2".to_string(),
                 OllamaModels::llama3_1_70B => "llama3.1:70b".to_string(),
+                OllamaModels::llama3_1_7B => "llama3.1:7b".to_string(),
+                OllamaModels::gemma2 => "gemma2".to_string(),
+                OllamaModels::qwen2_5_3B => "qwen2.5:3b".to_string(),
+                OllamaModels::qwen2_5_7B => "qwen2.5".to_string(),
+                OllamaModels::qwen2_5_32B => "qwen2.5:32b".to_string(), // 72 is just too large for us to handle efficiently.
             },
         }
     }
@@ -60,6 +72,8 @@ pub enum OpenAIModels {
     gpt_4o,
     #[allow(non_camel_case_types)]
     gpt_4o_mini,
+    #[allow(non_camel_case_types)]
+    o1_mini,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -68,4 +82,14 @@ pub enum OllamaModels {
     llama3_2_3B,
     #[allow(non_camel_case_types)]
     llama3_1_70B,
+    #[allow(non_camel_case_types)]
+    llama3_1_7B,
+    #[allow(non_camel_case_types)]
+    gemma2,
+    #[allow(non_camel_case_types)]
+    qwen2_5_3B,
+    #[allow(non_camel_case_types)]
+    qwen2_5_7B,
+    #[allow(non_camel_case_types)]
+    qwen2_5_32B,
 }
