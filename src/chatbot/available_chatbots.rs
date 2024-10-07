@@ -8,7 +8,7 @@ pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
     AvailableChatbots::OpenAI(OpenAIModels::o1_mini),
     AvailableChatbots::Ollama(OllamaModels::llama3_2_3B),
     AvailableChatbots::Ollama(OllamaModels::llama3_1_70B),
-    AvailableChatbots::Ollama(OllamaModels::llama3_1_7B),
+    AvailableChatbots::Ollama(OllamaModels::llama3_1_8B),
     AvailableChatbots::Ollama(OllamaModels::gemma2),
     AvailableChatbots::Ollama(OllamaModels::qwen2_5_3B),
     AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B),
@@ -37,7 +37,7 @@ impl From<AvailableChatbots> for String {
             AvailableChatbots::Ollama(model) => match model {
                 OllamaModels::llama3_2_3B => "llama3.2".to_string(),
                 OllamaModels::llama3_1_70B => "llama3.1:70b".to_string(),
-                OllamaModels::llama3_1_7B => "llama3.1:7b".to_string(),
+                OllamaModels::llama3_1_8B => "llama3.1:8b".to_string(),
                 OllamaModels::gemma2 => "gemma2".to_string(),
                 OllamaModels::qwen2_5_3B => "qwen2.5:3b".to_string(),
                 OllamaModels::qwen2_5_7B => "qwen2.5".to_string(),
@@ -83,7 +83,7 @@ pub enum OllamaModels {
     #[allow(non_camel_case_types)]
     llama3_1_70B,
     #[allow(non_camel_case_types)]
-    llama3_1_7B,
+    llama3_1_8B,
     #[allow(non_camel_case_types)]
     gemma2,
     #[allow(non_camel_case_types)]
