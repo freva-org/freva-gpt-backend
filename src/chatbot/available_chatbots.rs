@@ -38,9 +38,11 @@ impl From<AvailableChatbots> for String {
                 OllamaModels::llama3_2_3B => "llama3.2".to_string(),
                 OllamaModels::llama3_1_70B => "llama3.1:70b".to_string(),
                 OllamaModels::llama3_1_8B => "llama3.1:8b".to_string(),
+                OllamaModels::llama3_groq_8B => "llama3-groq-tool-use".to_string(), // community model
                 OllamaModels::gemma2 => "gemma2".to_string(),
                 OllamaModels::qwen2_5_3B => "qwen2.5:3b".to_string(),
                 OllamaModels::qwen2_5_7B => "qwen2.5".to_string(),
+                OllamaModels::qwen2_5_7B_tool => "majx13/test".to_string(), // community model
                 OllamaModels::qwen2_5_32B => "qwen2.5:32b".to_string(), // 72 is just too large for us to handle efficiently.
             },
         }
@@ -91,5 +93,9 @@ pub enum OllamaModels {
     #[allow(non_camel_case_types)]
     qwen2_5_7B,
     #[allow(non_camel_case_types)]
+    qwen2_5_7B_tool,
+    #[allow(non_camel_case_types)]
     qwen2_5_32B,
+    #[allow(non_camel_case_types)]
+    llama3_groq_8B,
 }
