@@ -5,7 +5,7 @@ use tracing::debug;
 pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini),
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4o),
-    AvailableChatbots::OpenAI(OpenAIModels::o1_mini),
+    // AvailableChatbots::OpenAI(OpenAIModels::o1_mini), // In Beta, doesn't do streaming yet.
     AvailableChatbots::Ollama(OllamaModels::llama3_2_3B),
     AvailableChatbots::Ollama(OllamaModels::llama3_1_70B),
     AvailableChatbots::Ollama(OllamaModels::llama3_1_8B),
