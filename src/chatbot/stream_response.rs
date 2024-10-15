@@ -1,16 +1,14 @@
-use std::{collections::VecDeque, pin::Pin};
+use std::collections::VecDeque;
 
 use actix_web::{HttpRequest, HttpResponse, Responder};
-use async_openai::{
-    error::OpenAIError,
-    types::{
-        ChatChoiceStream, ChatCompletionRequestMessage, ChatCompletionRequestUserMessage,
-        ChatCompletionToolChoiceOption, CreateChatCompletionRequest,
-        CreateChatCompletionRequestArgs, CreateChatCompletionStreamResponse,
-    },
+use async_openai::types::{
+    ChatChoiceStream, ChatCompletionMessageToolCallChunk, ChatCompletionRequestMessage,
+    ChatCompletionRequestUserMessage, ChatCompletionResponseStream, ChatCompletionToolChoiceOption,
+    CreateChatCompletionRequest, CreateChatCompletionRequestArgs,
+    CreateChatCompletionStreamResponse, FinishReason,
 };
 use documented::docs_const;
-use futures::{stream, Stream, StreamExt};
+use futures::{stream, StreamExt};
 use once_cell::sync::Lazy;
 use tracing::{debug, error, info, trace, warn};
 
@@ -447,6 +445,15 @@ async fn create_and_stream(
     HttpResponse::Ok().streaming(out_stream)
 }
 
+/// Helper Enum to describe the different Stream Events that can be recieved from OpenAI/OLLama.
+enum StreamEvents {
+    Delta(String),           // The Assistant wrote a simple delta.
+    StopEvent(FinishReason), // The API gave a reason to stop the conversation.
+    ToolCall(Vec<ChatCompletionMessageToolCallChunk>), // A tool delta was recieved.
+    Empty,                   // An event was recieved that contained no useful content.
+    Error(ChatChoiceStream), // An error occured, contains the raw event.
+}
+
 /// Converts the response from the OpenAI stream into a vector of StreamVariants.
 async fn oai_stream_to_variants(
     response: Option<
@@ -459,26 +466,37 @@ async fn oai_stream_to_variants(
     tool_arguments: &mut String,
     tool_id: &mut String,
     thread_id: &String,
-    open_ai_stream: &mut Pin<
-        Box<dyn Stream<Item = Result<CreateChatCompletionStreamResponse, OpenAIError>> + Send>,
-    >,
+    open_ai_stream: &mut ChatCompletionResponseStream,
     chatbot: AvailableChatbots,
 ) -> Vec<StreamVariant> {
     match response {
         Some(Ok(response)) => {
             if let Some(choice) = response.choices.first() {
-                // The choices represent the multiple completions that the LLM can make. We always set n=1, so there is exactly one choice.
-                match (
+                // First create the Stream Event so we can match on that later.
+                // This simplyfies the modification of how it's decided what event happened.
+                let event = match (
                     &choice.delta.tool_calls,
                     &choice.delta.content,
                     choice.finish_reason,
                 ) {
-                    (None, Some(string_delta), _) => {
+                    (None, Some(string_delta), _) => StreamEvents::Delta(string_delta.clone()),
+                    (_, None, Some(reason)) => StreamEvents::StopEvent(reason),
+                    (Some(tool_calls), None, None) => StreamEvents::ToolCall(tool_calls.clone()),
+                    (None, None, None) => StreamEvents::Empty,
+                    (Some(tool_calls), Some(string_delta), _) => {
+                        warn!("Tool call AND content found in response, the API specified that this couldn't happen: {:?} and {:?}", tool_calls, string_delta);
+                        StreamEvents::Error(choice.clone())
+                    }
+                };
+
+                // The choices represent the multiple completions that the LLM can make. We always set n=1, so there is exactly one choice.
+                match event {
+                    StreamEvents::Delta(string_delta) => {
                         // Basic case: the Assistant sends a text delta.
                         trace!("Delta: {}", string_delta);
                         vec![StreamVariant::Assistant(string_delta.clone())]
                     }
-                    (_, None, Some(reason)) => {
+                    StreamEvents::StopEvent(reason) => {
                         // The Assistant sends a stop event.
                         debug!("Got stop event from OpenAI: {:?}", reason);
                         handle_stop_event(
@@ -494,7 +512,7 @@ async fn oai_stream_to_variants(
                         )
                         .await
                     }
-                    (Some(tool_calls), None, None) => {
+                    StreamEvents::ToolCall(tool_calls) => {
                         // A tool was called. This can include partial completions of the tool call, "tool call deltas", like code fragments.
                         debug!(
                             "A tool was called, converting the delta to a Code variant: {:?}",
@@ -588,13 +606,20 @@ async fn oai_stream_to_variants(
                             }
                         }
                     }
-                    (None, None, None) => {
+                    StreamEvents::Empty => {
                         warn!("No content found in response and no reason to stop given; treating this as an empty Assistant response: {:?}", response);
                         vec![StreamVariant::Assistant(String::new())]
                     }
-                    (Some(tool_calls), Some(string_delta), _) => {
-                        warn!("Tool call AND content found in response, the API specified that this couldn't happen: {:?} and {:?}", tool_calls, string_delta);
-                        vec![StreamVariant::StreamEnd("Tool call AND content found in response, the API specified that this couldn't happen.".to_string())]
+                    StreamEvents::Error(choice) => {
+                        // Depending on what happened, we'll return a different error message.
+
+                        // This is only called when a tool call and content was found in the response, which is not supposed to happen.
+                        // If also a stop event was found, the message should be different.
+                        if choice.finish_reason.is_some() {
+                            vec![StreamVariant::StreamEnd("Tool call AND content AND stop event found in response, the API specified that this couldn't happen.".to_string())]
+                        } else {
+                            vec![StreamVariant::StreamEnd("Tool call AND content found in response, the API specified that this couldn't happen.".to_string())]
+                        }
                     }
                 }
             } else {
@@ -625,9 +650,7 @@ async fn handle_stop_event(
     tool_name: &mut Option<String>,
     tool_id: &mut String,
     thread_id: &String,
-    open_ai_stream: &mut Pin<
-        Box<dyn Stream<Item = Result<CreateChatCompletionStreamResponse, OpenAIError>> + Send>,
-    >,
+    open_ai_stream: &mut ChatCompletionResponseStream,
     response: &CreateChatCompletionStreamResponse,
     chatbot: AvailableChatbots,
 ) -> Vec<StreamVariant> {
