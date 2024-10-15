@@ -8,14 +8,22 @@ use crate::chatbot::{
 
 use super::types::StreamVariant;
 
-/// Helper function to return an ID for a new conversation.
-pub fn new_conversation_id() -> String {
-    trace!("Generating new conversation ID.");
-    let value = rand::thread_rng()
+/// Helper function to generate an ID.
+/// Mostly for creating conversation IDs.
+/// TODO: move to other module?
+pub fn generate_id() -> String {
+    trace!("Generating new ID.");
+    rand::thread_rng()
         .sample_iter(rand::distributions::Alphanumeric)
         .take(32)
         .map(char::from)
-        .collect();
+        .collect()
+}
+
+/// Helper function to return an ID for a new conversation.
+pub fn new_conversation_id() -> String {
+    trace!("Generating new conversation ID.");
+    let value = generate_id();
 
     // If this value is already in use, we'll just try again.
     match ACTIVE_CONVERSATIONS.lock() {

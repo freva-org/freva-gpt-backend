@@ -4,8 +4,8 @@ use actix_web::{HttpRequest, HttpResponse, Responder};
 use async_openai::types::{
     ChatChoiceStream, ChatCompletionMessageToolCallChunk, ChatCompletionRequestMessage,
     ChatCompletionRequestUserMessage, ChatCompletionResponseStream, ChatCompletionToolChoiceOption,
-    CreateChatCompletionRequest, CreateChatCompletionRequestArgs,
-    CreateChatCompletionStreamResponse, FinishReason,
+    ChatCompletionToolType, CreateChatCompletionRequest, CreateChatCompletionRequestArgs,
+    CreateChatCompletionStreamResponse, FinishReason, FunctionCallStream,
 };
 use documented::docs_const;
 use futures::{stream, StreamExt};
@@ -22,12 +22,12 @@ use crate::{
         prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON},
         select_client,
         thread_storage::read_thread,
-        types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
+        types::{help_convert_sv_ccrm, unescape_string, ConversationState, StreamVariant},
     },
     tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS},
 };
 
-use super::available_chatbots::AvailableChatbots;
+use super::{available_chatbots::AvailableChatbots, handle_active_conversations::generate_id};
 
 /// # Stream Response
 /// Takes in a thread_id, an input, a path to the freva config file, an auth_key and a chatbot and returns a stream of StreamVariants and their content.
@@ -262,6 +262,7 @@ async fn create_and_stream(
             None,            // The tool name, if it was called
             String::new(),   // the tool arguments,
             String::new(),   // the tool id
+            None, // the content of a llama tool call (See https://github.com/ollama/ollama/issues/5796 for why this needs to be done manually)
         ),
         move |(
             mut open_ai_stream,
@@ -272,6 +273,7 @@ async fn create_and_stream(
             mut tool_name,
             mut tool_arguments,
             mut tool_id,
+            mut llama_tool_call_content,
         )| {
             // It is required to clone the freva_config_path, because it is moved into the closure.
             let freva_config_path_clone = freva_config_path.clone();
@@ -299,6 +301,7 @@ async fn create_and_stream(
                             tool_name,
                             tool_arguments,
                             tool_id,
+                            llama_tool_call_content,
                         ),
                     ));
                 }
@@ -332,6 +335,7 @@ async fn create_and_stream(
                             tool_name,
                             tool_arguments,
                             tool_id,
+                            llama_tool_call_content,
                         ),
                     ))
                 } else if should_stop {
@@ -362,6 +366,7 @@ async fn create_and_stream(
                                 tool_name,
                                 tool_arguments,
                                 tool_id,
+                                llama_tool_call_content,
                             ),
                         ))
                     } else {
@@ -380,6 +385,7 @@ async fn create_and_stream(
                             &thread_id,
                             &mut open_ai_stream,
                             chatbot,
+                            &mut llama_tool_call_content,
                         )
                         .await;
 
@@ -433,6 +439,7 @@ async fn create_and_stream(
                                 tool_name,
                                 tool_arguments,
                                 tool_id,
+                                llama_tool_call_content,
                             ),
                         ))
                         // Ends if the variant is a StreamEnd
@@ -450,7 +457,8 @@ enum StreamEvents {
     Delta(String),           // The Assistant wrote a simple delta.
     StopEvent(FinishReason), // The API gave a reason to stop the conversation.
     ToolCall(Vec<ChatCompletionMessageToolCallChunk>), // A tool delta was recieved.
-    Empty,                   // An event was recieved that contained no useful content.
+    Empty,        // An event was recieved that contained no useful content, but was unexpected.
+    LiveToolCall, // The LLama tool call is running; nothing can be streamed.
     Error(ChatChoiceStream), // An error occured, contains the raw event.
 }
 
@@ -468,9 +476,11 @@ async fn oai_stream_to_variants(
     thread_id: &String,
     open_ai_stream: &mut ChatCompletionResponseStream,
     chatbot: AvailableChatbots,
+    llama_tool_call_content: &mut Option<String>,
 ) -> Vec<StreamVariant> {
     match response {
         Some(Ok(response)) => {
+            // The choices represent the multiple completions that the LLM can make. We always set n=1, so there is exactly one choice.
             if let Some(choice) = response.choices.first() {
                 // First create the Stream Event so we can match on that later.
                 // This simplyfies the modification of how it's decided what event happened.
@@ -479,7 +489,104 @@ async fn oai_stream_to_variants(
                     &choice.delta.content,
                     choice.finish_reason,
                 ) {
-                    (None, Some(string_delta), _) => StreamEvents::Delta(string_delta.clone()),
+                    (None, Some(string_delta), _) => {
+                        // Because the ollama implementation of the openAI-compliant API is not yet implemented for streaming,
+                        // We need to manually detect the tokens for the start of a tool call: "<tool_call>" and end: "</tool_call>".
+                        // Depending on them, we need to either emit a Delta or a ToolCall event.
+
+                        let tool_call_started = match string_delta.as_str() {
+                            "<tool_call>" => Some(true), // Because that's how the tokens are represented in ASCII, they're sent inside one delta, not split and with no other content.
+                            "</tool_call>" => Some(false),
+                            _ => None,
+                        };
+
+                        match (tool_call_started, llama_tool_call_content.clone()) {
+                            (None, None) => {
+                                // We are in the normal case, where the Assistant sends a delta.
+                                StreamEvents::Delta(string_delta.clone())
+                            }
+                            (Some(true), _) => {
+                                // If the tool call started and we are not in a tool call, this is the start of a tool call.
+                                // The standard OpenAI API now emits an empty Tool Call event, but it's not neccessary; an empty event will do the same.
+                                // However, the problem is now that the tool call is in the JSON strucuture where the name and arguments are stored, which can't really be streamed.
+                                // So we need to store the content of the tool call in a state variable to be able to pass it to the next iteration of the stream.
+
+                                if let Some(content) = llama_tool_call_content {
+                                    warn!(
+                                        "Tool call started, but content was not empty: {:?}",
+                                        content
+                                    );
+                                    // Clear the content just to be sure the next call is not affected.
+                                    *llama_tool_call_content = None;
+                                }
+
+                                // We store the content inside the llama_tool_call_content variable and emit a ToolCall event once it's JSON parseable.
+                                *llama_tool_call_content = Some(String::new());
+                                debug!("LLama tool call started: {:?}", string_delta);
+
+                                StreamEvents::LiveToolCall
+                            }
+                            (None, Some(content)) => {
+                                trace!("Tool call content: {:?}", content);
+                                // We are within a tool call; we simply add to the content.
+                                llama_tool_call_content
+                                    .as_mut()
+                                    .expect("Checked that the variable is Some, is now None.")
+                                    .push_str(string_delta);
+
+                                // If the content can now be parsed by JSON, we construct a ToolCall event.
+                                let extracted = try_extract_tool_call(
+                                    llama_tool_call_content
+                                        .as_ref()
+                                        .expect("Checked that the variable is Some, is now None.")
+                                        .trim(),
+                                );
+                                // If it's none, the tool call is probably not finished yet.
+                                match extracted {
+                                    None => {
+                                        // The tool call is not finished yet, so we emit an empty event.
+                                        StreamEvents::LiveToolCall
+                                    }
+                                    Some((name, arguments)) => {
+                                        // The tool call is finished, so we emit a ToolCall event.
+                                        debug!(
+                                            "LLama tool call finished: {:?} with arguments: {:?}",
+                                            name, arguments
+                                        );
+
+                                        // Reset the llama_tool_call_content variable so new tool calls can be detected.
+                                        *llama_tool_call_content = None;
+
+                                        StreamEvents::ToolCall(vec![
+                                            ChatCompletionMessageToolCallChunk {
+                                                id: Some(generate_id()),
+                                                function: Some(FunctionCallStream {
+                                                    name: Some(name),
+                                                    arguments: Some(arguments),
+                                                }),
+                                                index: 0,
+                                                r#type: Some(ChatCompletionToolType::Function),
+                                            },
+                                        ])
+                                    }
+                                }
+                            }
+                            (Some(false), _) => {
+                                // The end of the tool calls was reached; just emit a streamend event due to the tool call.
+
+                                if let Some(content) = llama_tool_call_content {
+                                    warn!(
+                                        "Tool call ended, but content was not empty: {:?}",
+                                        content
+                                    );
+                                    // Clear the content just to be sure the next call is not affected.
+                                    *llama_tool_call_content = None;
+                                }
+
+                                StreamEvents::StopEvent(FinishReason::ToolCalls)
+                            }
+                        }
+                    }
                     (_, None, Some(reason)) => StreamEvents::StopEvent(reason),
                     (Some(tool_calls), None, None) => StreamEvents::ToolCall(tool_calls.clone()),
                     (None, None, None) => StreamEvents::Empty,
@@ -489,7 +596,8 @@ async fn oai_stream_to_variants(
                     }
                 };
 
-                // The choices represent the multiple completions that the LLM can make. We always set n=1, so there is exactly one choice.
+                // Now that we determined the event, we can match on it to act accordingly.
+
                 match event {
                     StreamEvents::Delta(string_delta) => {
                         // Basic case: the Assistant sends a text delta.
@@ -620,6 +728,10 @@ async fn oai_stream_to_variants(
                         } else {
                             vec![StreamVariant::StreamEnd("Tool call AND content found in response, the API specified that this couldn't happen.".to_string())]
                         }
+                    }
+                    StreamEvents::LiveToolCall => {
+                        // The tool call is still running, so we'll just send an empty event.
+                        vec![]
                     }
                 }
             } else {
@@ -766,6 +878,59 @@ async fn handle_stop_event(
                     }
                 }
             }
+        }
+    }
+}
+
+/// Helper function that tries to parse a llama tool call from a string
+fn try_extract_tool_call(content: &str) -> Option<(String, String)> {
+    // Because the LLM wrote it, it's escaped JSON, so we'll first unescape it.
+    let content = unescape_string(content);
+
+    // We expect it to have some JSON dictionary, so we'll try to parse it.
+    let dict = match serde_json::from_str::<serde_json::Value>(&content) {
+        Ok(dict) => dict,
+        Err(_) => {
+            // The tool call is likely not yet finished.
+            return None;
+        }
+    };
+    debug!("Tool call content: {:?}", dict);
+
+    // The type should be object, because it contains the name and arguments.
+    match dict {
+        serde_json::Value::Object(inner_object) => {
+            // We have the object, so we can extract the name and arguments.
+            if let Some(serde_json::Value::String(name)) = inner_object.get("name") {
+                if let Some(serde_json::Value::Object(arguments)) = inner_object.get("arguments") {
+                    // We have the name and arguments, so we can return them.
+                    // The arguments need to pe parsed to a string from JSON.
+                    let arguments = match serde_json::to_string(arguments) {
+                        Ok(arguments) => arguments,
+                        Err(e) => {
+                            warn!("Error converting tool call arguments to string: {:?}", e);
+                            return None;
+                        }
+                    };
+                    Some((name.clone(), arguments.to_string()))
+                } else {
+                    // The arguments are missing, so we can't return anything.
+                    warn!(
+                        "Tool call expected arguments, but not found: {:?}",
+                        inner_object
+                    );
+                    None
+                }
+            } else {
+                // The name is missing, so we can't return anything.
+                warn!("Tool call expected name, but not found: {:?}", inner_object);
+                None
+            }
+        }
+        _ => {
+            // Shouldn't happen! The API specifies that it's always an object.
+            warn!("Tool call expected to be an object, but found: {:?}", dict);
+            None
         }
     }
 }
