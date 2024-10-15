@@ -22,7 +22,7 @@ RUN conda init bash
 RUN echo "conda activate env" >> ~/.bashrc 
 
 # Install the python packages into the environment
-RUN conda install -c conda-forge -n env numpy matplotlib netcdf4 cartopy contourpy pandas xarray freva scipy anaconda::scikit-learn pytorch dill
+RUN conda install -c conda-forge -n env numpy matplotlib netcdf4 cartopy contourpy pandas xarray freva scipy anaconda::scikit-learn pytorch dill geopandas astropy-healpix
 
 # Also copy over the Cargo.toml file to be able to start the server
 COPY Cargo.toml /app/Cargo.toml
