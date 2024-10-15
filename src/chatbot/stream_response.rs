@@ -885,7 +885,8 @@ async fn handle_stop_event(
 /// Helper function that tries to parse a llama tool call from a string
 fn try_extract_tool_call(content: &str) -> Option<(String, String)> {
     // Because the LLM wrote it, it's escaped JSON, so we'll first unescape it.
-    let content = unescape_string(content);
+    // let content = unescape_string(content);
+    trace!("Tool call content: {:?}", content);
 
     // Because the LLMs are sometimes bad at creating JSON, we'll help them a bit.
     // We check at all closing curly braces, if if the text were to end there, if it would be valid JSON.
@@ -930,6 +931,7 @@ fn try_extract_tool_call(content: &str) -> Option<(String, String)> {
                             return None;
                         }
                     };
+                    debug!("Tool call name: {:?}, arguments: {:?}", name, arguments);
                     Some((name.clone(), arguments.to_string()))
                 } else {
                     // The arguments are missing, so we can't return anything.
