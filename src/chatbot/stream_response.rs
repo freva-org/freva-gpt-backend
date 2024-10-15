@@ -731,7 +731,7 @@ async fn oai_stream_to_variants(
                     }
                     StreamEvents::LiveToolCall => {
                         // The tool call is still running, so we'll just send an empty event.
-                        vec![]
+                        vec![StreamVariant::Code(String::new(), String::new())] // Just empty ID??? TODO: is this important?
                     }
                 }
             } else {
@@ -887,11 +887,29 @@ fn try_extract_tool_call(content: &str) -> Option<(String, String)> {
     // Because the LLM wrote it, it's escaped JSON, so we'll first unescape it.
     let content = unescape_string(content);
 
-    // We expect it to have some JSON dictionary, so we'll try to parse it.
-    let dict = match serde_json::from_str::<serde_json::Value>(&content) {
-        Ok(dict) => dict,
-        Err(_) => {
-            // The tool call is likely not yet finished.
+    // Because the LLMs are sometimes bad at creating JSON, we'll help them a bit.
+    // We check at all closing curly braces, if if the text were to end there, if it would be valid JSON.
+    let positions_curly = content.match_indices("}").map(|e| e.0).collect::<Vec<_>>();
+
+    let mut dict = None;
+
+    for pos in positions_curly {
+        let new_content = &content[..=pos];
+        match serde_json::from_str::<serde_json::Value>(new_content) {
+            Ok(value) => {
+                dict = Some(value);
+                break; // we are guaranteed that the first valid JSON is the correct one.
+            }
+            Err(_) => {
+                continue;
+            }
+        }
+    }
+
+    // If we couldn't find a valid JSON, we'll return None, as the tool call is likely not finished yet.
+    let dict = match dict {
+        Some(dict) => dict,
+        None => {
             return None;
         }
     };
