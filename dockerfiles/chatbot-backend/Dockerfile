@@ -21,8 +21,12 @@ RUN conda init bash
 # Adding the conda activate command to the bashrc file means that all subsequent shells will have the conda environment activated
 RUN echo "conda activate env" >> ~/.bashrc 
 
-# Install the python packages into the environment
-RUN conda install -c conda-forge -n env numpy matplotlib netcdf4 cartopy contourpy pandas xarray freva scipy anaconda::scikit-learn pytorch dill geopandas astropy-healpix
+# Install the python packages into the environment. This is split up to improve caching.
+RUN conda install -c conda-forge -n env freva dill 
+RUN conda install -c conda-forge -n env numpy matplotlib pandas xarray scipy
+RUN conda install -c conda-forge -n env netcdf4 cartopy contourpy
+RUN conda install -c conda-forge -n env anaconda::aiohttp requests
+RUN conda install -c conda-forge -n env anaconda::scikit-learn pytorch geopandas astropy-healpix
 
 # Also copy over the Cargo.toml file to be able to start the server
 COPY Cargo.toml /app/Cargo.toml
