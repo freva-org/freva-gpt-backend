@@ -8,7 +8,10 @@ use async_openai::types::{
     CreateChatCompletionStreamResponse, FinishReason, FunctionCallStream,
 };
 use documented::docs_const;
-use futures::{stream, StreamExt};
+use futures::{
+    stream::{self, Fuse},
+    StreamExt,
+};
 use once_cell::sync::Lazy;
 use tracing::{debug, error, info, trace, warn};
 
@@ -213,6 +216,9 @@ fn build_request(
         .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
         .tool_choice(ChatCompletionToolChoiceOption::Auto) // Explicitly set to auto, because the LLM should be free to choose the tool.
         .temperature(0.4) // The model shouldn't be too creative, but also not too boring.
+        .stream_options(async_openai::types::ChatCompletionStreamOptions {
+            include_usage: true,
+        })
         .build()
 }
 
@@ -243,7 +249,7 @@ async fn create_and_stream(
         .create_stream(request)
         .await
     {
-        Ok(stream) => stream,
+        Ok(stream) => stream.fuse(), // Fuse the stream so calling next() will return None after the stream ends instead of blocking.
         Err(e) => {
             // If we can't create the stream, we'll return a generic error.
             warn!("Error creating stream: {:?}", e);
@@ -342,6 +348,16 @@ async fn create_and_stream(
                     ))
                 } else if should_stop {
                     // If the stream should stop, we'll simply return None.
+
+                    // However, the usage stats are contained after the stop event, so we'll poll the stream until it's completely stopped.
+                    while let Some(content) = open_ai_stream.next().await {
+                        if let Ok(response) = content {
+                            if let Some(usage) = response.usage {
+                                info!("Tokens used: {:?}; with chatbot: {:?}", usage, chatbot);
+                            }
+                        }
+                    }
+
                     // We do it in this order to be able to send one last event to the client signaling the end of the stream.
                     trace!("Stream is stopping, sent one last event, removing the conversation from the pool and then aborting stream.");
                     save_and_remove_conversation(&thread_id);
@@ -476,12 +492,16 @@ async fn oai_stream_to_variants(
     tool_arguments: &mut String,
     tool_id: &mut String,
     thread_id: &String,
-    open_ai_stream: &mut ChatCompletionResponseStream,
+    open_ai_stream: &mut Fuse<ChatCompletionResponseStream>,
     chatbot: AvailableChatbots,
     llama_tool_call_content: &mut Cell<Option<Cell<String>>>,
 ) -> Vec<StreamVariant> {
     match response {
         Some(Ok(response)) => {
+            // Debug info: how many tokens were used?
+            if let Some(usage) = response.clone().usage {
+                debug!("Tokens used: {:?}", usage);
+            }
             // The choices represent the multiple completions that the LLM can make. We always set n=1, so there is exactly one choice.
             if let Some(choice) = response.choices.first() {
                 // First create the Stream Event so we can match on that later.
@@ -791,7 +811,7 @@ async fn handle_stop_event(
     tool_name: &mut Option<String>,
     tool_id: &mut String,
     thread_id: &String,
-    open_ai_stream: &mut ChatCompletionResponseStream,
+    open_ai_stream: &mut Fuse<ChatCompletionResponseStream>,
     response: &CreateChatCompletionStreamResponse,
     chatbot: AvailableChatbots,
 ) -> Vec<StreamVariant> {
@@ -898,7 +918,7 @@ async fn handle_stop_event(
                                 }
                                 Ok(stream) => {
                                     // Everything worked, so we'll return the new stream and the new state.
-                                    *open_ai_stream = stream;
+                                    *open_ai_stream = stream.fuse();
                                     all_generated_variants
                                     // we need to return the generated variants, because the stream will be restarted with the tool call.
                                 }
