@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::{cell::Cell, collections::VecDeque};
 
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use async_openai::types::{
@@ -22,7 +22,7 @@ use crate::{
         prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON},
         select_client,
         thread_storage::read_thread,
-        types::{help_convert_sv_ccrm, unescape_string, ConversationState, StreamVariant},
+        types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
     },
     tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS},
 };
@@ -262,7 +262,7 @@ async fn create_and_stream(
             None,            // The tool name, if it was called
             String::new(),   // the tool arguments,
             String::new(),   // the tool id
-            None, // the content of a llama tool call (See https://github.com/ollama/ollama/issues/5796 for why this needs to be done manually)
+            Cell::new(None), // the content of a llama tool call (See https://github.com/ollama/ollama/issues/5796 for why this needs to be done manually)
         ),
         move |(
             mut open_ai_stream,
@@ -288,7 +288,9 @@ async fn create_and_stream(
                         Ok::<actix_web::web::Bytes, std::convert::Infallible>(
                             actix_web::web::Bytes::copy_from_slice(
                                 serde_json::to_string(&hint)
-                                    .expect("ServerHint unable to be converted to actix bytes!")
+                                    .unwrap_or_else(|e| {warn!("Error converting ServerHint to string: {:?}; falling back to byte ServerHint.", e);
+                                    format!(r#"{{"variant":"ServerHint", "content":"{{\"thread_id\": \"{thread_id}\"}}"}}"#).to_owned()
+                                })
                                     .as_bytes(),
                             ),
                         ),
@@ -476,7 +478,7 @@ async fn oai_stream_to_variants(
     thread_id: &String,
     open_ai_stream: &mut ChatCompletionResponseStream,
     chatbot: AvailableChatbots,
-    llama_tool_call_content: &mut Option<String>,
+    llama_tool_call_content: &mut Cell<Option<Cell<String>>>,
 ) -> Vec<StreamVariant> {
     match response {
         Some(Ok(response)) => {
@@ -500,50 +502,48 @@ async fn oai_stream_to_variants(
                             _ => None,
                         };
 
-                        match (tool_call_started, llama_tool_call_content.clone()) {
+                        match (tool_call_started, llama_tool_call_content.take()) {
                             (None, None) => {
                                 // We are in the normal case, where the Assistant sends a delta.
                                 StreamEvents::Delta(string_delta.clone())
                             }
-                            (Some(true), _) => {
+                            (Some(true), inner_llama_tool_call_content) => {
                                 // If the tool call started and we are not in a tool call, this is the start of a tool call.
                                 // The standard OpenAI API now emits an empty Tool Call event, but it's not neccessary; an empty event will do the same.
                                 // However, the problem is now that the tool call is in the JSON strucuture where the name and arguments are stored, which can't really be streamed.
                                 // So we need to store the content of the tool call in a state variable to be able to pass it to the next iteration of the stream.
 
-                                if let Some(content) = llama_tool_call_content {
+                                if let Some(content) = inner_llama_tool_call_content {
                                     warn!(
                                         "Tool call started, but content was not empty: {:?}",
-                                        content
+                                        content.take()
                                     );
                                     // Clear the content just to be sure the next call is not affected.
-                                    *llama_tool_call_content = None;
+                                    llama_tool_call_content.set(None);
                                 }
 
                                 // We store the content inside the llama_tool_call_content variable and emit a ToolCall event once it's JSON parseable.
-                                *llama_tool_call_content = Some(String::new());
+                                llama_tool_call_content.set(Some(Cell::new(String::new())));
                                 debug!("LLama tool call started: {:?}", string_delta);
 
                                 StreamEvents::LiveToolCall
                             }
                             (None, Some(content)) => {
-                                trace!("Tool call content: {:?}", content);
-                                // We are within a tool call; we simply add to the content.
-                                llama_tool_call_content
-                                    .as_mut()
-                                    .expect("Checked that the variable is Some, is now None.")
-                                    .push_str(string_delta);
+                                // Add the delta to the content of the tool call.
+                                let inner_content = content.take() + string_delta;
+
+                                trace!("Tool call content: {:?}", inner_content);
 
                                 // If the content can now be parsed by JSON, we construct a ToolCall event.
-                                let extracted = try_extract_tool_call(
-                                    llama_tool_call_content
-                                        .as_ref()
-                                        .expect("Checked that the variable is Some, is now None.")
-                                        .trim(),
-                                );
+                                let extracted = try_extract_tool_call(inner_content.trim());
+
+                                content.set(inner_content);
+
                                 // If it's none, the tool call is probably not finished yet.
                                 match extracted {
                                     None => {
+                                        // Re-set the content of the cell so it doesn't get lost.
+                                        llama_tool_call_content.set(Some(content));
                                         // The tool call is not finished yet, so we emit an empty event.
                                         StreamEvents::LiveToolCall
                                     }
@@ -555,7 +555,7 @@ async fn oai_stream_to_variants(
                                         );
 
                                         // Reset the llama_tool_call_content variable so new tool calls can be detected.
-                                        *llama_tool_call_content = None;
+                                        llama_tool_call_content.set(None);
 
                                         StreamEvents::ToolCall(vec![
                                             ChatCompletionMessageToolCallChunk {
@@ -571,16 +571,16 @@ async fn oai_stream_to_variants(
                                     }
                                 }
                             }
-                            (Some(false), _) => {
+                            (Some(false), inner_llama_tool_call_content) => {
                                 // The end of the tool calls was reached; just emit a streamend event due to the tool call.
 
-                                if let Some(content) = llama_tool_call_content {
+                                if let Some(content) = inner_llama_tool_call_content {
                                     warn!(
                                         "Tool call ended, but content was not empty: {:?}",
-                                        content
+                                        content.take()
                                     );
                                     // Clear the content just to be sure the next call is not affected.
-                                    *llama_tool_call_content = None;
+                                    llama_tool_call_content.set(None);
                                 }
 
                                 StreamEvents::StopEvent(FinishReason::ToolCalls)
@@ -752,7 +752,10 @@ async fn oai_stream_to_variants(
             if !matches!(chatbot, AvailableChatbots::OpenAI(_)) {
                 // Try to get the tool call from the running tool.
                 let tool_call = try_extract_tool_call(
-                    llama_tool_call_content.as_ref().unwrap_or(&String::new()),
+                    &llama_tool_call_content
+                        .take()
+                        .map(|c| c.take())
+                        .unwrap_or_default(),
                 );
                 match tool_call {
                     None => {
