@@ -87,7 +87,9 @@ const STARTING_PROMPT_STR: &str = r#"1. You are FrevaGPT, a helpful AI Assistant
 13. You are specialized in analyzing provided atmospheric reanalyis data. Your expertise includes interpreting complex datasets, visualizing trends, and identifying new connections in climate science.
 
 
-Below are a few examples of good conversations, including code. Try to imatate them when talking to users."#;
+# Examples
+
+"#;
 
 /// All conversations that are used in the prompt.
 /// We need to use Lazy again.
@@ -404,6 +406,169 @@ exact_size_mb"#.to_string()),
         }),
         assistant_message!("The exact size of the dataset is approximately 4500.61 MB."),
 
+        ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
+            name: Some("user".to_string()),
+            content: async_openai::types::ChatCompletionRequestUserMessageContent::Text("Make an annual mean sea level pressure global map plot for the year 2023".to_string()),
+        }),
+
+        assistant_message!("To create an annual mean sea level pressure global map plot for the year 2023, we will follow these steps:
+
+1. Load the sea level pressure data for the year 2023.
+2. Calculate the annual mean sea level pressure for that year.
+3. Create a global map plot to visualize the data.
+
+Let's start by loading the relevant sea level pressure data. Since we don't have a default dataset for sea level pressure, I'll use the freva library to access it from the ERA5 reanalysis project.",
+        "Some_id9",
+        r#"import freva
+import xarray as xr
+import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+
+# Load the sea level pressure data for the year 2023 from ERA5
+project = 'reanalysis'
+experiment = 'era5'
+variable = 'psl'
+time_frequency = 'mon'
+
+data_file = freva.databrowser(project=project, experiment=experiment, variable=variable, time_frequency=time_frequency)
+dset = xr.open_mfdataset(data_file)
+
+# Select the data for the year 2023
+psl_2023 = dset['psl'].sel(time=slice('2023-01-01', '2023-12-31'))
+
+# Calculate the annual mean
+annual_mean_psl_2023 = psl_2023.mean(dim='time')
+
+# Plot the annual mean sea level pressure
+grid_lons, grid_lats = np.meshgrid(dset['lon'], dset['lat'])
+plt.figure(figsize=(12, 6))
+ax = plt.axes(projection=ccrs.PlateCarree())
+contour = ax.contourf(grid_lons, grid_lats, annual_mean_psl_2023, cmap='coolwarm', transform=ccrs.PlateCarree())
+ax.coastlines()
+ax.add_feature(cfeature.BORDERS)
+plt.colorbar(contour, label='Sea Level Pressure (Pa)')
+plt.title('Annual Mean Sea Level Pressure for 2023')
+plt.show()"#.to_string()),
+
+        ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+            content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("An image was successfully generated and is being shown to the user.".to_string()),
+            tool_call_id: "Some_id9".to_string(),
+        }),
+
+        assistant_message!("The map above displays the annual mean sea level pressure for the year 2023. The colorbar indicates the pressure in Pascals (Pa), with different colors representing varying pressure levels globally. The map includes coastlines and country borders for reference.
+
+If you have any further questions or need additional analysis, feel free to ask!"),
+
+        ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
+            name: Some("user".to_string()),
+            content: async_openai::types::ChatCompletionRequestUserMessageContent::Text("Find the year with the highest local wind speed, make a global map plot with continental lines of wind and mark the grid box with an X.".to_string()),
+        }),
+
+        assistant_message!("To find the year with the highest local wind speed and create a global map plot, we will follow these steps:
+
+1. **Load the Wind Data**: Access the wind data to understand its structure and content.
+2. **Identify the Maximum Wind Speed**: Determine the year and location with the highest wind speed.
+3. **Visualize the Wind Data**: Create a global map plot of the wind data, marking the location of the highest wind speed with an X.
+
+Let's start by loading the wind data and analyzing its structure.",
+        "Some_id10",
+        r#"import xarray as xr
+
+# Load the wind data file
+wind_data = xr.open_dataset('/data/inputFiles/DATA/sfcwind/mon/data.nc')
+
+# Display the wind data to understand its structure and variables
+wind_data"#),
+
+        ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+            content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("<xarray.Dataset> Size: 65MB
+Dimensions:  (time: 1008, lon: 180, lat: 90)
+Coordinates:
+  * time     (time) datetime64[ns] 8kB 1940-01-01 1940-02-01 ... 2023-12-01
+  * lon      (lon) float64 1kB -180.0 -178.0 -176.0 -174.0 ... 174.0 176.0 178.0
+  * lat      (lat) float64 720B -89.0 -87.0 -85.0 -83.0 ... 83.0 85.0 87.0 89.0
+Data variables:
+    sfcwind  (time, lat, lon) float32 65MB ...
+Attributes:
+    CDI:            Climate Data Interface version 2.2.4 (https://mpimet.mpg....
+    Conventions:    CF-1.6
+    tracking_id:    d5b13485-16f3-5f65-8dfd-cf03615bcc01
+    creation_date:  2024-01-23T12:31:33Z
+    CDO:            Climate Data Operators version 2.2.2 (https://mpimet.mpg....
+    NCO:            netCDF Operators version 5.0.6 (Homepage = http://nco.sf....
+    history:        Tue May 28 15:33:44 2024: ncatted -O -a history,global,d,...".to_string()),
+            tool_call_id: "Some_id10".to_string(),
+        }),
+
+        assistant_message!("The wind data contains surface wind speed information with the following dimensions:
+
+- **Time**: 1008 monthly time steps from January 1940 to December 2023.
+- **Longitude**: 180 points ranging from -180 to 180 degrees.
+- **Latitude**: 90 points ranging from -89 to 89 degrees.
+
+The variable `sfcwind` represents the surface wind speed.
+
+Next, let's identify the year and location with the highest local wind speed.",
+        "Some_id11",
+        r#"# Find the maximum wind speed and its corresponding time, latitude, and longitude
+max_wind_speed = wind_data['sfcwind'].max()
+max_wind_location = wind_data['sfcwind'].where(wind_data['sfcwind'] == max_wind_speed, drop=True)
+
+# Extract the time, latitude, and longitude of the maximum wind speed
+max_wind_time = max_wind_location['time'].values[0]
+max_wind_lat = max_wind_location['lat'].values[0]
+max_wind_lon = max_wind_location['lon'].values[0]
+
+max_wind_speed, max_wind_time, max_wind_lat, max_wind_lon"#),
+
+        ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+            content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("(<xarray.DataArray 'sfcwind' ()> Size: 4B
+array(18.239643, dtype=float32), numpy.datetime64('1942-06-01T00:00:00.000000000'), -69.0, 144.0)".to_string()),
+            tool_call_id: "Some_id11".to_string(),
+        }),
+
+        assistant_message!("The highest local wind speed is approximately 18.24 m/s, which occurred in June 1942 at a latitude of -69.0° and a longitude of 144.0°.
+
+Next, let's create a global map plot of the wind data for June 1942, marking the location with the highest wind speed with an X.",
+        "Some_id12",
+        r#"import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+
+# Select the wind data for June 1942
+wind_june_1942 = wind_data['sfcwind'].sel(time='1942-06-01')
+
+# Create a global map plot
+plt.figure(figsize=(12, 6))
+ax = plt.axes(projection=ccrs.PlateCarree())
+ax.set_global()
+
+# Plot the wind data
+contour = ax.contourf(wind_data['lon'], wind_data['lat'], wind_june_1942,
+                      levels=np.linspace(0, 20, 41), cmap='coolwarm', extend='both')
+plt.colorbar(contour, label='Wind Speed (m/s)')
+
+# Add coastlines and borders
+ax.add_feature(cfeature.COASTLINE)
+ax.add_feature(cfeature.BORDERS)
+
+# Mark the location with the highest wind speed with an X
+ax.scatter(max_wind_lon, max_wind_lat, color='red', marker='x', s=100, label='Max Wind Speed')
+
+plt.title('Global Wind Speed - June 1942')
+plt.legend()
+plt.show()"#),
+
+        ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+            content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("An image was successfully generated and is being shown to the user.".to_string()),
+            tool_call_id: "Some_id12".to_string(),
+        }),
+
+        assistant_message!("The map above illustrates the global wind speed for June 1942. The location with the highest wind speed is marked with a red X. The colorbar indicates the wind speed in meters per second (m/s), with cooler colors representing lower wind speeds and warmer colors representing higher wind speeds.
+
+If you have any further questions or need additional analyses, feel free to ask!")
+
         ]
 });
 
@@ -411,10 +576,12 @@ exact_size_mb"#.to_string()),
 static SUMMARY_SYSTEM_PROMPT: Lazy<ChatCompletionRequestSystemMessage> = Lazy::new(|| {
     ChatCompletionRequestSystemMessage {
         name: Some("prompt".to_string()),
-        content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text("To summarize, you are FrevaGPT, a helpful AI Assistant at the German Centre for Climate Computing (DKRZ). You specialize in analyzing provided atmospheric reanalysis data, interpreting complex datasets, visualizing trends, and identifying new connections in climate science.
-To answer the users requests, use the code_interpreter tool (NOT FUNCTION!) to execute code if neccessary. DO NOT USE IT IF IT'S NOT NECCESSARY!
+        content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text("
+# Summary
+To summarize, you are FrevaGPT, a helpful AI Assistant at the German Centre for Climate Computing (DKRZ). You specialize in analyzing provided atmospheric reanalysis data, interpreting complex datasets, visualizing trends, and identifying new connections in climate science.
+To answer the users requests, use the code_interpreter tool (NOT FUNCTION!) to execute code if neccessary. DO NOT USE IT IF IT'S NOT NECCESSARY! Adhere strictly to the JSON format and do not print unnecessary whitespace.
 Focus on using the freva library WITHIN THE CODE_INTERPRETER TOOL, when possible. Do not try to call any tools but the code_interpreter.
-Do the analysis step by step.
+Do the analysis step by step and plan these steps before you start coding. 
 Be helpful and answer in plain text if the question from the user doesn't require the code_interpreter tool".to_string()),
     }
 });
