@@ -16,17 +16,17 @@ ENV PATH="/opt/conda/bin:$PATH"
 RUN dnf install -y rust cargo
 
 # Create virtual environment for app
-RUN conda create --name env 
-RUN conda init bash 
+RUN conda create --name env
+RUN conda init bash
 # Adding the conda activate command to the bashrc file means that all subsequent shells will have the conda environment activated
-RUN echo "conda activate env" >> ~/.bashrc 
+RUN echo "conda activate env" >> ~/.bashrc
 
 # Install the python packages into the environment. This is split up to improve caching.
-RUN conda install -c conda-forge -n env freva dill 
+RUN conda install -c conda-forge -n env freva dill
 RUN conda install -c conda-forge -n env numpy matplotlib pandas xarray scipy
 RUN conda install -c conda-forge -n env netcdf4 cartopy contourpy
 RUN conda install -c conda-forge -n env anaconda::aiohttp requests
-RUN conda install -c conda-forge -n env anaconda::scikit-learn pytorch geopandas astropy-healpix
+RUN conda install -c conda-forge -n env anaconda::scikit-learn pytorch geopandas healpy astropy
 
 # Also copy over the Cargo.toml file to be able to start the server
 COPY Cargo.toml /app/Cargo.toml
@@ -49,7 +49,7 @@ RUN touch /opt/conda/envs/env/freva/freva.crt
 # Move over the source code
 COPY src /app/src
 
-# DEBUG: Crashes the build with info about the python environment that will be used. 
+# DEBUG: Crashes the build with info about the python environment that will be used.
 # ENV PYO3_PRINT_CONFIG 1
 
 # Run the Rust code in very verbose mode, printing trace information
