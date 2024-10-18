@@ -1,6 +1,6 @@
 use std::{cell::Cell, collections::VecDeque};
 
-use actix_web::{HttpRequest, HttpResponse, Responder};
+use actix_web::{web::Bytes, HttpRequest, HttpResponse, Responder};
 use async_openai::types::{
     ChatChoiceStream, ChatCompletionMessageToolCallChunk, ChatCompletionRequestMessage,
     ChatCompletionRequestUserMessage, ChatCompletionResponseStream, ChatCompletionToolChoiceOption,
@@ -13,6 +13,7 @@ use futures::{
     StreamExt,
 };
 use once_cell::sync::Lazy;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
@@ -22,6 +23,7 @@ use crate::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
             new_conversation_id, save_and_remove_conversation,
         },
+        heartbeat::heartbeat_content,
         prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON},
         select_client,
         thread_storage::read_thread,
@@ -262,13 +264,14 @@ async fn create_and_stream(
         (
             open_ai_stream, // the stream from the OpenAI client
             thread_id,
-            false,           // whether the stream should stop
+            false,                                      // whether the stream should stop
             true,            // whether the stream should hint the thread_id
             VecDeque::new(), // the queue of variants to send
             None,            // The tool name, if it was called
             String::new(),   // the tool arguments,
             String::new(),   // the tool id
             Cell::new(None), // the content of a llama tool call (See https://github.com/ollama/ollama/issues/5796 for why this needs to be done manually)
+            None::<mpsc::Receiver<Vec<StreamVariant>>>, // the reciever for the tool call
         ),
         move |(
             mut open_ai_stream,
@@ -280,6 +283,7 @@ async fn create_and_stream(
             mut tool_arguments,
             mut tool_id,
             mut llama_tool_call_content,
+            mut reciever,
         )| {
             // It is required to clone the freva_config_path, because it is moved into the closure.
             let freva_config_path_clone = freva_config_path.clone();
@@ -310,26 +314,14 @@ async fn create_and_stream(
                             tool_arguments,
                             tool_id,
                             llama_tool_call_content,
+                            reciever,
                         ),
                     ));
                 }
 
                 // After potentially sending a thread_id hint, but before stopping, check whether the variants queue contains something; if so, send it.
                 if let Some(content) = variant_queue.pop_front() {
-                    let string_variant = match serde_json::to_string(&content) {
-                        Ok(string) => string,
-                        Err(e) => {
-                            warn!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
-                            format!(
-                                "{:?}",
-                                StreamVariant::ServerError(format!(
-                                    "Error converting StreamVariant to string: {content:?}"
-                                ))
-                            )
-                        }
-                    };
-
-                    let bytes = actix_web::web::Bytes::copy_from_slice(string_variant.as_bytes());
+                    let bytes = variant_to_bytes(content);
 
                     // Everything worked, so we'll return the bytes and the new state.
                     Some((
@@ -344,6 +336,7 @@ async fn create_and_stream(
                             tool_arguments,
                             tool_id,
                             llama_tool_call_content,
+                            reciever,
                         ),
                     ))
                 } else if should_stop {
@@ -385,10 +378,80 @@ async fn create_and_stream(
                                 tool_arguments,
                                 tool_id,
                                 llama_tool_call_content,
+                                reciever,
                             ),
                         ))
                     } else {
                         // If the client didn't send a stop request, we'll continue.
+
+                        // We have to check whether we have an active tool call.If so, the reviecer is not None.
+                        // In that case, we shouldn't poll the stream, but instead wait for the tool call to finish.
+                        // In the waiting, we'll return a heartbeat to the client.
+                        if let Some(mut inner_reciever) = reciever {
+                            // Construct a 5-second timeout to wait for in the select! macro.
+                            let timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
+
+                            // We'll wait for the tool call to finish or the timeout to expire.
+                            return tokio::select! {
+                                _ = timeout => {
+                                    // If the timeout expires, we'll send a heartbeat to the client.
+                                    Some((
+                                        Ok(variant_to_bytes(heartbeat_content())),
+                                        (
+                                            open_ai_stream,
+                                            thread_id,
+                                            should_stop,
+                                            false,
+                                            variant_queue,
+                                            tool_name,
+                                            tool_arguments,
+                                            tool_id,
+                                            llama_tool_call_content,
+                                            Some(inner_reciever),
+                                        ),
+                                    ))
+                                }
+                                output = inner_reciever.recv() => {
+                                    // The output might fail if the tool call was not successful.
+                                    let mut output = match output {
+                                        Some(output) => output,
+                                        None => {
+                                            error!("Error recieving tool call output, the reciever was closed.");
+                                            vec![StreamVariant::CodeError("Error recieving tool call output.".to_string())]
+                                        }
+                                    };
+
+                                    // Before returning the bytes, we need to restart the stream.
+                                    restart_stream(&thread_id, output.clone(), chatbot, &mut open_ai_stream).await;
+
+                                    // It also needs to be added to the conversation.
+                                    add_to_conversation(&thread_id, output.clone(), freva_config_path_clone.clone());
+
+                                    // The output can contain more than one variant, so we'll add them to the queue.
+                                    let first = output.pop().unwrap_or_else(|| StreamVariant::ServerError("No variants found in tool call output.".to_string()));
+                                    variant_queue.extend(output.into_iter());
+
+                                    let bytes = variant_to_bytes(first);
+
+
+                                    Some((
+                                        Ok(bytes),
+                                        (
+                                            open_ai_stream,
+                                            thread_id,
+                                            should_stop,
+                                            false,
+                                            variant_queue,
+                                            tool_name,
+                                            tool_arguments,
+                                            tool_id,
+                                            llama_tool_call_content,
+                                            None,
+                                        ),
+                                    ))
+                                }
+                            };
+                        }
 
                         // gets the response from the OpenAI Stream
                         let response = open_ai_stream.next().await;
@@ -404,6 +467,7 @@ async fn create_and_stream(
                             &mut open_ai_stream,
                             chatbot,
                             &mut llama_tool_call_content,
+                            &mut reciever,
                         )
                         .await;
 
@@ -429,21 +493,7 @@ async fn create_and_stream(
                         let mut variants: VecDeque<StreamVariant> = variants.into();
                         let first_variant = variants.pop_front().unwrap_or(error_variant);
 
-                        let string_variant = match serde_json::to_string(&first_variant) {
-                            Ok(string) => string,
-                            Err(e) => {
-                                error!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
-                                format!(
-                                    "{:?}",
-                                    StreamVariant::ServerError(format!(
-                                    "Error converting StreamVariant to string: {first_variant:?}"
-                                ))
-                                )
-                            }
-                        };
-
-                        let bytes =
-                            actix_web::web::Bytes::copy_from_slice(string_variant.as_bytes());
+                        let bytes = variant_to_bytes(first_variant);
 
                         // Everything worked, so we'll return the bytes and the new state.
                         Some((
@@ -458,6 +508,7 @@ async fn create_and_stream(
                                 tool_arguments,
                                 tool_id,
                                 llama_tool_call_content,
+                                reciever,
                             ),
                         ))
                         // Ends if the variant is a StreamEnd
@@ -495,6 +546,7 @@ async fn oai_stream_to_variants(
     open_ai_stream: &mut Fuse<ChatCompletionResponseStream>,
     chatbot: AvailableChatbots,
     llama_tool_call_content: &mut Cell<Option<Cell<String>>>,
+    reciever: &mut Option<mpsc::Receiver<Vec<StreamVariant>>>,
 ) -> Vec<StreamVariant> {
     match response {
         Some(Ok(response)) => {
@@ -637,6 +689,7 @@ async fn oai_stream_to_variants(
                             open_ai_stream,
                             &response,
                             chatbot,
+                            reciever,
                         )
                         .await
                     }
@@ -814,6 +867,7 @@ async fn handle_stop_event(
     open_ai_stream: &mut Fuse<ChatCompletionResponseStream>,
     response: &CreateChatCompletionStreamResponse,
     chatbot: AvailableChatbots,
+    reciever: &mut Option<mpsc::Receiver<Vec<StreamVariant>>>,
 ) -> Vec<StreamVariant> {
     match reason {
         async_openai::types::FinishReason::Stop => {
@@ -846,20 +900,28 @@ async fn handle_stop_event(
 
             let mut all_generated_variants = vec![];
 
+            // In order to allow for a heartbeat, we need to create a mspc channel for the tool call to communicate with the main thread.
+            let (tx, rx) = mpsc::channel::<Vec<StreamVariant>>(1);
+
             // There is NOT a tool call there, because that was accumulated in the previous iterations.
             // The stream ending is just OpenAI's way of telling us that the tool call is done and can now be executed.
             if let Some(name) = tool_name {
-                let mut temp = route_call(
+                tokio::spawn(route_call(
                     name.to_string(),
                     Some(tool_arguments.to_string()),
                     tool_id.to_string(),
                     thread_id.to_string(),
-                ); // call the tool with the arguments
-                all_generated_variants.append(&mut temp);
+                    tx,
+                ));
                 // Reset the tool_name and tool_arguments
                 *tool_name = None;
                 *tool_arguments = String::new();
                 *tool_id = String::new();
+
+                // At this point, we need to inform the main thread that that the tool call is running.
+                // Specifically, we need to return the info that a tool call was started and the reciever of the mpsc channel.
+                reciever.replace(rx);
+                vec![heartbeat_content()]
             } else {
                 warn!(
                     "Tool call expected, but not found in response: {:?}",
@@ -868,61 +930,71 @@ async fn handle_stop_event(
                 all_generated_variants.push(StreamVariant::CodeError(
                     "Tool call expected, but not found in response.".to_string(),
                 ));
+
+                restart_stream(thread_id, all_generated_variants, chatbot, open_ai_stream).await
             }
+        }
+    }
+}
 
-            // Before we can return the generated variants, we need to start a new steam because the old one is done.
-            // We need a list of all messages, which we can get from the active conversation global variable.
-            match get_conversation(thread_id) {
-                None => {
-                    error!("Tried to restart conversation after tool call, but failed! No active conversation found with thread_id: {}", thread_id);
-                    vec![StreamVariant::ServerError("Tried to restart conversation after tool call, but failed! No active conversation found.".to_string())]
+/// Helper function to restart the stream.
+async fn restart_stream(
+    thread_id: &String,
+    all_generated_variants: Vec<StreamVariant>,
+    chatbot: AvailableChatbots,
+    open_ai_stream: &mut Fuse<ChatCompletionResponseStream>,
+) -> Vec<StreamVariant> {
+    // Before we can return the generated variants, we need to start a new steam because the old one is done.
+    // We need a list of all messages, which we can get from the active conversation global variable.
+    match get_conversation(thread_id) {
+        None => {
+            error!("Tried to restart conversation after tool call, but failed! No active conversation found with thread_id: {}", thread_id);
+            vec![StreamVariant::ServerError("Tried to restart conversation after tool call, but failed! No active conversation found.".to_string())]
+        }
+        Some(messages) => {
+            // the actual messages we need to put there are those plus the generated ones, because the generated one were not added to the conversation yet.
+            let mut all_messages = messages.clone();
+            all_messages.append(&mut all_generated_variants.clone());
+
+            trace!(
+                "Restarting conversation after tool call with messages: {:?}",
+                all_messages
+            );
+
+            // The stream wants a vector of ChatCompletionRequestMessage, so we need to convert the StreamVariants to that.
+            let all_oai_messages = help_convert_sv_ccrm(all_messages);
+
+            trace!("All messages: {:?}", all_oai_messages);
+
+            // Now we construct a new stream and substitute the old one with it.
+            match build_request(all_oai_messages, chatbot) {
+                Err(e) => {
+                    // If we can't build the request, we'll return a generic error.
+                    warn!("Error building request: {:?}", e);
+                    vec![StreamVariant::ServerError(
+                        "Error building request.".to_string(),
+                    )]
                 }
-                Some(messages) => {
-                    // the actual messages we need to put there are those plus the generated ones, because the generated one were not added to the conversation yet.
-                    let mut all_messages = messages.clone();
-                    all_messages.append(&mut all_generated_variants.clone());
-
-                    trace!(
-                        "Restarting conversation after tool call with messages: {:?}",
-                        all_messages
-                    );
-
-                    // The stream wants a vector of ChatCompletionRequestMessage, so we need to convert the StreamVariants to that.
-                    let all_oai_messages = help_convert_sv_ccrm(all_messages);
-
-                    trace!("All messages: {:?}", all_oai_messages);
-
-                    // Now we construct a new stream and substitute the old one with it.
-                    match build_request(all_oai_messages, chatbot) {
+                Ok(request) => {
+                    trace!("Request built successfully: {:?}", request);
+                    match select_client(chatbot)
+                        .await
+                        .chat()
+                        .create_stream(request)
+                        .await
+                    {
                         Err(e) => {
-                            // If we can't build the request, we'll return a generic error.
-                            warn!("Error building request: {:?}", e);
+                            // If we can't create the stream, we'll return a generic error.
+                            warn!("Error creating stream: {:?}", e);
                             vec![StreamVariant::ServerError(
-                                "Error building request.".to_string(),
+                                "Error creating new stream.".to_string(),
                             )]
                         }
-                        Ok(request) => {
-                            trace!("Request built successfully: {:?}", request);
-                            match select_client(chatbot)
-                                .await
-                                .chat()
-                                .create_stream(request)
-                                .await
-                            {
-                                Err(e) => {
-                                    // If we can't create the stream, we'll return a generic error.
-                                    warn!("Error creating stream: {:?}", e);
-                                    vec![StreamVariant::ServerError(
-                                        "Error creating new stream.".to_string(),
-                                    )]
-                                }
-                                Ok(stream) => {
-                                    // Everything worked, so we'll return the new stream and the new state.
-                                    *open_ai_stream = stream.fuse();
-                                    all_generated_variants
-                                    // we need to return the generated variants, because the stream will be restarted with the tool call.
-                                }
-                            }
+                        Ok(stream) => {
+                            // Everything worked, so we'll return the new stream and the new state.
+                            *open_ai_stream = stream.fuse();
+                            all_generated_variants
+                            // we need to return the generated variants, because the stream will be restarted with the tool call.
                         }
                     }
                 }
@@ -1002,4 +1074,23 @@ fn try_extract_tool_call(content: &str) -> Option<(String, String)> {
             None
         }
     }
+}
+
+/// Helper function to convert a StreamVariant to bytes.
+/// Doesn't panic, always returns a valid byte array.
+fn variant_to_bytes(variant: StreamVariant) -> Bytes {
+    let string_rep = match serde_json::to_string(&variant) {
+        Ok(string) => string,
+        Err(e) => {
+            error!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
+            format!(
+                "{:?}",
+                StreamVariant::ServerError(format!(
+                    "Error converting StreamVariant to string: {variant:?}"
+                ))
+            )
+        }
+    };
+
+    actix_web::web::Bytes::copy_from_slice(string_rep.as_bytes())
 }

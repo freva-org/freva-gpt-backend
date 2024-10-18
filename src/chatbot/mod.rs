@@ -28,6 +28,9 @@ pub mod prompting;
 /// The endpoint for returning the available chatbots
 pub mod available_chatbots_endpoint;
 
+/// Internally used to handle the heartbeat that is happening while the code interpreter is running.
+pub mod heartbeat;
+
 // Defines a few useful static variables that are used throughout the chatbot.
 
 use std::sync::{Arc, Mutex};

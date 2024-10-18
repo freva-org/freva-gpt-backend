@@ -214,12 +214,13 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     }
                     // We now know that the hint is a non-empty JSON object, we can return it.
                     // TODO: Is this correct? Should we really tell the LLM about the thread_id?
-                    Ok(vec![ChatCompletionRequestMessage::System(
-                        ChatCompletionRequestSystemMessage {
-                            name: Some("ServerHint".to_string()),
-                            content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(s),
-                        },
-                    )])
+                    // Ok(vec![ChatCompletionRequestMessage::System(
+                    //     ChatCompletionRequestSystemMessage {
+                    //         name: Some("ServerHint".to_string()),
+                    //         content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(s),
+                    //     },
+                    // )])
+                    Err(ConversionError::VariantHide("ServerHint variants are only for use on the server side, not for the LLM."))
                 } else {
                     warn!("ServerHint content is not an object, ignoring and passing value to client blindly.");
                     Err(ConversionError::ParseError("ServerHint content is not an object."))
@@ -504,8 +505,8 @@ mod tests {
             StreamVariant::StreamEnd("Generation complete".to_string())
         ];
         let output = help_convert_sv_ccrm(input);
-        assert_eq!(output.len(), STARTING_PROMPT.len() + 6); // The length is dependant on the prompt, so we'll have to make it depend on the prompt's length.
-        assert_eq!(output[STARTING_PROMPT.len() + 2], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+        assert_eq!(output.len(), STARTING_PROMPT.len() + 5); // The length is dependant on the prompt, so we'll have to make it depend on the prompt's length.
+        assert_eq!(output[STARTING_PROMPT.len() + 1], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("To plot a circle, we can use the `matplotlib` library to create a simple visualization. Let's create a plot with a circle centered at the origin (0, 0) with a specified radius. I'll use a radius of 1 for this example.\n\nLet's proceed with the code to generate this plot.".to_string())),
             name: Some("frevaGPT".to_string()),
             tool_calls: Some(vec![ChatCompletionMessageToolCall{
@@ -532,11 +533,11 @@ mod tests {
         );
         let input = input.expect("Error reading test thread file. Did you copy over the `testthread.txt` file to the threads folder?");
         let output = help_convert_sv_ccrm(input);
-        assert_eq!(output.len(), 38);
+        assert_eq!(output.len(), 36);
 
         // "Assistant:To create an annual mean temperature global map plot for the year 2023 using the provided dataset, we will follow these steps:\n\n1. Load the temperature data for 2023.\n2. Calculate the annual mean temperature for that year.\n3. Create a global map plot of the mean temperature.\n\nLet's start by loading the temperature data and calculating the annual mean temperature for 2023."
         // "Code: {\r\n        \"code\": \"import xarray as xr\\nimport numpy as np\\nimport matplotlib.pyplot as plt\\n\\n# Load the specified dataset for the year 2023\\ntemperature_data = xr.open_dataset('/work/bm1159/XCES/data4xces/reanalysis/reanalysis/ECMWF/IFS/ERA5/mon/atmos/tas/r1i1p1/tas_Amon_reanalysis_era5_r1i1p1_20240101-20241231.nc')\\n\\n# Calculate the annual mean temperature for the year 2023\\ntemperature_mean_2023 = temperature_data['tas'].mean(dim='time')\\n\\n# Extract latitude and longitude for plotting\\nlon = temperature_data['lon']\\nlat = temperature_data['lat']\\n\\n# Create a global map plot of the mean temperature\\nplt.figure(figsize=(12, 6))\\nplt.contourf(lon, lat, temperature_mean_2023, levels=np.linspace(250, 310, 61), cmap='coolwarm', extend='both')\\nplt.colorbar(label='Mean Temperature (K)')\\nplt.title('Annual Mean Temperature (K) for 2023')\\nplt.xlabel('Longitude')\\nplt.ylabel('Latitude')\\nplt.show()\"\r\n    }:call_OgWOIoYgje39a1akMKmRyXeL"
-        assert_eq!(output[35], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+        assert_eq!(output[33], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             content: None,
             name: Some("frevaGPT".to_string()),
             tool_calls: Some(vec![ChatCompletionMessageToolCall{
@@ -550,13 +551,14 @@ mod tests {
             ..Default::default()
         }));
 
+        // The conversation doesn't do ServerHints anymore, so we'll check assistant without tool calls.
         assert_eq!(
-            output[28],
-            ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage {
-                name: Some("ServerHint".to_string()),
-                content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(
-                    "{\"thread_id\": \"XhBvWHg1w4Q8w5pnZARtEUGVEo50yHOg\"}".to_string()
-                )
+            output[26],
+            ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+                content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("The exact size of the dataset is approximately 4500.61 MB.".to_string())),
+                name: Some("frevaGPT".to_string()),
+                tool_calls: None,
+                ..Default::default()
             })
         );
     }
