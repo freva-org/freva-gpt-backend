@@ -59,7 +59,7 @@ pub fn start_code_interpeter(
 
     // Also retrieve all previous code interpreter inputs to get all libraries that are needed.
     let previous_code_interpreter_imports = match thread_id.clone() {
-        None => "".to_string(),
+        None => vec![],
         Some(thread_id) => retrieve_previous_code_interpreter_imports(&thread_id),
     };
 
@@ -77,6 +77,10 @@ pub fn start_code_interpeter(
         )];
     };
 
+    // In order to not import twice, which can appearently cause issues, we'll check the code and remove any imports that are already present.
+    let imports = sanitize_imports(previous_code_interpreter_imports, &code);
+    let imports = imports.join("\n");
+
     // Now parse the JSON into a struct.
     let mut code = match serde_json::from_str::<CodeInterpreterArguments>(&code) {
         Ok(parsed) => parsed,
@@ -86,7 +90,7 @@ pub fn start_code_interpeter(
         }
     };
 
-    let sanitized_code = sanitize_code(previous_code_interpreter_imports + &code.code);
+    let sanitized_code = sanitize_code(imports + &code.code);
     let post_processed_code = post_process(sanitized_code);
     code.code = post_processed_code;
 
@@ -218,14 +222,14 @@ pub fn run_code_interpeter(arguments: String) {
 
 /// Retrieves all previous code interpreter inputs from the conversation state.
 /// Returns a string with all the imports, seperated by newlines.
-fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> String {
+fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> Vec<String> {
     // The running conversation is in the global variable.
     let mut this_conversation = get_conversation(thread_id).unwrap_or_default();
     // The past conversation is stored on disk.
     let past_conversation = read_thread(thread_id, true).unwrap_or_default(); // We don't want to log an error if the file doesn't exist.
     this_conversation.extend(past_conversation);
 
-    let mut imports = String::new();
+    let mut imports = Vec::<String>::new();
     for variant in this_conversation {
         if let StreamVariant::Code(code, _) = variant {
             // Split the code into lines and only take the lines that start with "import" or start with "from" AND contain "import".
@@ -237,12 +241,34 @@ fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> String {
                     || (line.starts_with("from") && line.contains("import"))
                 {
                     trace!("Found import line: {}", line);
-                    imports.push_str(line);
-                    imports.push('\n');
+                    imports.push(line.to_string());
                 }
             }
         }
     }
+    imports
+}
+
+/// Takes in a list of possible imports and the code that should be run.
+/// Returns a sanitized list of the imports to add to the code.
+fn sanitize_imports(prev_imports: Vec<String>, code: &str) -> Vec<String> {
+    let mut imports = vec![];
+
+    // We'll first check the previous imports.
+    for prev_import in prev_imports {
+        if !code.contains(&prev_import) {
+            imports.push(prev_import);
+        }
+    }
+
+    // Now we'll check the code itself.
+    let code_lines = code.split("\n");
+    for line in code_lines {
+        if line.starts_with("import") || (line.starts_with("from") && line.contains("import")) {
+            imports.push(line.to_string());
+        }
+    }
+
     imports
 }
 
