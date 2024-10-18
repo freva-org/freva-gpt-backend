@@ -10,7 +10,7 @@ use crate::{
 /// - Initializes lazy variables to make sure they don't fail later.
 /// - Checks Auth setup.
 /// - Runs a few basic tests agains the code interpreter.
-pub fn run_runtime_checks() {
+pub async fn run_runtime_checks() {
     // The lazy static STARTING_MESSAGE_JSON can fail if the prompt or messages cannot be converted to a string.
     // To make sure that this is caught early, we'll just test it here.
     let _ = chatbot::prompting::STARTING_PROMPT_JSON.clone();
@@ -23,6 +23,12 @@ pub fn run_runtime_checks() {
 
     // The lazy static STREAM_STOP_CONTENT can also fail, so we need to test it here.
     let _ = STREAM_STOP_CONTENT.clone();
+
+    // The heartbeat module also has a lazy static variable that we should initialize here.
+    {
+        let guard = chatbot::heartbeat::SYSINFO.read().await;
+        debug!("System information: {:?}", guard.0);
+    }
 
     // We'll also initialize the authentication here so it's available for the entire server, from the very start.
     print!("Checking the authentication string... ");

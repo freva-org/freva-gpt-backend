@@ -56,7 +56,7 @@ async fn main() -> std::io::Result<()> {
     let host = std::env::var("HOST").unwrap_or_else(|_| "localhost".to_string());
 
     // Run all runtime checks
-    runtime_checks::run_runtime_checks();
+    runtime_checks::run_runtime_checks().await;
 
     info!("Starting server at {host}:{port}");
     println!("Starting server at {host}:{port}");

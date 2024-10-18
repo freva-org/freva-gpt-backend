@@ -396,7 +396,7 @@ async fn create_and_stream(
                                 _ = timeout => {
                                     // If the timeout expires, we'll send a heartbeat to the client.
                                     Some((
-                                        Ok(variant_to_bytes(heartbeat_content())),
+                                        Ok(variant_to_bytes(heartbeat_content().await)),
                                         (
                                             open_ai_stream,
                                             thread_id,
@@ -921,7 +921,7 @@ async fn handle_stop_event(
                 // At this point, we need to inform the main thread that that the tool call is running.
                 // Specifically, we need to return the info that a tool call was started and the reciever of the mpsc channel.
                 reciever.replace(rx);
-                vec![heartbeat_content()]
+                vec![heartbeat_content().await]
             } else {
                 warn!(
                     "Tool call expected, but not found in response: {:?}",
