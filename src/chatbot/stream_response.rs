@@ -835,7 +835,7 @@ async fn oai_stream_to_variants(
         None => {
             // The llama chatbot sometimes forgets to write </tool_call> at the end of the tool call.
             // If it's not an openAI chatbot, check whether we can get some tool call from the running tool.
-            if !matches!(chatbot, AvailableChatbots::OpenAI(_)) {
+            if matches!(chatbot, AvailableChatbots::Ollama(_)) {
                 // Try to get the tool call from the running tool.
                 let tool_call = try_extract_tool_call(
                     &llama_tool_call_content
@@ -845,17 +845,15 @@ async fn oai_stream_to_variants(
                 );
                 match tool_call {
                     None => {
-                        warn!("Stream ended abruptly and without error. This should not happen; returning StreamEnd.");
-                        vec![StreamVariant::StreamEnd(
-                            "Stream ended abruptly".to_string(),
-                        )]
+                        info!("Stream ended abruptly and without error. Ollama just does this, returning streamend.");
+                        vec![StreamVariant::StreamEnd("Ollama Stream ended".to_string())]
                     }
                     Some((name, arguments)) => {
                         // We know it's the code interpreter and can send it as a delta.
                         trace!("Tool call: {:?} with arguments: {:?}", name, arguments);
                         vec![
                             StreamVariant::Code(arguments, generate_id()),
-                            StreamVariant::StreamEnd("Stream ended abruptly".to_string()), // We still need to end the stream, because the tool call is done.
+                            StreamVariant::StreamEnd("Ollama Stream ended".to_string()), // We still need to end the stream, because the tool call is done.
                         ]
                     }
                 }
