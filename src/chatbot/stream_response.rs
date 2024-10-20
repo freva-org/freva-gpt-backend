@@ -57,6 +57,8 @@ use super::{available_chatbots::AvailableChatbots, handle_active_conversations::
 ///
 /// If the thread_id is blank but does not point to an existing thread, an InternalServerError response is returned.
 ///
+/// If the thread_id is already being streamed, a Conflict response is returned.
+///
 /// If the stream fails due to something else on the backend, an InternalServerError response is returned.
 #[docs_const]
 pub async fn stream_response(req: HttpRequest) -> impl Responder {
@@ -89,6 +91,17 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     };
 
     debug!("Thread ID: {}, Input: {}", thread_id, input);
+
+    // To avoid one thread being streamed more than once at the same time, we'll check if the thread is already being streamed.
+    if let Some(state) = conversation_state(&thread_id, true) {
+        warn!("The User requested a stream for a thread that is already being streamed. Thread ID: {}", thread_id);
+        info!("Conversation state: {:?}", state);
+        // Just send an error to the client. A 409 Conflict is the most appropriate status code.
+        return HttpResponse::Conflict().body(format!(
+            "Thread {} is already being streamed. Please wait until it's done.",
+            thread_id
+        ));
+    }
 
     // We also require the freva_config_path to be set. From the frontend, it's called "freva_config".
     let freva_config_path = match qstring
@@ -360,7 +373,7 @@ async fn create_and_stream(
 
                     // First checks whether it should stop the stream. (This happens if the client sent a stop request.)
                     if matches!(
-                        conversation_state(&thread_id),
+                        conversation_state(&thread_id, false),
                         Some(ConversationState::Stopping)
                     ) {
                         debug!("Conversation with thread_id {} has been stopped, sending one last event and then aborting stream.", thread_id);

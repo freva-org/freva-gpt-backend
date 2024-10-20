@@ -34,7 +34,7 @@ pub fn start_code_interpeter(
             info!("Thread_id not set, assuming in testing mode. Not setting freva_config_path.");
             "".to_string()
         }
-        Some(thread_id) => match conversation_state(&thread_id) {
+        Some(thread_id) => match conversation_state(&thread_id, false) {
             None => {
                 warn!("No conversation state found while trying to run the code interpreter. Not setting freva_config_path, this WILL break any calls to the code interpreter that require it.");
                 "".to_string()
