@@ -384,6 +384,11 @@ async fn create_and_stream(
                     ) {
                         debug!("Conversation with thread_id {} has been stopped, sending one last event and then aborting stream.", thread_id);
                         // We need to signal the end of the stream, so we'll have to tell actix to send one last StreamEnd event.
+                        add_to_conversation(
+                            &thread_id,
+                            vec![StreamVariant::StreamEnd("Conversation aborted".to_string())],
+                            freva_config_path_clone,
+                        );
                         end_conversation(&thread_id);
                         Some((
                             Ok(STREAM_STOP_CONTENT.clone()),
@@ -413,9 +418,12 @@ async fn create_and_stream(
                             // We'll wait for the tool call to finish or the timeout to expire.
                             return tokio::select! {
                                 _ = timeout => {
+                                    // Also add the heartbeat to the conversation.
+                                    let heartbeat = heartbeat_content().await;
+                                    add_to_conversation(&thread_id, vec![heartbeat.clone()], freva_config_path_clone.clone());
                                     // If the timeout expires, we'll send a heartbeat to the client.
                                     Some((
-                                        Ok(variant_to_bytes(heartbeat_content().await)),
+                                        Ok(variant_to_bytes(heartbeat)),
                                         (
                                             open_ai_stream,
                                             thread_id,
