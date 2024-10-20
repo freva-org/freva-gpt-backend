@@ -99,7 +99,13 @@ pub async fn heartbeat_content() -> StreamVariant {
 fn maybe_update() {
     if let Ok(mut lock) = SYSINFO.try_write() {
         if lock.1.elapsed().as_secs() > 4 {
-            *lock = (sysinfo::System::new_all(), Instant::now());
+            // lock.0.refresh_cpu_all(); // This doesn't work for whatever reason.
+            lock.0.refresh_processes_specifics(
+                sysinfo::ProcessesToUpdate::All,
+                false,
+                sysinfo::ProcessRefreshKind::everything(),
+            );
+            lock.1 = Instant::now();
         }
     }
 }
