@@ -13,7 +13,7 @@ use futures::{
     StreamExt,
 };
 use once_cell::sync::Lazy;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
@@ -277,14 +277,14 @@ async fn create_and_stream(
         (
             open_ai_stream, // the stream from the OpenAI client
             thread_id,
-            false,                                      // whether the stream should stop
+            false,           // whether the stream should stop
             true,            // whether the stream should hint the thread_id
             VecDeque::new(), // the queue of variants to send
             None,            // The tool name, if it was called
             String::new(),   // the tool arguments,
             String::new(),   // the tool id
             Cell::new(None), // the content of a llama tool call (See https://github.com/ollama/ollama/issues/5796 for why this needs to be done manually)
-            None::<mpsc::Receiver<Vec<StreamVariant>>>, // the reciever for the tool call
+            None::<(mpsc::Receiver<Vec<StreamVariant>>, JoinHandle<()>)>, // the reciever for the tool call and the join handle for the tool call
         ),
         move |(
             mut open_ai_stream,
@@ -364,6 +364,12 @@ async fn create_and_stream(
                         }
                     }
 
+                    // In order to not do unnecessary work, we'll abort the tool call task if it's still running.
+                    if let Some((_, handle)) = reciever {
+                        debug!("Aborting tool call task.");
+                        handle.abort();
+                    }
+
                     // We do it in this order to be able to send one last event to the client signaling the end of the stream.
                     trace!("Stream is stopping, sent one last event, removing the conversation from the pool and then aborting stream.");
                     save_and_remove_conversation(&thread_id);
@@ -400,7 +406,7 @@ async fn create_and_stream(
                         // We have to check whether we have an active tool call.If so, the reviecer is not None.
                         // In that case, we shouldn't poll the stream, but instead wait for the tool call to finish.
                         // In the waiting, we'll return a heartbeat to the client.
-                        if let Some(mut inner_reciever) = reciever {
+                        if let Some((mut inner_reciever, handle)) = reciever {
                             // Construct a 5-second timeout to wait for in the select! macro.
                             let timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
 
@@ -420,7 +426,7 @@ async fn create_and_stream(
                                             tool_arguments,
                                             tool_id,
                                             llama_tool_call_content,
-                                            Some(inner_reciever),
+                                            Some((inner_reciever, handle)),
                                         ),
                                     ))
                                 }
@@ -559,7 +565,7 @@ async fn oai_stream_to_variants(
     open_ai_stream: &mut Fuse<ChatCompletionResponseStream>,
     chatbot: AvailableChatbots,
     llama_tool_call_content: &mut Cell<Option<Cell<String>>>,
-    reciever: &mut Option<mpsc::Receiver<Vec<StreamVariant>>>,
+    reciever: &mut Option<(mpsc::Receiver<Vec<StreamVariant>>, JoinHandle<()>)>,
 ) -> Vec<StreamVariant> {
     match response {
         Some(Ok(response)) => {
@@ -878,7 +884,7 @@ async fn handle_stop_event(
     open_ai_stream: &mut Fuse<ChatCompletionResponseStream>,
     response: &CreateChatCompletionStreamResponse,
     chatbot: AvailableChatbots,
-    reciever: &mut Option<mpsc::Receiver<Vec<StreamVariant>>>,
+    reciever: &mut Option<(mpsc::Receiver<Vec<StreamVariant>>, JoinHandle<()>)>,
 ) -> Vec<StreamVariant> {
     match reason {
         async_openai::types::FinishReason::Stop => {
@@ -917,7 +923,7 @@ async fn handle_stop_event(
             // There is NOT a tool call there, because that was accumulated in the previous iterations.
             // The stream ending is just OpenAI's way of telling us that the tool call is done and can now be executed.
             if let Some(name) = tool_name {
-                tokio::spawn(route_call(
+                let handle = tokio::spawn(route_call(
                     name.to_string(),
                     Some(tool_arguments.to_string()),
                     tool_id.to_string(),
@@ -931,7 +937,7 @@ async fn handle_stop_event(
 
                 // At this point, we need to inform the main thread that that the tool call is running.
                 // Specifically, we need to return the info that a tool call was started and the reciever of the mpsc channel.
-                reciever.replace(rx);
+                reciever.replace((rx, handle));
                 vec![heartbeat_content().await]
             } else {
                 warn!(
