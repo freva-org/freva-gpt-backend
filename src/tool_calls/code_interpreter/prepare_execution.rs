@@ -275,7 +275,9 @@ fn sanitize_imports(prev_imports: Vec<String>, code: &str) -> Vec<String> {
     }
 
     // This newline prevents the imports from accidentally being on the same line
-    imports.push("\n".to_string());
+    if !imports.is_empty() {
+        imports.push("\n".to_string());
+    }
     imports
 }
 
