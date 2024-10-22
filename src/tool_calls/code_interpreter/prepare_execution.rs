@@ -8,6 +8,7 @@ use crate::{
         thread_storage::read_thread,
         types::{ConversationState, StreamVariant},
     },
+    logging::{silence_logger, undo_silence_logger},
     tool_calls::code_interpreter::{
         execute::execute_code,
         safety_check::{code_is_likely_safe, sanitize_code},
@@ -34,7 +35,7 @@ pub fn start_code_interpeter(
             info!("Thread_id not set, assuming in testing mode. Not setting freva_config_path.");
             "".to_string()
         }
-        Some(thread_id) => match conversation_state(&thread_id, false) {
+        Some(thread_id) => match conversation_state(&thread_id) {
             None => {
                 warn!("No conversation state found while trying to run the code interpreter. Not setting freva_config_path, this WILL break any calls to the code interpreter that require it.");
                 "".to_string()
@@ -228,7 +229,9 @@ fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> Vec<String> {
     // The running conversation is in the global variable.
     let mut this_conversation = get_conversation(thread_id).unwrap_or_default();
     // The past conversation is stored on disk.
-    let past_conversation = read_thread(thread_id, true).unwrap_or_default(); // We don't want to log an error if the file doesn't exist.
+    silence_logger();
+    let past_conversation = read_thread(thread_id).unwrap_or_default(); // We don't want to log an error if the file doesn't exist.
+    undo_silence_logger();
     this_conversation.extend(past_conversation);
 
     let mut imports = Vec::<String>::new();

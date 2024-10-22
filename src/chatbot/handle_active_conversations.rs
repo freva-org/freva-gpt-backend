@@ -76,7 +76,7 @@ pub fn add_to_conversation(
 }
 
 /// Returns the state of the conversation, if possible
-pub fn conversation_state(thread_id: &str, suppress_warn: bool) -> Option<ConversationState> {
+pub fn conversation_state(thread_id: &str) -> Option<ConversationState> {
     trace!("Checking the state of conversation with id: {}", thread_id);
 
     match ACTIVE_CONVERSATIONS.lock() {
@@ -89,9 +89,7 @@ pub fn conversation_state(thread_id: &str, suppress_warn: bool) -> Option<Conver
                 Some(conversation.state.clone())
             } else {
                 // If the conversation is not found, we'll return false.
-                if !suppress_warn {
-                    warn!("Conversation with id: {} not found.", thread_id);
-                }
+                warn!("Conversation with id: {} not found.", thread_id);
                 None
             }
         }

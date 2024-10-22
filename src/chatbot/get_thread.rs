@@ -43,7 +43,7 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
     };
 
     // Instead of retrieving from OpenAI, we need to retrieve from disk since that is where all streamed data is stored.
-    let result = match read_thread(thread_id, false) {
+    let result = match read_thread(thread_id) {
         Ok(content) => content,
         Err(e) => {
             // Further handle the error, as we know what possible IO errors can occur.

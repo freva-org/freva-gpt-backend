@@ -29,6 +29,7 @@ use crate::{
         thread_storage::read_thread,
         types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
     },
+    logging::{silence_logger, undo_silence_logger},
     tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS},
 };
 
@@ -92,8 +93,13 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     debug!("Thread ID: {}, Input: {}", thread_id, input);
 
+    // Because the call to conversation_state writes a warning if the thread is not found, we'll temporarily silence the logging.
+    silence_logger();
+    let state = conversation_state(&thread_id);
+    undo_silence_logger();
+
     // To avoid one thread being streamed more than once at the same time, we'll check if the thread is already being streamed.
-    if let Some(state) = conversation_state(&thread_id, true) {
+    if let Some(state) = state {
         warn!("The User requested a stream for a thread that is already being streamed. Thread ID: {}", thread_id);
         info!("Conversation state: {:?}", state);
         // Just send an error to the client. A 409 Conflict is the most appropriate status code.
@@ -167,7 +173,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     } else {
         // Don't create a new thread, but continue the existing one.
         debug!("Expecting there to be a file for thread_id {}", thread_id);
-        let content = match read_thread(thread_id.as_str(), false) {
+        let content = match read_thread(thread_id.as_str()) {
             Ok(content) => content,
             Err(e) => {
                 // If we can't read the thread, we'll return a generic error.
@@ -379,7 +385,7 @@ async fn create_and_stream(
 
                     // First checks whether it should stop the stream. (This happens if the client sent a stop request.)
                     if matches!(
-                        conversation_state(&thread_id, false),
+                        conversation_state(&thread_id),
                         Some(ConversationState::Stopping)
                     ) {
                         debug!("Conversation with thread_id {} has been stopped, sending one last event and then aborting stream.", thread_id);

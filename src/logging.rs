@@ -1,10 +1,16 @@
+use std::sync::{Mutex, OnceLock};
+
 use flexi_logger::{
-    style, Age, Cleanup, Criterion, FileSpec, LevelFilter, Logger, LoggerHandle, Naming,
+    style, Age, Cleanup, Criterion, FileSpec, LevelFilter, LogSpecification, Logger, LoggerHandle,
+    Naming,
 };
 
 use crate::cla_parser; // imports the cla_parser module for the Args struct
 
-pub fn setup_logger(args: &cla_parser::Args) -> LoggerHandle {
+// Stores the logger in a global variable to keep it alive.
+static LOGGER: OnceLock<Mutex<LoggerHandle>> = OnceLock::new();
+
+pub fn setup_logger(args: &cla_parser::Args) {
     let loglevel = match args.verbose {
         0 => LevelFilter::Info,
         1 => LevelFilter::Debug,
@@ -30,10 +36,13 @@ pub fn setup_logger(args: &cla_parser::Args) -> LoggerHandle {
         .start()
         .expect("Error initializing the logger."); // And fail if we can't initialize the logger.
 
-    // to keep the logger alive, we need to return it to the main thread and keep it alive there
+    // to keep the logger alive, we'll store it in a global variable
+    if LOGGER.set(Mutex::new(logger)).is_err() {
+        eprintln!("Error storing the logger in the global variable, logging will not work.");
+        std::process::exit(1);
+    }
 
     tracing::info!("Logger initialized successfully.");
-    logger
 }
 
 /// Custom log message formatter: [timestamp]:[level] (module:line) message
@@ -52,4 +61,45 @@ fn format_log_message(
         record.line().unwrap_or(0), // line number can help with debugging
         record.args()
     ) // the actual message
+}
+
+/// Temporarily sets the log level to error.
+/// Useful for temporarily silencing the logger if a function is too verbose.
+pub fn silence_logger() {
+    match LOGGER.get() {
+        None => {
+            eprintln!("Logger not initialized.");
+            std::process::exit(1);
+        }
+        Some(logger) => {
+            let mut logger_guard = match logger.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    eprintln!("Error locking the logger: {:?}", e);
+                    std::process::exit(1);
+                }
+            };
+            logger_guard.push_temp_spec(LogSpecification::off());
+        }
+    }
+}
+
+/// Resets the log level to what it was before silence_logger was called.
+pub fn undo_silence_logger() {
+    match LOGGER.get() {
+        None => {
+            eprintln!("Logger not initialized.");
+            std::process::exit(1);
+        }
+        Some(logger) => {
+            let mut logger_guard = match logger.lock() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    eprintln!("Error locking the logger: {:?}", e);
+                    std::process::exit(1);
+                }
+            };
+            logger_guard.pop_temp_spec();
+        }
+    }
 }

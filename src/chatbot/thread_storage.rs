@@ -100,10 +100,9 @@ pub fn open_thread(thread_id: &str) -> Option<File> {
 
 /// Reads a file for a conversation and returns the content.
 /// Returns the Read content as a Vec of `StreamVariants` or the IO Error that occured.
-/// The supress_errors flag can be used to suppress errors, so that no error is logged if the file doesn't exist.
 /// # Errors
 /// Returns the IO Errors that occured while reading the file.
-pub fn read_thread(thread_id: &str, supress_errors: bool) -> Result<Conversation, Error> {
+pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
     trace!("Reading thread with id: {}", thread_id);
 
     let content = match OpenOptions::new()
@@ -130,12 +129,10 @@ pub fn read_thread(thread_id: &str, supress_errors: bool) -> Result<Conversation
         }
         Err(e) => {
             // If we can't open the file, we'll have to error out again, as the client expects the conversation to be there.
-            if !supress_errors {
-                error!(
-                    "Error opening conversation file, sending error to client: {:?}",
-                    e
-                );
-            }
+            error!(
+                "Error opening conversation file, sending error to client: {:?}",
+                e
+            );
             return Err(e);
         }
     };
