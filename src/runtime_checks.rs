@@ -87,6 +87,10 @@ pub async fn run_runtime_checks() {
         println!("The test data is not accessable. This means that the test data will not be available for the runtime.");
         warn!("The test data is not accessable. This means that the test data will not be available for the runtime.");
     }
+
+    // Check that the syntax error catching works.
+    check_syntax_error();
+    check_syntax_error_surround();
 }
 
 /// Checks that the code interpreter can calculate 2+2.
@@ -254,4 +258,40 @@ pub fn check_soft_crash() {
 /// Simple helper function that checks whether the given string is a path to a directory we can read from.
 pub fn check_directory(path: &str) -> bool {
     std::fs::read_dir(path).is_ok()
+}
+
+/// Checks that the code interpreter can catch syntax errors
+/// AND highlight the line where the error occured.
+fn check_syntax_error() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "dsa=na034ß94?ß"}"#.to_string()),
+        "test".to_string(),
+        None,
+    );
+    assert_eq!(output.len(), 1);
+    assert_eq!(
+        output,
+        vec![StreamVariant::CodeOutput(
+            "(An error occured; no traceback available)\nSyntaxError: invalid syntax (<string>, line 1)\n\nHint: the error occured on line 1\n1: > dsa=na034ß94?ß <\n".to_string(),
+            "test".to_string()
+        )]
+    );
+}
+
+/// Checks that the code interpreter can catch syntax error
+/// and highlight the lines AROUND the line where the error occured.
+fn check_syntax_error_surround() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "import np\ndsa=na034ß94?ß\nprint('Hello World!')"}"#.to_string()),
+        "test".to_string(),
+        None,
+    );
+    assert_eq!(output.len(), 1);
+    assert_eq!(
+        output,
+        vec![StreamVariant::CodeOutput(
+            "(An error occured; no traceback available)\nSyntaxError: invalid syntax (<string>, line 2)\n\nHint: the error occured on line 2\n1: import np\n2: > dsa=na034ß94?ß <\n3: print('Hello World!')".to_string(),
+            "test".to_string()
+        )]
+    );
 }

@@ -110,7 +110,7 @@ pub fn start_code_interpeter(
 
     let output = Command::new("./target/debug/freva-gpt2-backend")
         .arg("--code-interpreter")
-        .arg(code.code)
+        .arg(code.code.clone())
         .env("EVALUATION_SYSTEM_CONFIG_FILE", freva_config_path)
         .env("THREAD_ID", thread_id.unwrap_or_default())
         .output();
@@ -170,6 +170,8 @@ pub fn start_code_interpeter(
 
             // The LLM probably needs both the stdout and stderr, so we'll return both.
             let stdout_stderr = format!("{stdout_short}\n{stderr_short}").trim().to_string(); // Because if the stderr is empty, this would add an unnecessary newline.
+
+            let stdout_stderr = post_process_output(stdout_stderr, code.code.clone());
             if stdout_stderr.is_empty() {
                 info!("The code interpreter returned an empty output.");
             }
@@ -295,4 +297,101 @@ fn post_process(code: String) -> String {
     }
 
     code
+}
+
+/// Post-processes the output before returning it.
+/// Gives hints for SyntaxErrors.
+fn post_process_output(output: String, code: String) -> String {
+    let mut output = output;
+
+    // The line we are looking for is formatted like this: "SyntaxError: invalid syntax # or other error #  (<string>, line 1)"
+    // If we find it, we want to insert the line that caused the error.
+
+    // Loop over all lines. If one starts with "SyntaxError", we'll return it.
+    let mut synerr_line = None;
+    for line in output.lines() {
+        if line.starts_with("SyntaxError") {
+            synerr_line = Some(line);
+            break;
+        }
+    }
+    match synerr_line {
+        None => {
+            // If we don't find the line, we don't process the output anything and just return it as is.
+            return output;
+        }
+        Some(line) => {
+            // We have the line, now we have to extract the line number.
+            let line_number_str = line
+                .split("line ")
+                .nth(1)
+                .unwrap_or_default()
+                .split(")")
+                .next()
+                .unwrap_or_default();
+
+            // If the line number is empty, we can't do anything.
+            if line_number_str.is_empty() {
+                return output;
+            }
+
+            // We want it as a number, so we can use it to read from the code.
+            let line_number = match line_number_str.parse::<usize>() {
+                Ok(line_number) => line_number,
+                Err(e) => {
+                    warn!(
+                        "Error parsing the line number from the SyntaxError: {:?}",
+                        e
+                    );
+                    return output;
+                }
+            };
+
+            // Now we can construct the hint. It should look like this, if the syntax error occured at line 3:
+            // Hint: the error occured on line 3:
+            // 2: (previous line)
+            // 3: > (line that caused the error) <
+            // 4: (next line)
+
+            let mut hint = String::new();
+            hint.push_str("Hint: the error occured on line ");
+            hint.push_str(&line_number.to_string());
+            hint.push('\n');
+
+            // Now we have to extract the line that caused the error.
+            let prev_line = code
+                .lines()
+                .nth(line_number.wrapping_sub(2)) // wrapping because usize can't be negative.
+                .unwrap_or_default(); // This will then simply be an empty string.
+            let error_line = code
+                .lines()
+                .nth(line_number.wrapping_sub(1))
+                .unwrap_or_default();
+            let next_line = code.lines().nth(line_number).unwrap_or_default();
+
+            if line_number != 1 {
+                hint.push_str(&(line_number - 1).to_string());
+                hint.push_str(": ");
+                hint.push_str(prev_line);
+                hint.push('\n');
+            }
+
+            hint.push_str(&(line_number).to_string());
+            hint.push_str(": > ");
+            hint.push_str(error_line);
+            hint.push_str(" <");
+            hint.push('\n');
+
+            if line_number != code.lines().count() {
+                hint.push_str(&(line_number + 1).to_string());
+                hint.push_str(": ");
+                hint.push_str(next_line);
+            }
+
+            output.push_str("\n\n");
+            output.push_str(&hint);
+        }
+    }
+
+    output
 }
