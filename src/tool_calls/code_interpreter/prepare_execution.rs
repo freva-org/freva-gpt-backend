@@ -274,6 +274,8 @@ fn sanitize_imports(prev_imports: Vec<String>, code: &str) -> Vec<String> {
         }
     }
 
+    // This newline prevents the imports from accidentally being on the same line
+    imports.push("\n".to_string());
     imports
 }
 
@@ -289,6 +291,8 @@ fn post_process(code: String) -> String {
         ("plt.", "import matplotlib.pyplot as plt\n"),
         ("xr.", "import xarray as xr\n"),
         ("pd.", "import pandas as pd\n"),
+        ("ccrs.", "import cartopy.crs as ccrs\n"),
+        ("cartopy.", "import cartopy\n"),
     ];
 
     for (detect, add) in libraries.iter() {
