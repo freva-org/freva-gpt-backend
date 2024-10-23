@@ -83,6 +83,8 @@ pub fn conversation_state(thread_id: &str) -> Option<ConversationState> {
         Ok(mut guard) => {
             // For debugging, log the length of the active conversations.
             trace!("Number of active conversations: {}", guard.len());
+            //DEBUG
+            println!("Number of active conversations: {}", guard.len());
             // If we can lock the mutex, we can check if the value is already in use.
             if let Some(conversation) = guard.iter_mut().find(|x| x.id == thread_id) {
                 // If we find the conversation, we'll check if it's stopped.
