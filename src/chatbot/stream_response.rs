@@ -424,9 +424,14 @@ async fn create_and_stream(
                             //DEBUG
                             println!("Starting tool call reciever loop.");
 
-                            let state = inner_reciever.try_recv();
-                            let output = match state {
-                                Err(mpsc::error::TryRecvError::Empty) => {
+                            // let state = inner_reciever.try_recv();
+                            let state = tokio::time::timeout(
+                                std::time::Duration::from_secs(5),
+                                inner_reciever.recv(),
+                            )
+                            .await;
+                            match state {
+                                Err(_) => {
                                     trace!("Reciever has no data yet, sending timeout.");
                                     //DEBUG
                                     println!("Reciever has no data yet, sending timeout.");
@@ -439,10 +444,10 @@ async fn create_and_stream(
                                         freva_config_path_clone.clone(),
                                     );
                                     // Actually sleep three seconds
-                                    std::thread::sleep(std::time::Duration::from_secs(3)); // Works
-                                                                                           // tokio::time::sleep(std::time::Duration::from_secs(3)).await; // Doesn't
-                                                                                           // tokio::time::delay_for(std::time::Duration::from_secs(3)).await; // Doesn't exist anymore
-                                                                                           // If the timeout expires, we'll send a heartbeat to the client.
+                                    // std::thread::sleep(std::time::Duration::from_secs(3)); // Works
+                                    // tokio::time::sleep(std::time::Duration::from_secs(3)).await; // Doesn't
+                                    // tokio::time::delay_for(std::time::Duration::from_secs(3)).await; // Doesn't exist anymore
+                                    // If the timeout expires, we'll send a heartbeat to the client.
 
                                     //DEBUG
                                     println!("Sent heartbeat: {:?}", heartbeat);
@@ -463,63 +468,63 @@ async fn create_and_stream(
                                         ),
                                     ));
                                 }
-                                Err(mpsc::error::TryRecvError::Disconnected) => None,
-                                Ok(output) => Some(output),
-                            };
-                            trace!("Reciever sent result!");
+                                Ok(output) => {
+                                    trace!("Reciever sent result!");
 
-                            // The output might fail if the tool call was not successful.
-                            let mut output = match output {
-                                Some(output) => output,
-                                None => {
-                                    error!("Error recieving tool call output, the reciever was closed.");
-                                    vec![StreamVariant::CodeError(
-                                        "Error recieving tool call output.".to_string(),
-                                    )]
+                                    // The output might fail if the tool call was not successful.
+                                    let mut output = match output {
+                                        Some(output) => output,
+                                        None => {
+                                            error!("Error recieving tool call output, the reciever was closed.");
+                                            vec![StreamVariant::CodeError(
+                                                "Error recieving tool call output.".to_string(),
+                                            )]
+                                        }
+                                    };
+
+                                    // Before returning the bytes, we need to restart the stream.
+                                    restart_stream(
+                                        &thread_id,
+                                        output.clone(),
+                                        chatbot,
+                                        &mut open_ai_stream,
+                                    )
+                                    .await;
+
+                                    // It also needs to be added to the conversation.
+                                    add_to_conversation(
+                                        &thread_id,
+                                        output.clone(),
+                                        freva_config_path_clone.clone(),
+                                    );
+
+                                    // The output can contain more than one variant, so we'll add them to the queue.
+                                    let first = output.pop().unwrap_or_else(|| {
+                                        StreamVariant::ServerError(
+                                            "No variants found in tool call output.".to_string(),
+                                        )
+                                    });
+                                    variant_queue.extend(output.into_iter());
+
+                                    let bytes = variant_to_bytes(first);
+
+                                    return Some((
+                                        Ok(bytes),
+                                        (
+                                            open_ai_stream,
+                                            thread_id,
+                                            should_stop,
+                                            false,
+                                            variant_queue,
+                                            tool_name,
+                                            tool_arguments,
+                                            tool_id,
+                                            llama_tool_call_content,
+                                            None,
+                                        ),
+                                    ));
                                 }
-                            };
-
-                            // Before returning the bytes, we need to restart the stream.
-                            restart_stream(
-                                &thread_id,
-                                output.clone(),
-                                chatbot,
-                                &mut open_ai_stream,
-                            )
-                            .await;
-
-                            // It also needs to be added to the conversation.
-                            add_to_conversation(
-                                &thread_id,
-                                output.clone(),
-                                freva_config_path_clone.clone(),
-                            );
-
-                            // The output can contain more than one variant, so we'll add them to the queue.
-                            let first = output.pop().unwrap_or_else(|| {
-                                StreamVariant::ServerError(
-                                    "No variants found in tool call output.".to_string(),
-                                )
-                            });
-                            variant_queue.extend(output.into_iter());
-
-                            let bytes = variant_to_bytes(first);
-
-                            return Some((
-                                Ok(bytes),
-                                (
-                                    open_ai_stream,
-                                    thread_id,
-                                    should_stop,
-                                    false,
-                                    variant_queue,
-                                    tool_name,
-                                    tool_arguments,
-                                    tool_id,
-                                    llama_tool_call_content,
-                                    None,
-                                ),
-                            ));
+                            }
                         }
 
                         // gets the response from the OpenAI Stream
