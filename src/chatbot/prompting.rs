@@ -567,7 +567,183 @@ plt.show()"#),
 
         assistant_message!("The map above illustrates the global wind speed for June 1942. The location with the highest wind speed is marked with a red X. The colorbar indicates the wind speed in meters per second (m/s), with cooler colors representing lower wind speeds and warmer colors representing higher wind speeds.
 
-If you have any further questions or need additional analyses, feel free to ask!")
+If you have any further questions or need additional analyses, feel free to ask!"),
+
+        // This example was technically already used, but this uses freva really well, instead of the test data.
+
+        ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
+            name: Some("user".to_string()),
+            content: async_openai::types::ChatCompletionRequestUserMessageContent::Text("Make a zonal mean plot of precipitation for the average between 1961 and 1990 as well as 1991 and 2020".to_string()),
+        }),
+
+        assistant_message!("To create a zonal mean plot of precipitation for the specified periods, we'll follow these steps:
+
+1. **Search for the Data**: Use the `freva.databrowser` to find precipitation data relevant to the periods 1961-1990 and 1991-2020.
+2. **Load the Data**: Load the data using `xarray` for both periods.
+3. **Calculate Averages**: Compute the average precipitation for each period.
+4. **Compute Zonal Means**: Calculate the zonal mean (average over longitudes) for both periods.
+5. **Plot the Data**: Visualize the zonal mean precipitation for both periods on a single plot.
+
+Let's start by searching for and loading the precipitation data.",
+        "Some_id13",
+        r#"import freva
+import xarray as xr
+
+# Search for precipitation data for the specified periods
+project = 'reanalysis'
+experiment = 'era5'
+variable = 'pr'
+time_frequency = 'mon'
+
+# Use the databrowser to find the data
+precip_data_files_1961_1990 = freva.databrowser(project=project, experiment=experiment, variable=variable, time_frequency=time_frequency, time='1961-01-01 to 1990-12-31')
+precip_data_files_1991_2020 = freva.databrowser(project=project, experiment=experiment, variable=variable, time_frequency=time_frequency, time='1991-01-01 to 2020-12-31')
+
+# Load the data using xarray
+precip_data_1961_1990 = xr.open_mfdataset(precip_data_files_1961_1990)
+precip_data_1991_2020 = xr.open_mfdataset(precip_data_files_1991_2020)
+
+precip_data_1961_1990, precip_data_1991_2020"#),
+
+        ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+            content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("(<xarray.Dataset> Size: 1GB
+Dimensions:   (time: 360, lon: 1280, bnds: 2, lat: 640)
+Coordinates:
+  * time      (time) datetime64[ns] 3kB 1961-01-01 1961-02-01 ... 1990-12-01
+  * lon       (lon) float64 10kB 0.0 0.2812 0.5625 0.8438 ... 359.2 359.4 359.7
+  * lat       (lat) float64 5kB -89.78 -89.51 -89.23 ... 89.23 89.51 89.78".to_string()), // shortened for brevity
+            tool_call_id: "Some_id13".to_string(),
+        }),
+
+        assistant_message!("We have successfully loaded the precipitation data for the periods 1961-1990 and 1991-2020. Each dataset contains monthly precipitation values with dimensions for time, latitude, and longitude.
+
+Next, we'll calculate the average precipitation for each period and compute the zonal means. Let's proceed with these calculations.",
+        "Some_id14",
+        "# Calculate the average precipitation for each period
+avg_precip_1961_1990 = precip_data_1961_1990['pr'].mean(dim='time')
+avg_precip_1991_2020 = precip_data_1991_2020['pr'].mean(dim='time')
+
+# Compute the zonal mean (average over longitudes) for both periods
+zonal_mean_1961_1990 = avg_precip_1961_1990.mean(dim='lon')
+zonal_mean_1991_2020 = avg_precip_1991_2020.mean(dim='lon')
+
+zonal_mean_1961_1990, zonal_mean_1991_2020"),
+
+    ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+        content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("(<xarray.DataArray 'pr' (lat: 640)> Size: 3kB
+dask.array<mean_agg-aggregate, shape=(640,), dtype=float32, chunksize=(640,), chunktype=numpy.ndarray>
+Coordinates:
+  * lat      (lat) float64 5kB -89.78 -89.51 -89.23 -88.95 ... 89.23 89.51 89.78, <xarray.DataArray 'pr' (lat: 640)> Size: 3kB
+dask.array<mean_agg-aggregate, shape=(640,), dtype=float32, chunksize=(640,), chunktype=numpy.ndarray>
+Coordinates:
+  * lat      (lat) float64 5kB -89.78 -89.51 -89.23 -88.95 ... 89.23 89.51 89.78)".to_string()),
+        tool_call_id: "Some_id14".to_string(),
+    }),
+
+    assistant_message!("We have calculated the zonal mean precipitation for both periods, 1961-1990 and 1991-2020. Each zonal mean is averaged over longitudes and provides precipitation values across different latitudes.
+
+Now, let's visualize these zonal means in a plot.",
+    "Some_id15",
+    r#"import matplotlib.pyplot as plt
+
+# Plot the zonal mean precipitation for both periods
+plt.figure(figsize=(10, 6))
+plt.plot(zonal_mean_1961_1990['lat'], zonal_mean_1961_1990, label='1961-1990', color='blue')
+plt.plot(zonal_mean_1991_2020['lat'], zonal_mean_1991_2020, label='1991-2020', color='orange')
+plt.xlabel('Latitude')
+plt.ylabel('Zonal Mean Precipitation (mm/day)')
+plt.title('Zonal Mean Precipitation for 1961-1990 and 1991-2020')
+plt.legend()
+plt.grid()
+plt.show()"#.to_string()),
+
+    ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+        content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("An image was successfully generated and is being shown to the user.".to_string()),
+        tool_call_id: "Some_id15".to_string(),
+    }),
+
+    assistant_message!("The plot above displays the zonal mean precipitation for the periods 1961-1990 and 1991-2020. The blue line represents the zonal mean for 1961-1990, while the orange line represents the zonal mean for 1991-2020. The x-axis shows the latitude, and the y-axis shows the zonal mean precipitation in millimeters per day (mm/day).
+
+If you have any further questions or need additional analyses, feel free to ask!"),
+
+    ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
+        name: Some("user".to_string()),
+        content: async_openai::types::ChatCompletionRequestUserMessageContent::Text("Make an annual mean temperature global map plot for the year 2023.".to_string()),
+    }),
+
+    assistant_message!("To create an annual mean temperature global map plot for the year 2023, we'll follow these steps:
+
+1. **Access the Data**: Use the `freva.databrowser` to search for temperature data (variable `tas`) for the year 2023.
+2. **Load the Data**: Convert the result to a list and load it using `xarray`.
+3. **Calculate the Annual Mean**: Compute the mean temperature for the entire year.
+4. **Visualize the Data**: Create a global map plot of the annual mean temperature.
+
+Let's start by accessing and loading the data.",
+    "Some_id16",
+    r#"import freva
+import xarray as xr
+
+# Access the temperature data for the year 2023 using the databrowser
+files = freva.databrowser(project='reanalysis', experiment='era5', variable='tas', time_frequency='mon', time='2023-01-01to2023-12-31')
+
+# Convert the result to a list and load the data using xarray
+files_list = list(files)
+dset = xr.open_mfdataset(files_list)
+
+# Display the dataset to understand its structure and variables
+dset"#),
+
+    ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+        content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("<xarray.Dataset> Size: 39MB
+Dimensions:   (time: 12, lon: 1280, bnds: 2, lat: 640)
+Coordinates:
+  * time      (time) datetime64[ns] 96B 2023-01-01 2023-02-01 ... 2023-12-01
+  * lon       (lon) float64 10kB 0.0 0.2812 0.5625 0.8438 ... 359.2 359.4 359.7
+  * lat       (lat) float64 5kB -89.78 -89.51 -89.23 ... 89.23 89.51 89.78".to_string()), // shortened for brevity
+        tool_call_id: "Some_id16".to_string(),
+    }),
+
+    assistant_message!("The dataset contains temperature data (`tas`) for the year 2023 with the following structure:
+
+- **Dimensions**:
+  - **Time**: 12 monthly time steps from January to December 2023.
+  - **Longitude**: 1280 points ranging from 0 to 360 degrees.
+  - **Latitude**: 640 points ranging from approximately -89.78 to 89.78 degrees.
+
+Next, let's calculate the annual mean temperature for 2023 and create a global map plot.",
+    "Some_id17",
+    r#"import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+
+# Calculate the annual mean temperature for 2023
+annual_mean_tas_2023 = dset['tas'].mean(dim='time')
+
+# Create a global map plot
+plt.figure(figsize=(12, 6))
+ax = plt.axes(projection=ccrs.PlateCarree())
+ax.set_global()
+
+# Plot the annual mean temperature
+temperature_plot = ax.contourf(dset['lon'], dset['lat'], annual_mean_tas_2023,
+                               levels=np.linspace(annual_mean_tas_2023.min(), annual_mean_tas_2023.max(), 100), cmap='coolwarm', extend='both')
+plt.colorbar(temperature_plot, label='Temperature (K)')
+
+# Add coastlines and borders
+ax.add_feature(cfeature.COASTLINE)
+ax.add_feature(cfeature.BORDERS)
+
+plt.title('Annual Mean Temperature for 2023')
+plt.show()"#.to_string()),
+
+    ChatCompletionRequestMessage::Tool(ChatCompletionRequestToolMessage {
+        content: async_openai::types::ChatCompletionRequestToolMessageContent::Text("An image was successfully generated and is being shown to the user.".to_string()),
+        tool_call_id: "Some_id17".to_string(),
+    }),
+
+    assistant_message!("The map above illustrates the annual mean temperature for the year 2023. The colorbar represents the temperature in Kelvin (K), with cooler colors indicating lower temperatures and warmer colors indicating higher temperatures. The map includes coastlines and country borders for reference.
+
+If you have any further questions or need additional analyses, feel free to ask!"),
 
         ]
 });
