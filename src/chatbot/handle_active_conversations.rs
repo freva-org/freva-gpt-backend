@@ -60,12 +60,14 @@ pub fn add_to_conversation(
             if let Some(conversation) = guard.iter_mut().find(|x| x.id == thread_id) {
                 // If we find the conversation, we'll add the variant to it.
                 conversation.conversation.append(&mut variant.clone());
+                conversation.last_activity = std::time::Instant::now(); // ALso update the last activity.
             } else {
                 // If we don't find the conversation, we'll create a new one.
                 guard.push(ActiveConversation {
                     id: thread_id.to_string(),
                     conversation: variant,
                     state: ConversationState::Streaming(freva_config_path),
+                    last_activity: std::time::Instant::now(),
                 });
             }
         }
@@ -79,27 +81,42 @@ pub fn add_to_conversation(
 pub fn conversation_state(thread_id: &str) -> Option<ConversationState> {
     trace!("Checking the state of conversation with id: {}", thread_id);
 
-    match ACTIVE_CONVERSATIONS.lock() {
+    let mut to_save = None;
+
+    let return_val = match ACTIVE_CONVERSATIONS.lock() {
         Ok(mut guard) => {
             // For debugging, log the length of the active conversations.
             trace!("Number of active conversations: {}", guard.len());
             //DEBUG
             // println!("Number of active conversations: {}", guard.len());
             // If we can lock the mutex, we can check if the value is already in use.
-            if let Some(conversation) = guard.iter_mut().find(|x| x.id == thread_id) {
-                // If we find the conversation, we'll check if it's stopped.
-                Some(conversation.state.clone())
-            } else {
-                // If the conversation is not found, we'll return false.
-                warn!("Conversation with id: {} not found.", thread_id);
-                None
-            }
+            let return_val =
+                if let Some(conversation) = guard.iter_mut().find(|x| x.id == thread_id) {
+                    // If we find the conversation, we'll check if it's stopped.
+                    Some(conversation.state.clone())
+                } else {
+                    // If the conversation is not found, we'll return false.
+                    warn!("Conversation with id: {} not found.", thread_id);
+                    None
+                };
+            // Before returning, we'll clean up stale conversations.
+            to_save = Some(cleanup_conversations(&mut guard));
+            return_val
         }
         Err(e) => {
             error!("Error locking the mutex: {:?}", e);
             None
         }
+    };
+
+    // In order to not save the conversations while the mutex is locked, we'll save it here.
+    if let Some(conversations) = to_save {
+        for conversation in conversations {
+            save_conversation(conversation);
+        }
     }
+
+    return_val
 }
 
 /// Ends the conversation with the given ID, setting the state to Ended.
@@ -140,20 +157,19 @@ pub fn save_and_remove_conversation(thread_id: &str) {
     };
 
     if let Some(conversation) = conversation {
-        // If we found the conversation, we'll write it to disk.
-        trace!(
-            "Removed conversation with thread_id: {}: {:?}",
-            thread_id,
-            conversation
-        );
-        debug!("Writing conversation to disk.");
-
-        // Before we'll write it to disk, we'll fold all the consecutive Assistant messages into one.
-
-        let new_conversation = concat_variants(conversation.conversation);
-
-        crate::chatbot::thread_storage::append_thread(thread_id, new_conversation);
+        save_conversation(conversation);
     }
+}
+
+/// Helper function to save a conversation to disk.
+fn save_conversation(conversation: ActiveConversation) {
+    debug!("Writing conversation to disk.");
+
+    // Before we'll write it to disk, we'll fold all the consecutive Assistant messages into one.
+
+    let new_conversation = concat_variants(conversation.conversation);
+
+    crate::chatbot::thread_storage::append_thread(&conversation.id, new_conversation);
 }
 
 /// The assistant and code messages are streamed, so the variants that come from OpenAI contain only one or a few tokens of the message.
@@ -232,4 +248,37 @@ pub fn get_conversation(thread_id: &str) -> Option<Vec<StreamVariant>> {
 
     // Because the conversation is stored in the global variable, it might not have concatinated the assistant and code messages yet.
     found_conversation.map(concat_variants) // If the conversation is found, we'll concatenate the messages, else we'll return None.
+}
+
+static MAX_INACTIVE_TIME: std::time::Duration = std::time::Duration::from_secs(3 * 60); // 3 minutes
+
+/// Cleans up all stae conversations to avoid the ACTIVE_CONVERSATIONS vector from growing indefinitely.
+/// The vector grows because when a client loses connection, the stream ends shortly after, so the cleanup doesn't happen.
+fn cleanup_conversations(guard: &mut Vec<ActiveConversation>) -> Vec<ActiveConversation> {
+    // Store the conversations that need to be saved, because we shouldn't save them while the mutex is locked.
+    let mut to_save = Vec::new();
+    guard.retain(|x| {
+        if x.last_activity.elapsed() > MAX_INACTIVE_TIME {
+            debug!(
+                "Removing conversation with id: {} because it's inactive.",
+                x.id
+            );
+            trace!("Conversation: {:?}", x);
+            // TODO, FIXME: this currently doesn't clean up conversations that used the code_interpreter, because the heartbeat is currently not working and the
+            // This will be fixed once the heartbeat is working, but this is a temporary fix.
+            if x.conversation
+                .last()
+                .map_or(false, |x| matches!(x, StreamVariant::ServerHint(_)))
+            {
+                trace!("Conversation used the code_interpreter, not removing.");
+                return true;
+            }
+            // If the conversation is inactive, we'll save it to disk and remove it from the active conversations.
+            to_save.push(x.clone());
+            false
+        } else {
+            true
+        }
+    });
+    to_save
 }

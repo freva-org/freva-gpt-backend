@@ -26,6 +26,8 @@ pub struct ActiveConversation {
     pub state: ConversationState,
 
     pub conversation: Conversation,
+
+    pub last_activity: std::time::Instant, // The last time the conversation was active. If the conversation is inactive for too long, it will be ended.
 }
 
 ///
