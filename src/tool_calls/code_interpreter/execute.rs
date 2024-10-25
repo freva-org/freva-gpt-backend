@@ -294,6 +294,7 @@ with open('{pickleable_path}', 'rb') as f:
 
 /// Helper function to save the locals to a pickle file.
 fn save_to_pickle_file(py: Python, locals: Bound<PyDict>, thread_id: String) {
+    trace!("Saving the locals to a pickle file.");
     // First we filter the locals to only include the ones that are actually serializable.
     // We'll execute some python code to do that.
     let code = format!(

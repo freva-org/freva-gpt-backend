@@ -196,6 +196,13 @@ struct CodeInterpreterArguments {
 
 /// The function that is called when the program is started and the code_interpreter argument is passed.
 pub fn run_code_interpeter(arguments: String) {
+    // We'll first initialize the logger.
+    let logger = setup_logging(); // can't drop the logger, because we need it to be alive for the whole program.
+    debug!(
+        "Starting the code interpreter with the following arguments: {}",
+        arguments
+    );
+
     // Before executing the code, we'll want to retrieve the Thread_id environment variable.
     // This is needed for the code interpreter to save the pickle file.
 
@@ -218,6 +225,10 @@ pub fn run_code_interpeter(arguments: String) {
     };
 
     print!("{}", output.trim()); // No trailing newline.
+
+    if let Some(logger) = logger {
+        logger.shutdown()
+    } // We have to shut down the logger manually
 
     // Because this is a seperate process, we have to exit it manually.
     std::process::exit(0);
@@ -403,4 +414,19 @@ fn post_process_output(output: String, code: String) -> String {
     }
 
     output
+}
+
+/// Helper function that initializes logging to the logging file.
+fn setup_logging() -> Option<flexi_logger::LoggerHandle> {
+    let result = flexi_logger::Logger::with(flexi_logger::LevelFilter::Trace)
+        .log_to_file(
+            flexi_logger::FileSpec::default()
+                .basename("logging_from_tools")
+                .suppress_timestamp(), // Don't use timestamps, only one file is created.
+        )
+        .append() // Append to the file, don't overwrite it.
+        .format(crate::logging::format_log_message)
+        .start();
+    // Since we have nothing to print if this fails, we'll just ignore the error.
+    result.ok()
 }

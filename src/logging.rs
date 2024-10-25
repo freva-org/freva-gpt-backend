@@ -46,7 +46,7 @@ pub fn setup_logger(args: &cla_parser::Args) {
 }
 
 /// Custom log message formatter: [timestamp]:[level] (module:line) message
-fn format_log_message(
+pub(crate) fn format_log_message(
     write: &mut dyn std::io::Write,
     now: &mut flexi_logger::DeferredNow,
     record: &flexi_logger::Record,

@@ -4,6 +4,7 @@ use crate::{
     auth::AUTH_KEY,
     chatbot::{self, stream_response::STREAM_STOP_CONTENT, types::StreamVariant},
     static_serve,
+    tool_calls::route_call::print_and_clear_tool_logs,
 };
 
 /// Check that the setup is correct for the runtime to run:
@@ -91,6 +92,9 @@ pub async fn run_runtime_checks() {
     // Check that the syntax error catching works.
     check_syntax_error();
     check_syntax_error_surround();
+
+    // To make sure not to confuse the backend, clear the tool logger.
+    print_and_clear_tool_logs();
 }
 
 /// Checks that the code interpreter can calculate 2+2.
