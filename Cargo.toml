@@ -1,6 +1,6 @@
 [package]
 name = "freva-gpt2-backend"
-version = "1.8.5"
+version = "1.8.6"
 edition = "2021"
 authors = ["Sebastian Willmann"]
 repository = "https://gitlab.dkrz.de/k203176/freva-gpt2-backend"
@@ -35,6 +35,7 @@ reqwest = { version = "0.12.8", features = [
 tokio = { version = "1.41.0", features = ["time"] }
 sysinfo = "0.32.0"
 fs2 = "0.4.3"
+async-process = "2.3.0"
 
 [lints.rust]
 unsafe_code = "forbid"

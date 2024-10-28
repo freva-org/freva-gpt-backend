@@ -27,7 +27,7 @@ pub async fn route_call(
         // The functionality lies in the seperate module.
 
         let result = sender
-            .send(start_code_interpeter(arguments, id, Some(thread_id)))
+            .send(start_code_interpeter(arguments, id, Some(thread_id)).await)
             .await;
 
         // Before sending the result, write out the content of tool logger.

@@ -56,20 +56,20 @@ pub async fn run_runtime_checks() {
     // Note that those checks need to be runtime, not compiletime, as the code interpreter calles the binary itself.
     print!("Running runtime checks including library checks for the code interpreter... ");
     info!("Running runtime checks including library checks for the code interpreter.");
-    check_assignments();
-    check_two_plus_two();
-    check_print();
-    check_print_noflush();
-    check_print_two();
-    check_imports();
+    check_assignments().await;
+    check_two_plus_two().await;
+    check_print().await;
+    check_print_noflush().await;
+    check_print_two().await;
+    check_imports().await;
     println!("Success!");
     info!("Runtime checks for the code interpreter were successful and all required libraries are available.");
 
     // Also check that the code interpreter can handle hard and soft crashes.
     print!("Checking whether the code interpreter can handle crashes... ");
     info!("Checking whether the code interpreter can handle crashes.");
-    check_hard_crash();
-    check_soft_crash();
+    check_hard_crash().await;
+    check_soft_crash().await;
     println!("Success!");
     info!("The code interpreter can handle crashes.");
 
@@ -90,8 +90,8 @@ pub async fn run_runtime_checks() {
     }
 
     // Check that the syntax error catching works.
-    check_syntax_error();
-    check_syntax_error_surround();
+    check_syntax_error().await;
+    check_syntax_error_surround().await;
 
     // To make sure not to confuse the backend, clear the tool logger.
     print_and_clear_tool_logs();
@@ -99,12 +99,13 @@ pub async fn run_runtime_checks() {
 
 /// Checks that the code interpreter can calculate 2+2.
 /// It's a very basic check to make sure that the code interpreter is working.
-fn check_two_plus_two() {
+async fn check_two_plus_two() {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(r#"{"code": "2+2"}"#.to_string()),
         "test".to_string(),
         None,
-    );
+    )
+    .await;
     assert_eq!(output.len(), 1);
     assert_eq!(
         output,
@@ -116,12 +117,13 @@ fn check_two_plus_two() {
 }
 
 /// Checks that the code interpreter can handle printing.
-fn check_print() {
+async fn check_print() {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(r#"{"code": "print('Hello World!', flush=True)"}"#.to_string()),
         "test".to_string(),
         None,
-    );
+    )
+    .await;
     assert_eq!(output.len(), 1);
     assert_eq!(
         output,
@@ -133,12 +135,13 @@ fn check_print() {
 }
 
 /// We also make sure that the code interpreter doesn't have to flush the stdout.
-fn check_print_noflush() {
+async fn check_print_noflush() {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(r#"{"code": "print('Hello World!')"}"#.to_string()),
         "test".to_string(),
         None,
-    );
+    )
+    .await;
     assert_eq!(output.len(), 1);
     assert_eq!(
         output,
@@ -151,12 +154,13 @@ fn check_print_noflush() {
 
 /// There was a weird error, this is to check that two print statements are correctly handled...
 /// I don't exactly know why this error occurs, but it's a good test.
-fn check_print_two() {
+async fn check_print_two() {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(r#"{"code": "print('Hello')\nprint('World!')"}"#.to_string()),
         "test".to_string(),
         None,
-    );
+    )
+    .await;
     assert_eq!(output.len(), 1);
     assert_eq!(
         output,
@@ -168,12 +172,13 @@ fn check_print_two() {
 }
 
 /// Check whether simple assignments work.
-fn check_assignments() {
+async fn check_assignments() {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(r#"{"code": "a = 2"}"#.to_string()),
         "test".to_string(),
         None,
-    );
+    )
+    .await;
     // The output should be empty, as we're not printing anything.
     assert_eq!(output.len(), 1);
     assert_eq!(
@@ -186,7 +191,7 @@ fn check_assignments() {
 }
 
 /// Checks that all wanted libraries can be imported.
-fn check_imports() {
+async fn check_imports() {
     let libraries = [
         "xarray",
         "tzdata",
@@ -211,12 +216,12 @@ fn check_imports() {
         "cartopy", // lowercase
     ];
     for library in &libraries {
-        check_single_import(library);
+        check_single_import(library).await;
     }
 }
 
 /// Checks that the code interpreter can import one specific library.
-fn check_single_import(library: &str) {
+async fn check_single_import(library: &str) {
     let formatted_import_code =
         format!(r#"{{"code": "import {library};print(\"success!\", flush=True)"}}"#);
     debug!(formatted_import_code);
@@ -224,7 +229,8 @@ fn check_single_import(library: &str) {
         Some(formatted_import_code),
         "test".to_string(),
         None,
-    );
+    )
+    .await;
     assert!(output.len() == 1);
     assert_eq!(
         output[0],
@@ -233,22 +239,24 @@ fn check_single_import(library: &str) {
 }
 
 /// Checks that the code interpreter can run code that crashes python hard with crashing itself.
-pub fn check_hard_crash() {
+pub async fn check_hard_crash() {
     let _ = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(r#"{"code": "exit()"}"#.to_string()),
         "test".to_string(),
         None,
-    );
+    )
+    .await;
     // If we reach this point, the code interpreter did not crash.
 }
 
 /// Checks that the code interpreter can handle simple problems like division by zero.
-pub fn check_soft_crash() {
+pub async fn check_soft_crash() {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(r#"{"code": "1/0"}"#.to_string()),
         "test".to_string(),
         None,
-    );
+    )
+    .await;
     assert_eq!(output.len(), 1);
     assert_eq!(
         output,
@@ -266,12 +274,13 @@ pub fn check_directory(path: &str) -> bool {
 
 /// Checks that the code interpreter can catch syntax errors
 /// AND highlight the line where the error occured.
-fn check_syntax_error() {
+async fn check_syntax_error() {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(r#"{"code": "dsa=na034ß94?ß"}"#.to_string()),
         "test".to_string(),
         None,
-    );
+    )
+    .await;
     assert_eq!(output.len(), 1);
     assert_eq!(
         output,
@@ -284,12 +293,13 @@ fn check_syntax_error() {
 
 /// Checks that the code interpreter can catch syntax error
 /// and highlight the lines AROUND the line where the error occured.
-fn check_syntax_error_surround() {
+async fn check_syntax_error_surround() {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
         Some(r#"{"code": "import np\ndsa=na034ß94?ß\nprint('Hello World!')"}"#.to_string()),
         "test".to_string(),
         None,
-    );
+    )
+    .await;
     assert_eq!(output.len(), 1);
     assert_eq!(
         output,

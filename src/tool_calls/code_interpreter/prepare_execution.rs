@@ -1,4 +1,4 @@
-use std::process::Command;
+use async_process::Command;
 
 use tracing::{debug, info, trace, warn};
 
@@ -19,7 +19,7 @@ use crate::{
 /// Takes in the arguments that were passed to the tool call as well as the id of the tool call (for the output).
 /// Returns the output of the code interpreter as a Vector of StreamVariants.
 /// Requires the thread_id to be set when used by the frontend. It is used to get the freva_config_path.
-pub fn start_code_interpeter(
+pub async fn start_code_interpeter(
     arguments: Option<String>,
     id: String,
     thread_id: Option<String>,
@@ -114,7 +114,8 @@ pub fn start_code_interpeter(
         .arg(code.code.clone())
         .env("EVALUATION_SYSTEM_CONFIG_FILE", freva_config_path)
         .env("THREAD_ID", thread_id.unwrap_or_default())
-        .output();
+        .output()
+        .await; // It's a future now, so we have to await it.
 
     // for now, we'll just return the output as a string. The code interpreter will later be able to return more complex data.
     match output {
