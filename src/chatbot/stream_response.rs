@@ -419,7 +419,7 @@ async fn create_and_stream(
                         // In the waiting, we'll return a heartbeat to the client.
                         if let Some((mut inner_reciever, handle)) = reciever {
                             // tokio::select! didn't seem to work when called on the reciever and sleep,
-                            // So we'll sacrifice some efficiency and only check the reciever every 3 seconds.
+                            // So we'll sacrifice some efficiency and only check the reciever every 5 seconds.
 
                             //DEBUG
                             // println!("Starting tool call reciever loop.");
@@ -433,7 +433,7 @@ async fn create_and_stream(
                             // note: the tokio timeout, select! as well as all async functions son't seem to work correctly.
                             // I'll use std::thread::sleep for now, but it's not ideal.
                             // I didn't yet manage to reproduce the bug in a smaller example, but I'll try again later.
-                            // For now, we'll just poll the reciever every 3 seconds.
+                            // For now, we'll just poll the reciever every 5 seconds.
                             let output = match state {
                                 Err(mpsc::error::TryRecvError::Empty) => {
                                     trace!("Reciever has no data yet, sending timeout.");
@@ -448,9 +448,9 @@ async fn create_and_stream(
                                         freva_config_path_clone.clone(),
                                     );
                                     // Actually sleep three seconds
-                                    // std::thread::sleep(std::time::Duration::from_secs(3)); // Works
-                                    tokio::time::sleep(std::time::Duration::from_secs(3)).await; // Doesn't
-                                                                                                 // tokio::time::delay_for(std::time::Duration::from_secs(3)).await; // Doesn't exist anymore
+                                    // std::thread::sleep(std::time::Duration::from_secs(5)); // Works
+                                    tokio::time::sleep(std::time::Duration::from_secs(5)).await; // Doesn't
+                                                                                                 // tokio::time::delay_for(std::time::Duration::from_secs(5)).await; // Doesn't exist anymore
                                                                                                  // If the timeout expires, we'll send a heartbeat to the client.
 
                                     //DEBUG
