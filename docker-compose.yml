@@ -29,7 +29,7 @@ services:
     container_name: ollama-instance
     hostname: ollama-instance
     volumes:
-      - /home/b/b380001/ollama-podman/.ollama:/root/.ollama
+      - /container/da/freva-gpt-ollama-LLMs/.ollama:/root/.ollama
     networks:
       freva-gpt:
         ipv4_address: 10.89.0.3
