@@ -9,24 +9,27 @@ Additionally, the notebook I use for testing the versions (`testing.ipynb`) is a
 ## Running the backend
 
 To run the backend, navigate to this folder so that this file is on the top level.
-Then run `podman-build.sh` to build the project and `compose.sh` to launch it.
-This requires podman to be configured correctly and that no container with the name `freva-gpt2-backend-instance` is running.
-In that case, stop and remove that container and re-run `compose.sh`.
+Then run `podman-compose build` to build the project and `podman-compose up -d` to launch it.
+This requires `podman-compose` and `podman` to be configured correctly and that no container with the name `freva-gpt2-backend-instance` is running.
+In that case, run `podman-compose down` and then to start the containers `podman-compose up -d`.
 
-That means that when the container is already running an changes are made, executing the following commands in order relaunches the container with the changes applied:
+That means that when the containers are already running an changes are made, executing the following commands in order relaunches the containers with the changes applied:
 
 ```bash
-./podman-build.sh # builds the changes. Everything is cached; changing the code should only take 10 seconds, changing pendencies takes up to 7 minutes for conda to install them
-./stop_backend # stop and remove the previous container of freva-gpt-backend so the new one can be properly launched in it's place
-./compose.sh # start the container in a standardized way
+podman-compose build # builds the changes. Everything is cached; changing the code should only take 10 seconds, changing pendencies takes up to 7 minutes for conda to install them
+podman-compose down # stop and remove the previous containers of freva-gpt-backend and ollama so the new ones can be properly launched in it's place
+podman-compose up -d # start the containers in a standardized way
 # Optionally
 podman logs -fl # follow the logs of the latest container. If it goes to `Starting Server on 0.0.0.0:8502`, it worked. Can also be used to quickly see all warnings and errors the backend emitted.
 ```
 
-The `podman-build.sh` script is mainly just a way to tell podman to load the Dockerfile at `dockerfiles/chatbot-backend/Dockerfile`, so changes in that file will be reflected in the next build.
+The `docker-compose.yaml` file defines how the containers are deployed, defining settings for images used, port-forwarding, mounted volumes, and network settings. For the `freva-gpt2-backend` it also defines how
+to build the image, which is mainly just a way to tell podman to load the Dockerfile at `dockerfiles/chatbot-backend/Dockerfile`. Changes in that file will be reflected in the next build.
 
 ### Ollama
 
 The backend supports a local ollama instance to be running.
-After pulling the official ollama docker container with podman, it can be started with the `./start_ollama.sh` script.
+It is also started when running the `podman-compose up` command.
 The models that want to be used need to be pulled from within the container with `podman exec -it ollama /bin/bash`.
+For example, if we want to download `Llama3.2` into the container, we would run the following command inside it:
+`ollama pull llama3.2`
