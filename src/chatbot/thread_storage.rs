@@ -140,9 +140,16 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
     trace!("Successfully read from File, content: {}", content);
 
     // We now need to "split" at the first colon, so we can get the variant and the content.
+    let res = extract_variants_from_string(content);
+
+    trace!("Returning number of lines: {}", res.len());
+
+    Ok(res)
+}
+
+pub fn extract_variants_from_string(content: String) -> Vec<StreamVariant> {
     let lines = content.lines();
     let mut res = Vec::new();
-
     for line in lines {
         // First try to use json to deserialize the line.
         match serde_json::from_str(line) {
@@ -203,10 +210,7 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
             continue;
         }
     }
-
-    trace!("Returning number of lines: {}", res.len());
-
-    Ok(res)
+    res
 }
 
 /// Some variants like Code and CodeOutput have more than one field, so this function splits the content at the last colon.

@@ -7,6 +7,27 @@ use async_openai::types::{
     FunctionCall,
 };
 use once_cell::sync::Lazy;
+use std::fs;
+use std::io::Read;
+use tracing::trace;
+
+// ...existing code...
+
+/// Lazy variable to hold example conversations read from `examples.jsonl`.
+pub static EXAMPLE_CONVERSATIONS_FROM_FILE: Lazy<Vec<ChatCompletionRequestMessage>> =
+    Lazy::new(|| {
+        let mut file =
+            fs::File::open("src/chatbot/examples.jsonl").expect("Unable to open examples.jsonl");
+        let mut content = String::new();
+        file.read_to_string(&mut content)
+            .expect("Unable to read examples.jsonl");
+
+        trace!("Successfully read from File, content: {}", content);
+        let stream_variants = crate::chatbot::thread_storage::extract_variants_from_string(content);
+        trace!("Returning number of lines: {}", stream_variants.len());
+
+        crate::chatbot::types::help_convert_sv_ccrm(stream_variants)
+    });
 
 /// Helper macro to simplify the creation of assistant messages.
 macro_rules! assistant_message {
@@ -54,7 +75,7 @@ pub static STARTING_PROMPT_JSON: Lazy<String> = Lazy::new(|| {
 /// Consists of a starting prompt and a few example conversations.
 pub static STARTING_PROMPT: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::new(|| {
     let mut messages = vec![ChatCompletionRequestMessage::System(INITIAL_PROMPT.clone())];
-    messages.extend(EXAMPLE_CONVERSATIONS.clone());
+    messages.extend(EXAMPLE_CONVERSATIONS_FROM_FILE.clone());
     messages.push(ChatCompletionRequestMessage::System(
         SUMMARY_SYSTEM_PROMPT.clone(),
     ));
@@ -93,7 +114,7 @@ const STARTING_PROMPT_STR: &str = r#"1. You are FrevaGPT, a helpful AI Assistant
 
 /// All conversations that are used in the prompt.
 /// We need to use Lazy again.
-static EXAMPLE_CONVERSATIONS: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::new(|| {
+static EXAMPLE_CONVERSATIONS_OLD: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::new(|| {
     vec![
         ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
             name: Some("user".to_string()),
