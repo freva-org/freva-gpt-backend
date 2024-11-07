@@ -1,8 +1,8 @@
 use std::io::Write;
 
 use base64::Engine;
-use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use pyo3::{prelude::*, types::PyList};
 use tracing::{debug, info, trace, warn};
 
 /// Executes the given code within a "jupyter" environment.
@@ -289,12 +289,19 @@ with open('{pickleable_path}', 'rb') as f:
     // We expect the loaded_vars to be a dictionary, so we'll try to convert it to one.
     let locals = loaded_vars.downcast_into::<PyDict>().ok()?;
 
+    // For debugging, log the names of the variables.
+    let keys = locals.keys();
+    for k in keys {
+        trace!("Loaded variable: {:?}", k);
+    }
+
     Some(locals)
 }
 
 /// Helper function to save the locals to a pickle file.
 fn save_to_pickle_file(py: Python, locals: Bound<PyDict>, thread_id: String) {
     trace!("Saving the locals to a pickle file.");
+
     // First we filter the locals to only include the ones that are actually serializable.
     // We'll execute some python code to do that.
     let code = format!(
@@ -302,12 +309,16 @@ fn save_to_pickle_file(py: Python, locals: Bound<PyDict>, thread_id: String) {
 
 local_items = locals().copy()
 pickleable_vars = {{}}
+unpickleable_vars = {{}}
 
 for key, value in local_items.items():
     try:
         dill.dumps(value)
         pickleable_vars[key] = value
     except Exception:
+        # We'd like to hint that we can't pickle this variable, but printing would show it to the LLM.
+        # So instead we store it in a variable that we access later in Rust.
+        unpickleable_vars[key] = [Exception,value]
         pass # we'll just assume that it's something we can't handle like a module
 
 # Save picklable variables
@@ -326,6 +337,26 @@ with open('python_pickles/{thread_id}.pickle', 'wb') as f:
             // The code didn't execute successfully.
             warn!("Error saving the locals to a pickle file: {:?}", e);
             println!("Error saving the locals to a pickle file: {e:?}",);
+        }
+    }
+
+    // Now we'll check if there are any variables that we couldn't pickle.
+    let unpickleable_vars = locals.get_item("unpickleable_vars").ok().flatten();
+    if let Some(Ok(unpick)) = unpickleable_vars.map(|x| x.downcast_into::<PyDict>()) {
+        trace!("Unpickleable variables found.");
+        // We'll log the names of the variables that we couldn't pickle.
+        let items = unpick.items();
+        for k in items {
+            trace!("Unpickleable variable: {:?}", k);
+            // Try to get the exception
+            let exception = k
+                .downcast_into::<PyList>()
+                .ok()
+                .and_then(|x| x.get_item(0).ok());
+            if let Some(exception) = exception {
+                // We'll log the exception.
+                trace!("Exception: {:?}", exception);
+            }
         }
     }
 }

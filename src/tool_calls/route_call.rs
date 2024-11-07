@@ -66,10 +66,11 @@ pub(crate) fn print_and_clear_tool_logs() {
             } else {
                 // If the content is not empty, log it to this process' logger.
                 if !content.is_empty() {
-                    debug!(
-                        "Content of the tool logger file:\n {}",
-                        String::from_utf8_lossy(&content)
-                    );
+                    let to_write = String::from_utf8_lossy(&content);
+
+                    // Add a tab to the beginning of each line to make it more readable and distinguishable.
+                    let to_write = to_write.replace("\n", "\n\t");
+                    debug!("Content of the tool logger file:\n {}", to_write);
                 }
 
                 // Clear the content of the file.
