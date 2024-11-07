@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use base64::Engine;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyTuple};
 use pyo3::{prelude::*, types::PyList};
 use tracing::{debug, info, trace, warn};
 
@@ -349,9 +349,12 @@ with open('python_pickles/{thread_id}.pickle', 'wb') as f:
         for k in items {
             trace!("Unpickleable variable: {:?}", k);
             // Try to get the exception
-            let exception = k
-                .downcast_into::<PyList>()
+            let tuple = k
+                .downcast_into::<PyTuple>()
                 .ok()
+                .and_then(|x| x.get_item(1).ok()); // 0th item is the key, 1st is the value
+            let exception = tuple
+                .and_then(|x| x.downcast_into::<PyList>().ok())
                 .and_then(|x| x.get_item(0).ok());
             if let Some(exception) = exception {
                 // We'll log the exception.
