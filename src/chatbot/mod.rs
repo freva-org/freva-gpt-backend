@@ -63,6 +63,13 @@ static OLLAMA_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
     async_openai::Client::with_config(config)
 });
 
+/// The Google-based chatbot needs a seperate API key that is set in the .env file.
+static GOOGLE_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
+    let key = std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY is not set in the .env file.");
+    let config = async_openai::config::OpenAIConfig::new().with_api_key(key);
+    async_openai::Client::with_config(config)
+});
+
 /// The address of the Ollama server.
 static OLLAMA_ADDRESS: Lazy<String> = Lazy::new(|| {
     println!("OLLAMA_ADDRESS: {:?}", std::env::var("OLLAMA_ADDRESS"));
@@ -104,6 +111,11 @@ pub async fn select_client(
                 warn!("Ollama is not running, but ollama couldn't be found! This might fail!");
             }
             &OLLAMA_CLIENT
+        }
+        available_chatbots::AvailableChatbots::Google(_) => {
+            trace!("Selecting Google client");
+            warn!("Gemini API is currently not available in the EU region. This will most likely fail!");
+            &GOOGLE_CLIENT
         }
     }
 }

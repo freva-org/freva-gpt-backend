@@ -15,6 +15,7 @@ pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
     AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B),
     AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B_tool),
     AvailableChatbots::Ollama(OllamaModels::qwen2_5_32B),
+    // AvailableChatbots::Google(GoogleModels::gemini_1_5_flash), // Not yet available in the EU.
 ];
 
 /// The default chatbot that will be used when the user doesn't specify one.
@@ -25,6 +26,7 @@ pub static DEFAULTCHATBOT: AvailableChatbots = AVAILABLE_CHATBOTS[0];
 pub enum AvailableChatbots {
     OpenAI(OpenAIModels),
     Ollama(OllamaModels),
+    Google(GoogleModels),
 }
 
 // Implementing the conversion from the enum to a string
@@ -46,6 +48,9 @@ impl From<AvailableChatbots> for String {
                 OllamaModels::qwen2_5_7B => "qwen2.5".to_string(),
                 OllamaModels::qwen2_5_7B_tool => "majx13/test".to_string(), // community model
                 OllamaModels::qwen2_5_32B => "qwen2.5:32b".to_string(), // 72 is just too large for us to handle efficiently.
+            },
+            AvailableChatbots::Google(model) => match model {
+                GoogleModels::gemini_1_5_flash => "gemini-1.5-flash".to_string(),
             },
         }
     }
@@ -100,4 +105,10 @@ pub enum OllamaModels {
     qwen2_5_32B,
     #[allow(non_camel_case_types)]
     llama3_groq_8B,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum GoogleModels {
+    #[allow(non_camel_case_types)]
+    gemini_1_5_flash,
 }
