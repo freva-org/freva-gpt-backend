@@ -66,6 +66,10 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                         // But we continue with the last line.
                     }
                     Err(e) => {
+                        // Also store the locals to a pickle file so they aren't lost
+                        if let Some(thread_id) = thread_id {
+                            save_to_pickle_file(py, locals, thread_id);
+                        }
                         return Err(format_pyerr(&e, py));
                     }
                 }
@@ -315,10 +319,10 @@ for key, value in local_items.items():
     try:
         dill.dumps(value)
         pickleable_vars[key] = value
-    except Exception:
+    except Exception as e:
         # We'd like to hint that we can't pickle this variable, but printing would show it to the LLM.
         # So instead we store it in a variable that we access later in Rust.
-        unpickleable_vars[key] = [Exception,value]
+        unpickleable_vars[key] = [e,value]
         pass # we'll just assume that it's something we can't handle like a module
 
 # Save picklable variables
@@ -358,8 +362,17 @@ with open('python_pickles/{thread_id}.pickle', 'wb') as f:
                 .and_then(|x| x.get_item(0).ok());
             if let Some(exception) = exception {
                 // We'll log the exception.
-                trace!("Exception: {:?}", exception);
+                trace!("Exception: {:?}", exception.repr());
             }
+        }
+    }
+    // Also trace print all the variables that we could pickle.
+    let pickleable_vars = locals.get_item("pickleable_vars").ok().flatten();
+    if let Some(Ok(pick)) = pickleable_vars.map(|x| x.downcast_into::<PyDict>()) {
+        trace!("Pickleable variables found.");
+        let items = pick.items();
+        for k in items {
+            trace!("Stored variable: {:?}", k);
         }
     }
 }
