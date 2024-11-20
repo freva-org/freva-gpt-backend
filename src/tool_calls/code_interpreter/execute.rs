@@ -183,8 +183,10 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
 /// Statements like 2+2 or list expressions should be evaluated,
 /// while function calls, imports, and variable assignments should be executed.
 fn should_eval(line: &str) -> bool {
-    let negative = line.contains("import") || line.contains("(") || line.contains("=");
-    let exceptions = line.contains("plt.show()") || line.contains("item()");
+    // Imports, function calls, and variable assignments should be executed.
+    // However, outputting multiple variables via a tuple should be evaluated.
+    let negative = line.contains("import") || (line.contains("(") && !line.starts_with("(")) || line.contains("=");
+    let exceptions = line.contains("plt.show()") || line.contains("item()") || line.contains("freva.facet_search(");
     !negative || exceptions
 }
 

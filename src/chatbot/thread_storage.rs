@@ -5,13 +5,8 @@
 // Reading and writing is just manipulating files, so we can use the `std::fs` module.
 // Note that the file of a conversation is opened at the start of the stream, so it cannot be read from while it is being written to.
 
-// The file content will be structured as follows:
-// STREAMVARIANT:CONTENT
-// So for example, if the user asks "What is the capital of France?" and the assistant responds "Paris", the file
-// will contain
-// User:What is the capital of France?
-// Assistant:Paris
-// StreamEnd:Success
+// The File will store the conversation in the JSON lines format, where each line is a JSON object, 
+// specifying the variant, as serialized by serde_json.
 
 use std::{
     fs::{File, OpenOptions},
@@ -26,6 +21,9 @@ use super::types::{Conversation, StreamVariant};
 
 /// Appends events from a stream of a conversation to the file of the conversation.
 pub fn append_thread(thread_id: &str, content: Conversation) {
+    trace!("Will append content to thread: {:?} (to clean up)", content);
+    let mut content = content;
+    cleanup_conversation(&mut content);
     trace!("Appending content to thread: {:?}", content);
     // First we have to convert the content to a string.
     if content.is_empty() {
@@ -217,4 +215,47 @@ pub fn extract_variants_from_string(content: String) -> Vec<StreamVariant> {
 fn split_colon_at_end(s: &str) -> Option<(&str, &str)> {
     let (first, last) = s.rsplit_once(':')?;
     Some((first, last))
+}
+
+/// When a conversation is saved, it might be corrupted in some way. 
+/// For us, this means that every Code variant needs to be followed by a CodeOutput variant
+/// after some number of ServerHint variants,
+/// and that the very last variant needs to be a StreamEnd variant.
+fn cleanup_conversation(content: &mut Conversation) {
+    
+    // Insert a CodeOutput variant after every Code variant.
+    let mut i = 0; // The index of the current variant.
+    let mut active_code_id = None; // The ID of the current code variant.
+    while i < content.len() {
+        match &content[i] {
+            StreamVariant::Code(_, id) => {
+                active_code_id = Some(id.clone());
+            }
+            StreamVariant::CodeOutput(_, _) => {
+                active_code_id = None;
+            }
+            StreamVariant::ServerHint(_) => {
+                // If we're in a ServerHint, we can just skip it.
+                i += 1;
+                continue;
+            }
+            _ => {
+
+                if let Some(id) = active_code_id.take() { // Also resets the active code ID.
+                    // If we're in a variant that is not a CodeOutput, but we have an active code ID, we need to insert a CodeOutput variant.
+                    content.insert(i, StreamVariant::CodeOutput("".to_string(), id));
+                    i += 1;
+                    continue;
+                } 
+            }
+        }
+        i += 1;
+    }
+
+    // If the last variant is not a StreamEnd variant, we'll need to insert one.
+    if let Some(last) = content.last() {
+        if !matches!(last, StreamVariant::StreamEnd(_)) {
+            content.push(StreamVariant::StreamEnd("Stream ended in a very unexpected manner".to_string()));
+        }
+    }
 }

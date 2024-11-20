@@ -307,6 +307,7 @@ fn post_process(code: String) -> String {
         ("pd.", "import pandas as pd\n"),
         ("ccrs.", "import cartopy.crs as ccrs\n"),
         ("cartopy.", "import cartopy\n"),
+        ("cfeature", "import cartopy.feature as cfeature\n"),
     ];
 
     for (detect, add) in libraries.iter() {
