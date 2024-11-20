@@ -6,15 +6,15 @@ pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini),
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4o),
     // AvailableChatbots::OpenAI(OpenAIModels::o1_mini), // In Beta, doesn't do streaming yet.
-    AvailableChatbots::Ollama(OllamaModels::llama3_2_3B),
-    AvailableChatbots::Ollama(OllamaModels::llama3_1_70B),
-    AvailableChatbots::Ollama(OllamaModels::llama3_1_8B),
-    AvailableChatbots::Ollama(OllamaModels::llama3_groq_8B),
-    AvailableChatbots::Ollama(OllamaModels::gemma2),
-    AvailableChatbots::Ollama(OllamaModels::qwen2_5_3B),
-    AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B),
-    AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B_tool),
-    AvailableChatbots::Ollama(OllamaModels::qwen2_5_32B),
+    // AvailableChatbots::Ollama(OllamaModels::llama3_2_3B),
+    // AvailableChatbots::Ollama(OllamaModels::llama3_1_70B),
+    // AvailableChatbots::Ollama(OllamaModels::llama3_1_8B),
+    // AvailableChatbots::Ollama(OllamaModels::llama3_groq_8B),
+    // AvailableChatbots::Ollama(OllamaModels::gemma2),
+    AvailableChatbots::Ollama(OllamaModels::qwen2_5_3B), // Only one active for development purposes. Will be expanded back after the 12th. 
+    // AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B),
+    // AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B_tool),
+    // AvailableChatbots::Ollama(OllamaModels::qwen2_5_32B),
     // AvailableChatbots::Google(GoogleModels::gemini_1_5_flash), // Not yet available in the EU.
 ];
 
@@ -37,6 +37,8 @@ impl From<AvailableChatbots> for String {
                 OpenAIModels::gpt_4o => "gpt-4o".to_string(),
                 OpenAIModels::gpt_4o_mini => "gpt-4o-mini".to_string(),
                 OpenAIModels::o1_mini => "o1-mini".to_string(),
+                OpenAIModels::gpt_4_turbo => "gpt-4-turbo".to_string(),
+                OpenAIModels::gpt_3_5_turbo => "gpt-3.5-turbo".to_string(),
             },
             AvailableChatbots::Ollama(model) => match model {
                 OllamaModels::llama3_2_3B => "llama3.2".to_string(),
@@ -83,6 +85,10 @@ pub enum OpenAIModels {
     gpt_4o_mini,
     #[allow(non_camel_case_types)]
     o1_mini,
+    #[allow(non_camel_case_types)]
+    gpt_4_turbo,
+    #[allow(non_camel_case_types)]
+    gpt_3_5_turbo,
 }
 
 #[derive(Debug, Clone, Copy)]
