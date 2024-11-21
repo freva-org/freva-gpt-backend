@@ -89,9 +89,14 @@ pub async fn run_runtime_checks() {
         warn!("The test data is not accessable. This means that the test data will not be available for the runtime.");
     }
 
+    print!("Checking robustness and jupyter like behavior of the code interpreter... ");
+    info!("Checking robustness and jupyter like behavior of the code interpreter.");
     // Check that the syntax error catching works.
     check_syntax_error().await;
     check_syntax_error_surround().await;
+    check_eval_exec().await;
+    println!("Success!");
+    info!("The code interpreter is robust enough and behaves like a Jupyter notebook in all tests.");
 
     // To make sure not to confuse the backend, clear the tool logger.
     print_and_clear_tool_logs();
@@ -305,6 +310,81 @@ async fn check_syntax_error_surround() {
         output,
         vec![StreamVariant::CodeOutput(
             "(An error occured; no traceback available)\nSyntaxError: invalid syntax (<string>, line 2)\n\nHint: the error occured on line 2\n1: import np\n2: > dsa=na034ß94?ß <\n3: print('Hello World!')".to_string(),
+            "test".to_string()
+        )]
+    );
+}
+
+/// Checks that the code interpreter can properly decide which lines to execute and which to evaluate.
+/// The logic should be the same as in a Jupyter notebook.
+async fn check_eval_exec() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "a = 2\nb = 3\na+b"}"#.to_string()),
+        "test".to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(output.len(), 1);
+    assert_eq!(
+        output,
+        vec![StreamVariant::CodeOutput(
+            "5".to_string(),
+            "test".to_string()
+        )]
+    );
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "a = 2\nb = 3\na,b"}"#.to_string()),
+        "test".to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(output.len(), 1);
+    assert_eq!(
+        output,
+        vec![StreamVariant::CodeOutput(
+            "(2, 3)".to_string(),
+            "test".to_string()
+        )]
+    );
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "a = 2\nb = 3\nfloat(a+b)"}"#.to_string()),
+        "test".to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(output.len(), 1);
+    assert_eq!(
+        output,
+        vec![StreamVariant::CodeOutput(
+            "5.0".to_string(),
+            "test".to_string()
+        )]
+    );
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "a = 2\nb = 3\n(a, b if not a==b else a)"}"#.to_string()),
+        "test".to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(output.len(), 1);
+    assert_eq!(
+        output,
+        vec![StreamVariant::CodeOutput(
+            "(2, 3)".to_string(),
+            "test".to_string()
+        )]
+    );
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "test=[1,2,3]\nlen(test)"}"#.to_string()),
+        "test".to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(output.len(), 1);
+    assert_eq!(
+        output,
+        vec![StreamVariant::CodeOutput(
+            "3".to_string(),
             "test".to_string()
         )]
     );

@@ -33,7 +33,7 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 None => {
                     // If there is no newline, we'll just eval the whole code, unless an import is present.
                     // If an import is present, we'll have to execute it instead.
-                    if should_eval(&code) {
+                    if should_eval(&code, py) {
                         (None, Some(code))
                     } else {
                         (Some(code), None)
@@ -42,12 +42,7 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 Some((rest, last)) => {
                     // We'll have to check the last line
                     let last_line = last.trim();
-                    if !should_eval(last_line) {
-                        // If the last line contains a "(", it's likely a function call, which we can't evaluate.
-                        // If it contains "import", it's likely an import statement, which we also can't evaluate.
-                        // The exception is if it's a variable assignment, but we can't really check that.
-                        // The exception we do check for is if it's a plt.show() call, which we do support.
-                        // We'll just execute the whole code.
+                    if !should_eval(last_line, py) {
                         (Some(code), None)
                     } else {
                         // Otherwise, we'll split it up.
@@ -182,12 +177,56 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
 /// Helper function to decide whether a line should be evaluated or executed.
 /// Statements like 2+2 or list expressions should be evaluated,
 /// while function calls, imports, and variable assignments should be executed.
-fn should_eval(line: &str) -> bool {
+fn should_eval(line: &str, py: Python) -> bool {
     // Imports, function calls, and variable assignments should be executed.
     // However, outputting multiple variables via a tuple should be evaluated.
-    let negative = line.contains("import") || (line.contains("(") && !line.starts_with("(")) || line.contains("=");
-    let exceptions = line.contains("plt.show()") || line.contains("item()") || line.contains("freva.facet_search(");
-    !negative || exceptions
+    // let negative = line.contains("import") || (line.contains("(") && !line.starts_with("(")) || line.contains("=");
+    // let exceptions = line.contains("plt.show()") || line.contains("item()") || line.contains("freva.facet_search(");
+    // !negative || exceptions
+
+    // New approach: Python has the ast library, which we can use to parse the line and decide whether it should be evaluated.
+
+    let to_check = format!(
+        r#"import ast
+should_eval = None
+try:
+    node = ast.parse("{line}")
+    # Only one node is allowed
+    correct_node = node.body[-1] if node.body else None
+    should_eval = isinstance(correct_node, ast.Expr)
+except Exception:
+    should_eval = False
+    "#
+    );
+    let locals = PyDict::new_bound(py);
+    let globals = PyDict::new_bound(py);
+
+    match py.run_bound(&to_check, Some(&globals), Some(&locals)) {
+        Ok(()) => {
+            let should_eval = locals.get_item("should_eval");
+            match should_eval {
+                Ok(Some(should_eval)) => {
+                    let is_true = should_eval.is_truthy(); // If there was an error in is_truthy, we'll assume false.
+                    debug!("Should the line be evaluated? {:?}", is_true);
+                    matches!(is_true, Ok(true))
+                }
+                _ => { // If we couldn't get the value, we'll just return false. 
+                    warn!(
+                        "Error checking whether the line should be evaluated: {:?}",
+                        should_eval
+                    );
+                    false
+                }
+            }
+        }
+        Err(e) => { // If we couldn't run the code, we'll just return false.
+            warn!(
+                "Error checking whether the line should be evaluated: {:?}",
+                e
+            );
+            false
+        }
+    }
 }
 
 /// Helper function to turn a PyErr into a string for the LLM

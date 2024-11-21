@@ -174,7 +174,7 @@ pub async fn start_code_interpeter(
             let stdout_stderr = format!("{stdout_short}\n{stderr_short}").trim().to_string(); // Because if the stderr is empty, this would add an unnecessary newline.
 
             let stdout_stderr = post_process_output(stdout_stderr, code.code.clone());
-            if stdout_stderr.is_empty() {
+            if stdout_stderr.split_whitespace().next().is_none() { // This will check whether it contains only whitespace.
                 info!("The code interpreter returned an empty output.");
             }
 
