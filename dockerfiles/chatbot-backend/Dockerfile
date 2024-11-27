@@ -53,4 +53,4 @@ COPY src /app/src
 # ENV PYO3_PRINT_CONFIG 1
 
 # Run the Rust code in very verbose mode, printing trace information
-ENTRYPOINT [ "cargo", "run", "--", "-vv"]
+ENTRYPOINT [ "cargo", "run", "-r", "--", "-vv"]
