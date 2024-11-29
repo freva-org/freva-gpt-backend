@@ -1030,7 +1030,7 @@ dependencies = [
 
 [[package]]
 name = "freva-gpt2-backend"
-version = "1.8.11"
+version = "1.8.12"
 dependencies = [
  "actix-web",
  "async-openai",
@@ -1043,6 +1043,7 @@ dependencies = [
  "flexi_logger",
  "fs2",
  "futures",
+ "itertools",
  "once_cell",
  "pyo3",
  "qstring",

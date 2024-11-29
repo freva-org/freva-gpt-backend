@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
@@ -6,6 +8,18 @@ use crate::{
     static_serve,
     tool_calls::route_call::print_and_clear_tool_logs,
 };
+
+/// Helper function to flush stdout and stderr.
+fn flush_stdout_stderr() {
+    if let Err(e) = std::io::stdout().flush() {
+        error!("Error flushing stdout: {e:?}",);
+        eprintln!("Error flushing stdout: {e:?}",);
+    }
+    if let Err(e) = std::io::stderr().flush() {
+        error!("Error flushing stderr: {e:?}",);
+        eprintln!("Error flushing stderr: {e:?}",);
+    }
+}
 
 /// Check that the setup is correct for the runtime to run:
 /// - Initializes lazy variables to make sure they don't fail later.
@@ -33,6 +47,7 @@ pub async fn run_runtime_checks() {
 
     // We'll also initialize the authentication here so it's available for the entire server, from the very start.
     print!("Checking the authentication string... ");
+    flush_stdout_stderr();
     info!("Checking the authentication string...");
     let auth_string = match std::env::var("AUTH_KEY") {
         Ok(auth_string) => auth_string,
@@ -51,10 +66,11 @@ pub async fn run_runtime_checks() {
     });
     info!("Authentication string set successfully.");
     println!("Success!");
-
+    
     // Run the basic checks for the code interpreter.
     // Note that those checks need to be runtime, not compiletime, as the code interpreter calles the binary itself.
     print!("Running runtime checks including library checks for the code interpreter... ");
+    flush_stdout_stderr();
     info!("Running runtime checks including library checks for the code interpreter.");
     check_assignments().await;
     check_two_plus_two().await;
@@ -63,20 +79,23 @@ pub async fn run_runtime_checks() {
     check_print_two().await;
     check_imports().await;
     println!("Success!");
+    flush_stdout_stderr();
     info!("Runtime checks for the code interpreter were successful and all required libraries are available.");
-
+    
     // Also check that the code interpreter can handle hard and soft crashes.
     print!("Checking whether the code interpreter can handle crashes... ");
+    flush_stdout_stderr();
     info!("Checking whether the code interpreter can handle crashes.");
     check_hard_crash().await;
     check_soft_crash().await;
     println!("Success!");
+    flush_stdout_stderr();
     info!("The code interpreter can handle crashes.");
-
+    
     // Also check that required directories exist.
     if check_directory("/app/logs")
-        & check_directory("/app/threads")
-        & check_directory("/app/python_pickles")
+    & check_directory("/app/threads")
+    & check_directory("/app/python_pickles")
     {
         println!("All required directories exist and are readable.");
         info!("All required directories exist and are readable.");
@@ -88,12 +107,14 @@ pub async fn run_runtime_checks() {
         println!("The test data is not accessable. This means that the test data will not be available for the runtime.");
         warn!("The test data is not accessable. This means that the test data will not be available for the runtime.");
     }
-
+    
     print!("Checking robustness and jupyter like behavior of the code interpreter... ");
+    flush_stdout_stderr();
     info!("Checking robustness and jupyter like behavior of the code interpreter.");
     // Check that the syntax error catching works.
     check_syntax_error().await;
     check_syntax_error_surround().await;
+    check_traceback_error_surround().await;
     check_eval_exec().await;
     println!("Success!");
     info!("The code interpreter is robust enough and behaves like a Jupyter notebook in all tests.");
@@ -266,7 +287,7 @@ pub async fn check_soft_crash() {
     assert_eq!(
         output,
         vec![StreamVariant::CodeOutput(
-            "ZeroDivisionError: division by zero\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>".to_string(),
+            "ZeroDivisionError: division by zero\nTraceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n\nHint: the error occured on line 1\n1: > 1/0 <\n".to_string(),
             "test".to_string()
         )]
     );
@@ -310,6 +331,27 @@ async fn check_syntax_error_surround() {
         output,
         vec![StreamVariant::CodeOutput(
             "(An error occured; no traceback available)\nSyntaxError: invalid syntax (<string>, line 2)\n\nHint: the error occured on line 2\n1: import np\n2: > dsa=na034ß94?ß <\n3: print('Hello World!')".to_string(),
+            "test".to_string()
+        )]
+    );
+}
+
+/// Checks that the code interpreter can catch tracebacks
+/// and highlight the line around the error.
+/// The base error is already tested in check_soft_crash.
+async fn check_traceback_error_surround() {
+    // Code to check: 1/0
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "a=2\n1/0\nb=3"}"#.to_string()),
+        "test".to_string(),
+        None,
+    )
+    .await;
+    assert_eq!(output.len(), 1);
+    assert_eq!(
+        output,
+        vec![StreamVariant::CodeOutput(
+            "ZeroDivisionError: division by zero\nTraceback (most recent call last):\n  File \"<string>\", line 2, in <module>\n\nHint: the error occured on line 2\n1: a=2\n2: > 1/0 <\n3: b=3".to_string(),
             "test".to_string()
         )]
     );

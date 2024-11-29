@@ -1,5 +1,6 @@
 use async_process::Command;
 
+use itertools::Itertools;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
@@ -174,7 +175,8 @@ pub async fn start_code_interpeter(
             let stdout_stderr = format!("{stdout_short}\n{stderr_short}").trim().to_string(); // Because if the stderr is empty, this would add an unnecessary newline.
 
             let stdout_stderr = post_process_output(stdout_stderr, code.code.clone());
-            if stdout_stderr.split_whitespace().next().is_none() { // This will check whether it contains only whitespace.
+            if stdout_stderr.split_whitespace().next().is_none() {
+                // This will check whether it contains only whitespace.
                 info!("The code interpreter returned an empty output.");
             }
 
@@ -322,7 +324,7 @@ fn post_process(code: String) -> String {
 }
 
 /// Post-processes the output before returning it.
-/// Gives hints for SyntaxErrors.
+/// Gives hints for SyntaxErrors and Tracebacks.
 fn post_process_output(output: String, code: String) -> String {
     let mut output = output;
 
@@ -339,8 +341,7 @@ fn post_process_output(output: String, code: String) -> String {
     }
     match synerr_line {
         None => {
-            // If we don't find the line, we don't process the output anything and just return it as is.
-            return output;
+            // If we don't find the line, we don't process the output further here.
         }
         Some(line) => {
             // We have the line, now we have to extract the line number.
@@ -375,47 +376,111 @@ fn post_process_output(output: String, code: String) -> String {
             // 3: > (line that caused the error) <
             // 4: (next line)
 
-            let mut hint = String::new();
-            hint.push_str("Hint: the error occured on line ");
-            hint.push_str(&line_number.to_string());
-            hint.push('\n');
-
-            // Now we have to extract the line that caused the error.
-            let prev_line = code
-                .lines()
-                .nth(line_number.wrapping_sub(2)) // wrapping because usize can't be negative.
-                .unwrap_or_default(); // This will then simply be an empty string.
-            let error_line = code
-                .lines()
-                .nth(line_number.wrapping_sub(1))
-                .unwrap_or_default();
-            let next_line = code.lines().nth(line_number).unwrap_or_default();
-
-            if line_number != 1 {
-                hint.push_str(&(line_number - 1).to_string());
-                hint.push_str(": ");
-                hint.push_str(prev_line);
-                hint.push('\n');
-            }
-
-            hint.push_str(&(line_number).to_string());
-            hint.push_str(": > ");
-            hint.push_str(error_line);
-            hint.push_str(" <");
-            hint.push('\n');
-
-            if line_number != code.lines().count() {
-                hint.push_str(&(line_number + 1).to_string());
-                hint.push_str(": ");
-                hint.push_str(next_line);
-            }
-
-            output.push_str("\n\n");
-            output.push_str(&hint);
+            add_hint_to_output(line_number, &code, &mut output);
         }
     }
 
+    // Note that it's not possible to have both a traceback and a syntax error in the same output.
+
+    // Now, we implement a similar hint for tracebacks.
+    // The structure of a traceback is (for us):
+    // Valuetype("Error message")
+    // Traceback (most recent call last):
+    // File "<string>", line (this_line), in <module>
+    // ...
+    // (Because I write the error before the traceback, so that when the output is too long, the error is still visible.)
+
+    // The goal is to also write a hint for the line that caused the error.
+
+    let mut traceback_line = None;
+    for (line, next_line) in output.lines().tuple_windows() {
+        if line.starts_with("Traceback") {
+            traceback_line = Some(next_line);
+            break;
+        }
+    }
+
+    match traceback_line {
+        None => {
+            // If we don't find the line, we don't process the output further here.
+        }
+        Some(line) => {
+            // We have the line, now we have to extract the line number.
+            let line_number_str = line // "File "<string>", line (this_line), in <module>"
+                .split("line ") // ["File \"<string>\", ", " (this_line), in <module>"]
+                .nth(1) // " (this_line), in <module>"
+                .unwrap_or_default()
+                .split(",") // [" (this_line)", " in <module>"]
+                .next() // " (this_line)"
+                .unwrap_or_default()
+                .trim(); // "(this_line)"
+
+            // If the line number is empty, we can't do anything.
+            if line_number_str.is_empty() {
+                return output;
+            }
+
+            // We want it as a number, so we can use it to read from the code.
+            let line_number = match line_number_str.parse::<usize>() {
+                Ok(line_number) => line_number,
+                Err(e) => {
+                    warn!("Error parsing the line number from the Traceback: {:?}", e);
+                    return output;
+                }
+            };
+
+            // Now we can construct the hint. It should look like this, if the traceback occured at line 3:
+            // Hint: the error occured on line 3:
+            // 2: (previous line)
+            // 3: > (line that caused the error) <
+            // 4: (next line)
+
+            add_hint_to_output(line_number, &code, &mut output);
+        }
+    }
     output
+}
+
+// Small helper function to add the hint to the output.
+fn add_hint_to_output(line_number: usize, code: &str, output: &mut String) {
+    let mut hint = String::new();
+    hint.push_str("Hint: the error occured on line ");
+    hint.push_str(&line_number.to_string());
+    hint.push('\n');
+
+    // Now we have to extract the line that caused the error.
+    let prev_line = code
+        .lines()
+        .nth(line_number.wrapping_sub(2)) // wrapping because usize can't be negative.
+        .unwrap_or_default();
+    // This will then simply be an empty string.
+    let error_line = code
+        .lines()
+        .nth(line_number.wrapping_sub(1))
+        .unwrap_or_default();
+    let next_line = code.lines().nth(line_number).unwrap_or_default();
+
+    if line_number != 1 {
+        hint.push_str(&(line_number - 1).to_string());
+        hint.push_str(": ");
+        hint.push_str(prev_line);
+        hint.push('\n');
+    }
+
+    hint.push_str(&(line_number).to_string());
+    hint.push_str(": > ");
+    hint.push_str(error_line);
+    hint.push_str(" <");
+    hint.push('\n');
+
+    if line_number != code.lines().count() {
+        hint.push_str(&(line_number + 1).to_string());
+        hint.push_str(": ");
+        hint.push_str(next_line);
+    }
+
+    output.push_str("\n\n");
+    output.push_str(&hint);
 }
 
 /// Helper function that initializes logging to the logging file.
