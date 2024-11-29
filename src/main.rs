@@ -124,7 +124,7 @@ async fn main() -> std::io::Result<()> {
     // If the keep-alive time is too short, we risk the connection being closed before the stream is finished.
     // If it's too long, there might be a lot of open connections that are not being used.
     // FIXME: This long duration can be cut massively once a heartbeat is implemented.
+    .workers(8) // It uses 128 by default - far too much background usage
     .run()
-    .workers(8) # It uses 128 by default - far too much background usage
     .await
 }
