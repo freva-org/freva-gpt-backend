@@ -23,7 +23,7 @@ RUN echo "conda activate env" >> ~/.bashrc
 
 # Install the python packages into the environment. This is split up to improve caching.
 RUN conda install --yes -c conda-forge -n env freva dill
-RUN conda install --yes -c conda-forge -n env numpy matplotlib pandas xarray scipy
+RUN conda install --yes -c conda-forge -n env numpy matplotlib pandas xarray xesmf scipy
 RUN conda install --yes -c conda-forge -n env netcdf4 cartopy contourpy geopy
 RUN conda install --yes -c conda-forge -n env aiohttp requests
 RUN conda install --yes -c conda-forge -n env scikit-learn pytorch geopandas healpy astropy
