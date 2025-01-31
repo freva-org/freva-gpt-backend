@@ -3,8 +3,8 @@ use tracing::debug;
 /// The list of available chatbots that the user can choose from.
 /// The first one is the default chatbot.
 pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini),
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4o),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini),
     // AvailableChatbots::OpenAI(OpenAIModels::o1_mini), // In Beta, doesn't do streaming yet.
     AvailableChatbots::OpenAI(OpenAIModels::gpt_3_5_turbo),
     // AvailableChatbots::Ollama(OllamaModels::llama3_2_3B),
@@ -12,7 +12,7 @@ pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
     // AvailableChatbots::Ollama(OllamaModels::llama3_1_8B),
     // AvailableChatbots::Ollama(OllamaModels::llama3_groq_8B),
     // AvailableChatbots::Ollama(OllamaModels::gemma2),
-    AvailableChatbots::Ollama(OllamaModels::qwen2_5_3B), // Only one active for development purposes. Will be expanded back after the 12th. 
+    AvailableChatbots::Ollama(OllamaModels::qwen2_5_3B), // Only one active for development purposes. Will be expanded back after the 12th.
     // AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B),
     // AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B_tool),
     // AvailableChatbots::Ollama(OllamaModels::qwen2_5_32B),

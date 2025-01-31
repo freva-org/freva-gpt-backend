@@ -191,12 +191,15 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     content: async_openai::types::ChatCompletionRequestToolMessageContent::Text(s),
                 })
             ]),
-            Self::Image(_) => Ok(vec![ChatCompletionRequestMessage::System(
-                ChatCompletionRequestSystemMessage {
-                    name: Some("Image".to_string()),
-                    content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text("An image was successfully generated and is being shown to the user.".to_string()),
-                },
-            )]),
+            Self::Image(_) => 
+                // Ok(vec![ChatCompletionRequestMessage::System(
+                // ChatCompletionRequestSystemMessage {
+                    // name: Some("Image".to_string()),
+                    // content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text("An image was successfully generated and is being shown to the user.".to_string()),
+                // },
+            // )])
+               Err(ConversionError::VariantHide("Temporarily hiding Image information from the LLM for the analysis; will fix poperly as soon as possible!")) 
+                ,
             Self::CodeError(_) | Self::OpenAIError(_) | Self::ServerError(_) => Err(ConversionError::VariantHide("Error variants should not be passed to the LLM, it doesn't need to know about them.")),
             Self::StreamEnd(_) => Err(ConversionError::VariantHide("StreamEnd variants are only for use on the server side, not for the LLM.")),
             Self::ServerHint(s) => {
