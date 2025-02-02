@@ -1,6 +1,6 @@
 [package]
 name = "freva-gpt2-backend"
-version = "1.8.12"
+version = "1.8.13"
 edition = "2021"
 authors = ["Sebastian Willmann"]
 repository = "https://gitlab.dkrz.de/k203176/freva-gpt2-backend"
@@ -12,7 +12,7 @@ categories = ["science", "science::geo", "web-programming::http-server"]
 
 [dependencies]
 actix-web = "4.9.0"
-async-openai = "0.25.0"
+async-openai = {git = "https://github.com/SeseMueller/async-openai", version = "0.27.2"}
 base64 = "0.22.1"
 clap = { version = "4.5.20", features = ["derive", "cargo"] }
 const_format = "0.2.33"

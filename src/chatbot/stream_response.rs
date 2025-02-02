@@ -226,21 +226,37 @@ fn build_request(
 ) -> Result<CreateChatCompletionRequest, async_openai::error::OpenAIError> {
     // Because some errors occured around here, we'll log the messages.
     trace!("Messages sending to OpenAI: {:?}", messages);
-    CreateChatCompletionRequestArgs::default()
+
+    // The reasoning models do not allow you to specify whether or not you want them to do parallel tool calls.
+    // The request will be denied with an 400 error. However, if it is not specified whether or not to do parallel tool calls, it will default to "auto".
+    // Because dealing with multiple tool calls at the same time is not yet implemented, we'll have to set it to false, but not for the reasoning models.
+
+    let mut default_args = CreateChatCompletionRequestArgs::default(); // If the partial_request would be set to default here, the lifetime would be too short.
+    let mut partial_request = default_args
         .model(String::from(chatbot))
         .n(1)
         .messages(messages)
         .stream(true)
-        .max_tokens(16000u32)
         .tools(ALL_TOOLS.clone())
-        .parallel_tool_calls(false) // No parallel tool calls!
-        .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
         .tool_choice(ChatCompletionToolChoiceOption::Auto) // Explicitly set to auto, because the LLM should be free to choose the tool.
-        .temperature(0.4) // The model shouldn't be too creative, but also not too boring.
         .stream_options(async_openai::types::ChatCompletionStreamOptions {
             include_usage: true,
-        })
-        .build()
+        });
+        
+        match chatbot {
+            AvailableChatbots::OpenAI(crate::chatbot::available_chatbots::OpenAIModels::o1_mini)
+            | AvailableChatbots::OpenAI(crate::chatbot::available_chatbots::OpenAIModels::o3_mini) => {
+                partial_request = partial_request.max_completion_tokens(16000u32) // The max tokens parameter is called differently for the reasoning models.
+            }
+            _ => {
+                partial_request = partial_request.parallel_tool_calls(false) // No parallel tool calls!
+                .temperature(0.4) // The model shouldn't be too creative, but also not too boring.
+                .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
+                .max_tokens(16000u32);
+        }
+    };
+
+    partial_request.build()
 }
 
 // The last event in the event. Should be sent if the stream is stopped by the client sending a stop request.
@@ -739,6 +755,10 @@ async fn oai_stream_to_variants(
                     }
                     (_, None, Some(reason)) => StreamEvents::StopEvent(reason),
                     (Some(tool_calls), None, None) => StreamEvents::ToolCall(tool_calls.clone()),
+                    (Some(tool_calls), Some(empty_string), None) if empty_string.is_empty() => {
+                        StreamEvents::ToolCall(tool_calls.clone())
+                    } // o3 sometimes likes to pass empty content, we should ignore it.
+
                     (None, None, None) => StreamEvents::Empty,
                     (Some(tool_calls), Some(string_delta), _) => {
                         warn!("Tool call AND content found in response, the API specified that this couldn't happen: {:?} and {:?}", tool_calls, string_delta);

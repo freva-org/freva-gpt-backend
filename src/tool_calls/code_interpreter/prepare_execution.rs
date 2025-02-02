@@ -110,7 +110,14 @@ pub async fn start_code_interpeter(
     // Secondly, the python module likes to crash hard sometimes, so if the code interpreter crashes, it won't take the whole chatbot down with it.
     // The code we use will be the same as in the execute_code function.
 
-    let output = Command::new("./target/debug/freva-gpt2-backend")
+    
+    #[cfg(debug_assertions)]
+    static BIN_PATH: &str = "./target/debug/freva-gpt2-backend";
+    // But when it is run in release mode, the binary is in a different location.
+    #[cfg(not(debug_assertions))]
+    static BIN_PATH: &str = "./target/release/freva-gpt2-backend";
+
+    let output = Command::new(BIN_PATH)
         .arg("--code-interpreter")
         .arg(code.code.clone())
         .env("EVALUATION_SYSTEM_CONFIG_FILE", freva_config_path)

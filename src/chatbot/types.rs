@@ -2,7 +2,7 @@ use core::fmt;
 
 use async_openai::types::{
     ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage,
-    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
+    ChatCompletionRequestMessage,
     ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall,
 };
 use documented::Documented;
@@ -192,14 +192,15 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                 })
             ]),
             Self::Image(_) => 
-                // Ok(vec![ChatCompletionRequestMessage::System(
-                // ChatCompletionRequestSystemMessage {
-                    // name: Some("Image".to_string()),
-                    // content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text("An image was successfully generated and is being shown to the user.".to_string()),
-                // },
+            // Ok(vec![ChatCompletionRequestMessage::System(
+            //     ChatCompletionRequestSystemMessage {
+            //         name: Some("Image".to_string()),
+            //         content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text("An image was successfully generated and is being shown to the user.".to_string()),
+            //     },
             // )])
-               Err(ConversionError::VariantHide("Temporarily hiding Image information from the LLM for the analysis; will fix poperly as soon as possible!")) 
-                ,
+            
+                    Err(ConversionError::VariantHide("ServerHint variants are only for use on the server side, not for the LLM.")) // TODO: Implement giving the LLM information about the image.
+            ,
             Self::CodeError(_) | Self::OpenAIError(_) | Self::ServerError(_) => Err(ConversionError::VariantHide("Error variants should not be passed to the LLM, it doesn't need to know about them.")),
             Self::StreamEnd(_) => Err(ConversionError::VariantHide("StreamEnd variants are only for use on the server side, not for the LLM.")),
             Self::ServerHint(s) => {
@@ -395,6 +396,23 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
                     content.name + ": " + &content.content.unwrap_or("(no content)".to_string());
                 Ok(Self::Assistant(retval))
             }
+            ChatCompletionRequestMessage::Developer(chat_completion_request_developer_message) => {
+                // The Developer message is like a system message, but more explicetly from the developer.
+                // From the documentation, it should only be used in the context of reasoning models (o1, o1-mini, o3, o3-mini).
+                // I doubt the distinction is useful for us, I'll just treat it as a system message.
+                let text = match chat_completion_request_developer_message.content {
+                    async_openai::types::ChatCompletionRequestDeveloperMessageContent::Text(s) => s,
+                    async_openai::types::ChatCompletionRequestDeveloperMessageContent::Array(vector) => {
+                        let mut text_vec = vec![];
+                        for elem in vector {
+                            text_vec.push(elem.text);
+                        }
+                        text_vec.join("\n")
+                    }
+                };
+                warn!("Developer Message received, this shouldn't happen. Communication was build with System messages exclusively. Content: {:?}", text);
+                Ok(Self::Prompt(text)) 
+            },
         }
     }
 }

@@ -7,6 +7,7 @@ pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini),
     // AvailableChatbots::OpenAI(OpenAIModels::o1_mini), // In Beta, doesn't do streaming yet.
     AvailableChatbots::OpenAI(OpenAIModels::gpt_3_5_turbo),
+    AvailableChatbots::OpenAI(OpenAIModels::o3_mini),
     // AvailableChatbots::Ollama(OllamaModels::llama3_2_3B),
     // AvailableChatbots::Ollama(OllamaModels::llama3_1_70B),
     // AvailableChatbots::Ollama(OllamaModels::llama3_1_8B),
@@ -17,6 +18,7 @@ pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
     // AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B_tool),
     // AvailableChatbots::Ollama(OllamaModels::qwen2_5_32B),
     // AvailableChatbots::Google(GoogleModels::gemini_1_5_flash), // Not yet available in the EU.
+    AvailableChatbots::Ollama(OllamaModels::deepseek_r1_70b), // For testing purposes.
 ];
 
 /// The default chatbot that will be used when the user doesn't specify one.
@@ -40,6 +42,7 @@ impl From<AvailableChatbots> for String {
                 OpenAIModels::o1_mini => "o1-mini".to_string(),
                 OpenAIModels::gpt_4_turbo => "gpt-4-turbo".to_string(),
                 OpenAIModels::gpt_3_5_turbo => "gpt-3.5-turbo".to_string(),
+                OpenAIModels::o3_mini => "o3-mini".to_string(),
             },
             AvailableChatbots::Ollama(model) => match model {
                 OllamaModels::llama3_2_3B => "llama3.2".to_string(),
@@ -51,6 +54,7 @@ impl From<AvailableChatbots> for String {
                 OllamaModels::qwen2_5_7B => "qwen2.5".to_string(),
                 OllamaModels::qwen2_5_7B_tool => "majx13/test".to_string(), // community model
                 OllamaModels::qwen2_5_32B => "qwen2.5:32b".to_string(), // 72 is just too large for us to handle efficiently.
+                OllamaModels::deepseek_r1_70b => "deepseek-r1:70b".to_string(), // For testing purposes.
             },
             AvailableChatbots::Google(model) => match model {
                 GoogleModels::gemini_1_5_flash => "gemini-1.5-flash".to_string(),
@@ -90,6 +94,8 @@ pub enum OpenAIModels {
     gpt_4_turbo,
     #[allow(non_camel_case_types)]
     gpt_3_5_turbo,
+    #[allow(non_camel_case_types)]
+    o3_mini,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -112,6 +118,8 @@ pub enum OllamaModels {
     qwen2_5_32B,
     #[allow(non_camel_case_types)]
     llama3_groq_8B,
+    #[allow(non_camel_case_types)]
+    deepseek_r1_70b,
 }
 
 #[derive(Debug, Clone, Copy)]
