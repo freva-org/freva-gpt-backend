@@ -123,7 +123,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
             // );
 
             // FIXME: remove this temporary fix
-            "/work/ch1187/clint/freva-dev/freva/evaluation_system.conf".to_string()
+            "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
         }
         Some(freva_config_path) => freva_config_path.to_string(),
     };
