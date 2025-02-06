@@ -120,7 +120,8 @@ pub async fn run_runtime_checks() {
     info!("The code interpreter is robust enough and behaves like a Jupyter notebook in all tests.");
 
     // To make sure not to confuse the backend, clear the tool logger.
-    print_and_clear_tool_logs();
+    // Due to debugging, this now needs two arguments.
+    print_and_clear_tool_logs(std::time::SystemTime::now(), std::time::SystemTime::now());
 }
 
 /// Checks that the code interpreter can calculate 2+2.

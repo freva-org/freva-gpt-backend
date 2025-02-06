@@ -216,6 +216,13 @@ pub fn run_code_interpeter(arguments: String) {
     // Before executing the code, we'll want to retrieve the Thread_id environment variable.
     // This is needed for the code interpreter to save the pickle file.
 
+    // Debug: Overhead debugging
+    if let Ok(overhead_time) = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+    {
+        debug!("The code interpreter has been called. OVERHEAD={}", overhead_time.as_nanos());
+    }
+
     let mut thread_id = match std::env::var("THREAD_ID") {
         Err(e) => {
             warn!("Error reading the thread_id environment variable: {:?}", e);

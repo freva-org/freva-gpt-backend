@@ -1,8 +1,10 @@
 // Routes a tool call to the appropriate function.
 
-use std::{fs::OpenOptions, io::Read};
+use std::{fs::OpenOptions, io::Read, time::UNIX_EPOCH};
 
 use fs2::FileExt;
+use itertools::Itertools;
+use std::io::Write;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
 
@@ -26,12 +28,18 @@ pub async fn route_call(
     let senderror = if func_name == "code_interpreter" {
         // The functionality lies in the seperate module.
 
+        // Debugging:
+        // The code interpreter has a severe overhead that is quite inconsistent. In order to track it down, several points of interest will record when they are reached.
+        let routing_pit = std::time::SystemTime::now(); // The point in time when the routing function is reached.
+
         let result = sender
             .send(start_code_interpeter(arguments, id, Some(thread_id)).await)
             .await;
 
+        let return_pit = std::time::SystemTime::now(); // The point in time when the code interpreter returns.
+
         // Before sending the result, write out the content of tool logger.
-        print_and_clear_tool_logs();
+        print_and_clear_tool_logs(routing_pit, return_pit);
         result
     } else {
         // If the function name is not recognized, we'll return an error message.
@@ -45,7 +53,11 @@ pub async fn route_call(
 }
 
 /// Helper function to read and delete the content of the tool logger file.
-pub(crate) fn print_and_clear_tool_logs() {
+/// Returns (for debugging) a vector of all points in time that were reached during the code interpreter.
+pub(crate) fn print_and_clear_tool_logs(
+    routing_pit: std::time::SystemTime,
+    return_pit: std::time::SystemTime,
+) {
     debug!("Reading and clearing the tool logger file.");
     match OpenOptions::new()
         .read(true)
@@ -66,11 +78,50 @@ pub(crate) fn print_and_clear_tool_logs() {
             } else {
                 // If the content is not empty, log it to this process' logger.
                 if !content.is_empty() {
-                    let to_write = String::from_utf8_lossy(&content);
+                    let content_as_string = String::from_utf8_lossy(&content);
 
                     // Add a tab to the beginning of each line to make it more readable and distinguishable.
-                    let to_write = to_write.replace("\n", "\n\t");
+                    let to_write = content_as_string.replace("\n", "\n\t");
                     debug!("Content of the tool logger file:\n {}", to_write);
+
+                    // Debugging: get all relevant points in time.
+                    // They all end in OVERHEAD=XXXXXXX, where XXXXXXX is the time in nanoseconds.
+                    let mut pits = Vec::new();
+                    pits.push(routing_pit);
+                    for line in content_as_string.lines() {
+                        if let Some(overhead) = line.split_once("OVERHEAD=") {
+                            if let Ok(overhead) = overhead.1.parse::<u64>() {
+                                pits.push(UNIX_EPOCH + std::time::Duration::from_nanos(overhead));
+                            }
+                        }
+                    }
+                    pits.push(return_pit);
+
+                    // We now have the starting, multiple intermediate, and ending points in time.
+                    // Let's log them to the file "debug_overhead.log" (in CSV).
+                    // We'll just append to the file, as it's not critical.
+                    // Line format: "routing_pit,overhead1,overhead2,...,return_pit".
+                    if let Ok(overhead_file) = OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("debug_overhead.log")
+                    {
+                        let mut overhead_file = std::io::BufWriter::new(overhead_file);
+
+                        // write!(overhead_file, "{:?},", routing_pit); // Just debug, don't care about the result.
+                        // for pit in pits {
+                        //     write!(overhead_file, "{:?},", pit);
+                        // }
+                        // writeln!(overhead_file, "{:?}", return_pit);
+                        // I actually don't want the raw overheads, but the distances between them.
+                        // So, I'll calculate the differences.
+                        for (pit_1, pit_2) in pits.iter().tuple_windows() {
+                            if let Ok(diff) = pit_2.duration_since(*pit_1) {
+                                write!(overhead_file, "{:>25},", diff.as_micros()); // Debug only, we can throw away the result.
+                            }
+                        }
+                        writeln!(overhead_file); // New line.
+                    }
                 }
 
                 // Clear the content of the file.

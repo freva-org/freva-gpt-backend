@@ -15,6 +15,14 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
     // Fixed: Martin told me that the "global" interpreter lock, is, in fact, not global, but per process.
     // Because I moved the execution to another process to prevent catastrophic crashes, nothing should be able to interfere with the GIL.
 
+    // Debug: Overhead debugging
+    if let Ok(overhead_time) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        debug!(
+            "The python environment was prepared. OVERHEAD={}",
+            overhead_time.as_nanos()
+        );
+    }
+
     trace!("Starting GIL block.");
     let output = Python::with_gil(|py| {
         // We need a PyDict to store the local and global variables for the call.
@@ -23,6 +31,16 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
             None => PyDict::new_bound(py),
         };
         let globals = PyDict::new_bound(py);
+
+        // Debug: Overhead debugging
+        if let Ok(overhead_time) =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        {
+            debug!(
+                "The local variables were loaded. OVERHEAD={}",
+                overhead_time.as_nanos()
+            );
+        }
 
         let result = {
             // Because we want the last line to be returned, we'll execute all but the last line.
@@ -51,6 +69,16 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 }
             };
 
+            // Debug: Overhead debugging
+            if let Ok(overhead_time) =
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            {
+                debug!(
+                    "It was decided whether or not the code should be evaluated or executed. OVERHEAD={}",
+                    overhead_time.as_nanos()
+                );
+            }
+
             if let Some(rest_lines) = rest_lines {
                 debug!("Executing all but the last line.");
                 trace!("Executing code: {}", rest_lines);
@@ -68,6 +96,16 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                         return Err(format_pyerr(&e, py));
                     }
                 }
+            }
+
+            // Debug: Overhead debugging
+            if let Ok(overhead_time) =
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            {
+                debug!(
+                    "All but (maybe) the last line were executed. OVERHEAD={}",
+                    overhead_time.as_nanos()
+                );
             }
 
             if let Some(last_line) = last_line {
@@ -130,6 +168,16 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 Ok(String::new())
             }
         };
+
+        // Debug: Overhead debugging
+        if let Ok(overhead_time) =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        {
+            debug!(
+                "The code has finished executing. OVERHEAD={}",
+                overhead_time.as_nanos()
+            );
+        }
 
         // Before returning the result, we'll have to flush stdout and stderr IN PYTHON.
 
@@ -210,7 +258,8 @@ except Exception:
                     debug!("Should the line be evaluated? {:?}", is_true);
                     matches!(is_true, Ok(true))
                 }
-                _ => { // If we couldn't get the value, we'll just return false. 
+                _ => {
+                    // If we couldn't get the value, we'll just return false.
                     warn!(
                         "Error checking whether the line should be evaluated: {:?}",
                         should_eval
@@ -219,7 +268,8 @@ except Exception:
                 }
             }
         }
-        Err(e) => { // If we couldn't run the code, we'll just return false.
+        Err(e) => {
+            // If we couldn't run the code, we'll just return false.
             warn!(
                 "Error checking whether the line should be evaluated: {:?}",
                 e
