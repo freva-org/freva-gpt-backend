@@ -92,6 +92,8 @@ pub(crate) fn print_and_clear_tool_logs(
                         if let Some(overhead) = line.split_once("OVERHEAD=") {
                             if let Ok(overhead) = overhead.1.parse::<u64>() {
                                 pits.push(UNIX_EPOCH + std::time::Duration::from_nanos(overhead));
+                            } else {
+                                error!("Failed to parse the overhead time: {}", overhead.1);
                             }
                         }
                     }
@@ -101,26 +103,28 @@ pub(crate) fn print_and_clear_tool_logs(
                     // Let's log them to the file "debug_overhead.log" (in CSV).
                     // We'll just append to the file, as it's not critical.
                     // Line format: "routing_pit,overhead1,overhead2,...,return_pit".
-                    if let Ok(overhead_file) = OpenOptions::new()
+                    match OpenOptions::new()
                         .create(true)
                         .append(true)
-                        .open("debug_overhead.log")
+                        .open("/data/inputFiles/debug_overhead.log") // it's stored in the testdata folder for debugging.
                     {
-                        let mut overhead_file = std::io::BufWriter::new(overhead_file);
-
-                        // write!(overhead_file, "{:?},", routing_pit); // Just debug, don't care about the result.
-                        // for pit in pits {
-                        //     write!(overhead_file, "{:?},", pit);
-                        // }
-                        // writeln!(overhead_file, "{:?}", return_pit);
-                        // I actually don't want the raw overheads, but the distances between them.
-                        // So, I'll calculate the differences.
-                        for (pit_1, pit_2) in pits.iter().tuple_windows() {
-                            if let Ok(diff) = pit_2.duration_since(*pit_1) {
-                                write!(overhead_file, "{:>25},", diff.as_micros()); // Debug only, we can throw away the result.
+                        Ok(overhead_file) => {
+                            let mut overhead_file = std::io::BufWriter::new(overhead_file);
+                            for (pit_1, pit_2) in pits.iter().tuple_windows() {
+                                if let Ok(diff) = pit_2.duration_since(*pit_1) {
+                                    if let Err(e) = write!(overhead_file, "{:>25},", diff.as_micros()) {
+                                        error!("Failed to write the difference between two points in time: {}", e);
+                                    }
+                                    // Debug only, we can throw away the result.
+                                } else {
+                                    error!("Failed to calculate the difference between two points in time. Did the clock change?");
+                                }
+                            }
+                            if let Err(e) = writeln!(overhead_file) {
+                                error!("Failed to write the return point in time: {}", e);
                             }
                         }
-                        writeln!(overhead_file); // New line.
+                        Err(e) => error!("Failed to open the overhead logger file: {}", e),
                     }
                 }
 

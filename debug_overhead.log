@@ -1,5 +1,0 @@
-Small file than records the different overhead "checkpoints" in the code.
-Each line below consists the elapsed time (in microseconds) between first of the point in time before the code interpreter is executed, followed by multiple points in time (pits) that are recorded while the code is running, and finally the point in time after the code interpreter is done.
-The inner pits are, in order: 
-  Code interpreter called,  python environment done,   local variables loaded, decided execute/evaluate,            code executed,  code finished executing.
-

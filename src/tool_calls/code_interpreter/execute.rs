@@ -401,6 +401,7 @@ fn save_to_pickle_file(py: Python, locals: Bound<PyDict>, thread_id: String) {
     // We'll execute some python code to do that.
     let code = format!(
         r#"import dill # like pickle, but can handle >2GB variables
+from types import ModuleType
 
 local_items = locals().copy()
 pickleable_vars = {{}}
@@ -408,6 +409,10 @@ unpickleable_vars = {{}}
 
 for key, value in local_items.items():
     try:
+        if isinstance(value, ModuleType):
+            # We shouldn't pickle modules, so we'll just skip them.
+            unpickleable_vars[key] = [None, value]
+            continue
         dill.dumps(value)
         pickleable_vars[key] = value
     except Exception as e:
