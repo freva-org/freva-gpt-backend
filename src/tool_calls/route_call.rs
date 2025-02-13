@@ -99,6 +99,13 @@ pub(crate) fn print_and_clear_tool_logs(
                     }
                     pits.push(return_pit);
 
+                    // Debugging: write the overhead times to a file.
+                    // Note that I want to be able to debug this on my local machine too where docker doesn't work.
+                    #[cfg(target_os="macos")]
+                    const FILE_PATH: &str = "./testdata/debug_overhead.log";
+                    #[cfg(not(target_os="macos"))]
+                    const FILE_PATH: &str = "/data/inputFiles/debug_overhead.log";
+
                     // We now have the starting, multiple intermediate, and ending points in time.
                     // Let's log them to the file "debug_overhead.log" (in CSV).
                     // We'll just append to the file, as it's not critical.
@@ -106,7 +113,7 @@ pub(crate) fn print_and_clear_tool_logs(
                     match OpenOptions::new()
                         .create(true)
                         .append(true)
-                        .open("/data/inputFiles/debug_overhead.log") // it's stored in the testdata folder for debugging.
+                        .open(FILE_PATH) // it's stored in the testdata folder for debugging. 
                     {
                         Ok(overhead_file) => {
                             let mut overhead_file = std::io::BufWriter::new(overhead_file);

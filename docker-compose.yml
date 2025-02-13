@@ -13,11 +13,11 @@ services:
       - "8502:8502"
     volumes:
       - /work:/work:ro
-      - ./logs:/app/logs
-      - ./threads:/app/threads
-      - ./target:/app/target
-      - ./testdata:/data/inputFiles
-      - ./python_pickles:/app/python_pickles
+      - /container/da/freva-gpt-backend-links/logs:/app/logs
+      - /container/da/freva-gpt-backend-links/threads:/app/threads
+      - /container/da/freva-gpt-backend-links/target:/app/target
+      - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles
+      - /container/da/freva-gpt-backend-links/python_pickles:/app/python_pickles
     networks:
       freva-gpt:
         ipv4_address: 10.89.0.2
