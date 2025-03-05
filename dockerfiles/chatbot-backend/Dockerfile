@@ -26,7 +26,7 @@ RUN conda install --yes -c conda-forge -n env freva dill
 RUN conda install --yes -c conda-forge -n env numpy matplotlib pandas xarray xesmf scipy
 RUN conda install --yes -c conda-forge -n env netcdf4 cartopy contourpy geopy
 RUN conda install --yes -c conda-forge -n env aiohttp requests
-RUN conda install --yes -c conda-forge -n env scikit-learn pytorch geopandas easygems astropy
+RUN conda install --yes -c conda-forge -n env scikit-learn pytorch geopandas healpy easygems astropy
 
 # Also copy over the Cargo.toml file to be able to start the server
 COPY Cargo.toml /app/Cargo.toml
