@@ -42,7 +42,7 @@ services:
 networks:
   freva-gpt:
     driver: bridge
-    network_backend: netavark
+    # network_backend: netavark
     ipam:
       config:
         - subnet: 10.89.0.0/16

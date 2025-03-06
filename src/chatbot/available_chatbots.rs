@@ -20,6 +20,7 @@ pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
     // AvailableChatbots::Google(GoogleModels::gemini_1_5_flash), // Not yet available in the EU.
     // AvailableChatbots::Ollama(OllamaModels::deepseek_r1_70b), // Doesn't support tool calls!.
     AvailableChatbots::Ollama(OllamaModels::deepseek_r1_32b_tools), // the community model, doesn't support tool calls yet, the community needs to work on it
+    AvailableChatbots::Ollama(OllamaModels::qwq),
 ];
 
 /// The default chatbot that will be used when the user doesn't specify one.
@@ -57,6 +58,7 @@ impl From<AvailableChatbots> for String {
                 OllamaModels::qwen2_5_32B => "qwen2.5:32b".to_string(), // 72 is just too large for us to handle efficiently.
                 OllamaModels::deepseek_r1_70b => "deepseek-r1:70b".to_string(), // For testing purposes.
                 OllamaModels::deepseek_r1_32b_tools => "deepseek-r1:32b".to_string(), // The Qwen distill; technically capable of tool calling.
+                OllamaModels::qwq => "qwq".to_string(), // Qwen but reasoning
             },
             AvailableChatbots::Google(model) => match model {
                 GoogleModels::gemini_1_5_flash => "gemini-1.5-flash".to_string(),
@@ -124,6 +126,8 @@ pub enum OllamaModels {
     deepseek_r1_70b,
     #[allow(non_camel_case_types)]
     deepseek_r1_32b_tools,
+    #[allow(non_camel_case_types)]
+    qwq,
 }
 
 #[derive(Debug, Clone, Copy)]
