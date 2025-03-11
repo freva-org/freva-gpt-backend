@@ -37,6 +37,8 @@ sysinfo = "0.32.0"
 fs2 = "0.4.3"
 async-process = "2.3.0"
 itertools = "0.13.0"
+mongodb = {version = "3.2.2", features = ["sync"]}
+chrono = "0.4.40"
 
 [lints.rust]
 unsafe_code = "forbid"

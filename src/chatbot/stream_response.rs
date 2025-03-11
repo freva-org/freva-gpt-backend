@@ -26,7 +26,7 @@ use crate::{
         heartbeat::heartbeat_content,
         prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON},
         select_client,
-        thread_storage::read_thread,
+        storage_router::read_thread,
         types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
     },
     logging::{silence_logger, undo_silence_logger},

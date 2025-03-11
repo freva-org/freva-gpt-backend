@@ -6,7 +6,7 @@ use tracing::{debug, info, trace, warn};
 use crate::{
     chatbot::{
         handle_active_conversations::{conversation_state, get_conversation},
-        thread_storage::read_thread,
+        storage_router::read_thread,
         types::{ConversationState, StreamVariant},
     },
     logging::{silence_logger, undo_silence_logger},

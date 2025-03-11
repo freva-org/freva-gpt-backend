@@ -74,7 +74,7 @@ pub fn append_thread(thread_id: &str, content: Conversation) {
 }
 
 /// Opens a file for a conversation and returns a file handle.
-pub fn open_thread(thread_id: &str) -> Option<File> {
+fn open_thread(thread_id: &str) -> Option<File> {
     trace!("Opening thread with id: {}", thread_id);
     // We'll try to open the file for the conversation.
     match OpenOptions::new()
@@ -221,7 +221,7 @@ fn split_colon_at_end(s: &str) -> Option<(&str, &str)> {
 /// For us, this means that every Code variant needs to be followed by a CodeOutput variant
 /// after some number of ServerHint variants,
 /// and that the very last variant needs to be a StreamEnd variant.
-fn cleanup_conversation(content: &mut Conversation) {
+pub fn cleanup_conversation(content: &mut Conversation) {
     
     // Insert a CodeOutput variant after every Code variant.
     let mut i = 0; // The index of the current variant.

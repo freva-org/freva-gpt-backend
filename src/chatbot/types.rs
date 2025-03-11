@@ -509,7 +509,7 @@ pub fn unescape_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
 
-    use crate::chatbot::{prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON}, thread_storage::read_thread};
+    use crate::chatbot::prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON};
 
     // The helper function to convert a StreamVariant to a ChatCompletionRequestMessage
     // has some problems, we'll test it here.
@@ -548,7 +548,7 @@ mod tests {
     fn test_help_convert_sv_ccrm_real_data() {
         // Instead of using constructed data, we'll actually read the data from a file.
         // In this case, from a file that, when read, triggered the error this test is supposed to catch.
-        let input = read_thread("testthread");
+        let input = crate::chatbot::thread_storage::read_thread("testthread"); // Always read from disk
         assert!(
             input.is_ok(),
             "Error reading test thread file: {:?}",

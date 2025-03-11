@@ -5,7 +5,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::chatbot::types::StreamVariant;
 
-use super::thread_storage::read_thread;
+use super::storage_router::read_thread;
 
 /// # Get Thread
 /// Returns the content of a thread as a Json of List of Strings.

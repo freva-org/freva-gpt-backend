@@ -169,7 +169,7 @@ fn save_conversation(conversation: ActiveConversation) {
 
     let new_conversation = concat_variants(conversation.conversation);
 
-    crate::chatbot::thread_storage::append_thread(&conversation.id, new_conversation);
+    crate::chatbot::storage_router::append_thread(&conversation.id, "EMPTY USER!! TODO" ,new_conversation);
 }
 
 /// The assistant and code messages are streamed, so the variants that come from OpenAI contain only one or a few tokens of the message.
