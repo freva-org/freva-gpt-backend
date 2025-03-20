@@ -51,6 +51,7 @@ pub fn add_to_conversation(
     thread_id: &str,
     variant: Vec<StreamVariant>,
     freva_config_path: String,
+    user_id: String,
 ) {
     trace!("Adding to conversation with id: {}", thread_id);
 
@@ -68,6 +69,7 @@ pub fn add_to_conversation(
                     conversation: variant,
                     state: ConversationState::Streaming(freva_config_path),
                     last_activity: std::time::Instant::now(),
+                    user_id,
                 });
             }
         }
@@ -78,7 +80,7 @@ pub fn add_to_conversation(
 }
 
 /// Returns the state of the conversation, if possible
-pub fn conversation_state(thread_id: &str) -> Option<ConversationState> {
+pub async fn conversation_state(thread_id: &str) -> Option<ConversationState> {
     trace!("Checking the state of conversation with id: {}", thread_id);
 
     let mut to_save = None;
@@ -112,7 +114,7 @@ pub fn conversation_state(thread_id: &str) -> Option<ConversationState> {
     // In order to not save the conversations while the mutex is locked, we'll save it here.
     if let Some(conversations) = to_save {
         for conversation in conversations {
-            save_conversation(conversation);
+            save_conversation(conversation).await;
         }
     }
 
@@ -138,7 +140,7 @@ pub fn end_conversation(thread_id: &str) {
 }
 
 /// Removes the conversation with the given ID, clearing it from the active conversations and writing it to disk.
-pub fn save_and_remove_conversation(thread_id: &str) {
+pub async fn save_and_remove_conversation(thread_id: &str) {
     trace!("Removing conversation with id: {}", thread_id);
 
     // We extract the conversation from the global variable to minimize the time we lock the mutex.
@@ -157,19 +159,19 @@ pub fn save_and_remove_conversation(thread_id: &str) {
     };
 
     if let Some(conversation) = conversation {
-        save_conversation(conversation);
+        save_conversation(conversation).await;
     }
 }
 
 /// Helper function to save a conversation to disk.
-fn save_conversation(conversation: ActiveConversation) {
+async fn save_conversation(conversation: ActiveConversation) {
     debug!("Writing conversation to disk.");
 
     // Before we'll write it to disk, we'll fold all the consecutive Assistant messages into one.
 
     let new_conversation = concat_variants(conversation.conversation);
 
-    crate::chatbot::storage_router::append_thread(&conversation.id, "EMPTY USER!! TODO" ,new_conversation);
+    crate::chatbot::storage_router::append_thread(&conversation.id, &conversation.user_id ,new_conversation).await;
 }
 
 /// The assistant and code messages are streamed, so the variants that come from OpenAI contain only one or a few tokens of the message.

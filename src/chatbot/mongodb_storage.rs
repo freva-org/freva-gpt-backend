@@ -23,7 +23,7 @@ pub struct MongoDBThread {
 
 
 /// Stores a thread in the mongoDB database, appending the content if the thread already exists.
-pub fn append_thread(thread_id: &str, user_id: &str, content: Conversation) {
+pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation) {
     debug!("Will append content to thread {} for user {}", thread_id, user_id);
     trace!("Content: {:?}", content);
     let mut content = content;
@@ -36,7 +36,7 @@ pub fn append_thread(thread_id: &str, user_id: &str, content: Conversation) {
     }
 
     // We first need to retrieve the thread from the database, if it exists.
-    let existing_thread = read_thread(thread_id);
+    let existing_thread = read_thread(thread_id).await;
 
     // If the thread exists in the DB, we need to overwrite it.
     // If not, we need to create a new thread.
@@ -83,7 +83,7 @@ pub fn append_thread(thread_id: &str, user_id: &str, content: Conversation) {
 
     // If the topic exists, we need to update the thread.
     if existing_thread.is_some() {
-        let result = MONGODB_CLIENT.database(&MONGODB_DATABASE_NAME).collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME).update_one(
+        let result = MONGODB_CLIENT.force().await.database(&MONGODB_DATABASE_NAME).collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME).update_one(
             doc! {
                 "thread_id": thread_id
             },
@@ -95,7 +95,7 @@ pub fn append_thread(thread_id: &str, user_id: &str, content: Conversation) {
                     "user_id": user_id,
                 }
             },
-        ).run();
+        ).await;
     
         match result{
             Ok(update_result) => {
@@ -116,9 +116,9 @@ pub fn append_thread(thread_id: &str, user_id: &str, content: Conversation) {
             content,
         };
 
-        let result = MONGODB_CLIENT.database(&MONGODB_DATABASE_NAME).collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME).insert_one(
+        let result = MONGODB_CLIENT.force().await.database(&MONGODB_DATABASE_NAME).collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME).insert_one(
             thread,
-        ).run();
+        ).await;
 
         match result {
             Ok(insert_result) => {
@@ -136,15 +136,15 @@ pub fn append_thread(thread_id: &str, user_id: &str, content: Conversation) {
 
 /// Loads a thread from the mongoDB database, by thread_id.
 /// Also loads all other data from the thread, such as the user_id, date and "topic".
-pub fn read_thread(thread_id: &str) -> Option<MongoDBThread> {
+pub async fn read_thread(thread_id: &str) -> Option<MongoDBThread> {
     debug!("Will load thread with id {}", thread_id);
 
     // Query the database by thread_id.
-    let result = MONGODB_CLIENT.database(&MONGODB_DATABASE_NAME).collection(&MONGODB_COLLECTION_NAME).find_one(
+    let result = MONGODB_CLIENT.force().await.database(&MONGODB_DATABASE_NAME).collection(&MONGODB_COLLECTION_NAME).find_one(
         doc! {
             "thread_id": thread_id
         },
-    ).run();
+    ).await;
 
     match result {
         Ok (inner) => {
@@ -162,10 +162,13 @@ pub fn read_thread(thread_id: &str) -> Option<MongoDBThread> {
 
 
 
-static MONGODB_CLIENT: Lazy<mongodb::sync::Client> = Lazy::new(|| {
+static MONGODB_CLIENT: async_lazy::Lazy<mongodb::Client> = async_lazy::Lazy::new(|| {
     let client_uri = env::var("MONGODB_URI").expect("MONGODB_URI is not set in the .env file.");
-
-    mongodb::sync::Client::with_uri_str(&client_uri).expect("Failed to create client options.")
+    println!("Connecting to MongoDB with URI: {}", client_uri);
+    // mongodb::sync::Client::with_uri_str(&client_uri).expect("Failed to create client options.")
+    Box::pin(async move {
+        mongodb::Client::with_uri_str(&client_uri).await.expect("Failed to create client options.")
+    })
 });
 
 static MONGODB_DATABASE_NAME: Lazy<String> = Lazy::new(|| {

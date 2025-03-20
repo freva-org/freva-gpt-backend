@@ -28,6 +28,8 @@ pub struct ActiveConversation {
     pub conversation: Conversation,
 
     pub last_activity: std::time::Instant, // The last time the conversation was active. If the conversation is inactive for too long, it will be ended.
+
+    pub user_id: String, // The ID of the user, as sent from the frontend/client.
 }
 
 ///
