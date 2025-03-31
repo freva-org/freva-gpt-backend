@@ -18,7 +18,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     chatbot::{
-        available_chatbots::DEFAULTCHATBOT,
+        available_chatbots::{model_ends_on_no_choice, DEFAULTCHATBOT},
         handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
             new_conversation_id, save_and_remove_conversation,
@@ -800,7 +800,7 @@ async fn oai_stream_to_variants(
                         debug!("Got stop event from OpenAI: {:?}", reason);
                         handle_stop_event(
                             reason,
-                            choice,
+                            Some(choice),
                             tool_arguments,
                             tool_name,
                             tool_id,
@@ -927,8 +927,21 @@ async fn oai_stream_to_variants(
                     }
                 }
             } else {
-                debug!("No response found, ending stream.");
-                vec![StreamVariant::OpenAIError("No response found.".to_string())]
+                // Some models (specifically some of the qwen family, have the tendency to not return any choices to mark the end of the stream.)
+                if model_ends_on_no_choice(chatbot) {
+                    debug!("Qwen-like model ended stream without choice, simulating stop event.");
+                    // Differentiatie between a tool call and a standard stop by the tool arguments and tool name. 
+                    let finish_reason = if !tool_arguments.is_empty() && tool_name.is_some() {
+                        FinishReason::ToolCalls
+                    } else {
+                        FinishReason::Stop
+                    };
+                    handle_stop_event(finish_reason, None, tool_arguments, tool_name, tool_id, thread_id, open_ai_stream, &response, chatbot, reciever).await
+                    // vec![StreamVariant::StreamEnd("Qwen-like stream ended".to_string())]
+                } else {
+                    info!("No response found, ending stream.");
+                    vec![StreamVariant::OpenAIError("No response found.".to_string())]
+                }
             }
         }
         Some(Err(e)) => {
@@ -976,7 +989,7 @@ async fn oai_stream_to_variants(
 
 async fn handle_stop_event(
     reason: async_openai::types::FinishReason,
-    choice: &ChatChoiceStream,
+    choice: Option<&ChatChoiceStream>,
     tool_arguments: &mut String,
     tool_name: &mut Option<String>,
     tool_id: &mut String,
@@ -1009,10 +1022,12 @@ async fn handle_stop_event(
         }
         async_openai::types::FinishReason::ToolCalls => {
             // We expect there to now be a tool call in the response.
+            if let Some(choice) = choice {
 
-            if let Some(content) = choice.delta.tool_calls.clone() {
-                // Handle the tool call
-                trace!("Tool call: {:?}", content);
+                if let Some(content) = choice.delta.tool_calls.clone() {
+                    // Handle the tool call
+                    trace!("Tool call: {:?}", content);
+                }
             }
 
             let mut all_generated_variants = vec![];
