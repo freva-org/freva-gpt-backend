@@ -38,6 +38,21 @@ pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation
     // We first need to retrieve the thread from the database, if it exists.
     let existing_thread = read_thread(thread_id).await;
 
+    // If there is some existing thread, we need to update the content.
+    // The new content is the old content + the new content.
+    let (content, thread_exists) = match existing_thread {
+        Some(existing_thread) => {
+            let mut existing_content = existing_thread.content;
+            existing_content.append(&mut content);
+            debug!("Found existing thread, will append content.");
+            (existing_content, true)
+        },
+        None => {
+            debug!("No existing thread found, will create a new one.");
+            (content, false)
+        }
+    };
+
     // If the thread exists in the DB, we need to overwrite it.
     // If not, we need to create a new thread.
 
@@ -64,14 +79,6 @@ pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation
 
     let date = chrono::Utc::now().to_rfc3339(); // Also ISO 8601 compliant
 
-    // let thread = MongoDBThread {
-    //     user_id: user_id.to_string(),
-    //     thread_id: thread_id.to_string(),
-    //     date: chrono::Utc::now().to_rfc3339(), // Also ISO 8601 compliant
-    //     topic,
-    //     content,
-    // };
-
     let content_bson = mongodb::bson::to_bson(&content);
     let content_bson = match content_bson {
         Ok(content_bson) => content_bson,
@@ -82,7 +89,7 @@ pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation
     };
 
     // If the topic exists, we need to update the thread.
-    if existing_thread.is_some() {
+    if thread_exists {
         let result = MONGODB_CLIENT.force().await.database(&MONGODB_DATABASE_NAME).collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME).update_one(
             doc! {
                 "thread_id": thread_id

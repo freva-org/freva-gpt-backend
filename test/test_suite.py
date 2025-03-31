@@ -303,3 +303,19 @@ def test_o3_mini_available():
 #     else:
 #         response2 = generate_full_respone("Thanks, please run the code now.", chatbot="o3-mini", thread_id=response.thread_id)
 #         assert any("hello world" in i.lower() for i in response2.codeoutput_variants) # No third try, if it fails again, it's a fail.
+
+def test_third_request():
+    '''Can the backend store information the user gave over multiple requests?''' # Since Version 1.8.14
+    # The test is for a regression that happened when the backend moved to mongodb from storing threads on disk.
+    # Basically, I forgot to append the existing thread, so the conten was just overwritten.
+    # This lead to the chatbot not being able to recall what the user wrote in their first request, once they do a third request, hence the name.
+    
+    # response1 = generate_full_respone("Please remember the following information: \"I am a software engineer and I like to play chess\".", chatbot="gpt-4o-mini")
+    # This doesn't work well because it technically does work, but is not in the style of what frevaGPT was designed to work with.
+    response1 = generate_full_respone("Hi! I'm Sebastian from the DRKZ. Who are you?", chatbot="gpt-4o-mini")
+    # The assistant should now remember the users name.
+    response2 = generate_full_respone("Nice to meet you! What do you think about chess?", chatbot="gpt-4o-mini", thread_id=response1.thread_id) # Just some filler. I'm not good at small talk.
+    
+    response3 = generate_full_respone("What was my name again?", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
+    
+    assert any("Sebastian" in i for i in response3.assistant_variants)

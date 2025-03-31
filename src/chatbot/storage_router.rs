@@ -1,5 +1,6 @@
 use super::types::Conversation;
 
+#[allow(dead_code)] // Only one variant of this enum is ever used, so this shuts up the warning
 /// Represents the possible available storage options for the threads
 enum AvailableStorages {
     Disk,
