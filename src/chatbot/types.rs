@@ -160,12 +160,13 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     prompt
                 };
 
-                // For debugging, check whether the prompt is the same as we are currently using.
-                if s == crate::chatbot::prompting::STARTING_PROMPT_JSON.to_string() {
-                    trace!("Prompt is the same as the starting prompt.");
-                } else {
-                    warn!("Recieved prompt that is different from the current starting prompt. Did the prompt change?");
-                };
+                // Templating was added to the starting prompt, which is why this cannot work for now. TODO!
+                // // For debugging, check whether the prompt is the same as we are currently using.
+                // if s == crate::chatbot::prompting::STARTING_PROMPT_JSON.to_string() {
+                //     trace!("Prompt is the same as the starting prompt.");
+                // } else {
+                //     warn!("Recieved prompt that is different from the current starting prompt. Did the prompt change?");
+                // };
 
 
                 trace!("Prompt: {:?}", prompt);
@@ -509,7 +510,7 @@ pub fn unescape_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
 
-    use crate::chatbot::{prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON}, thread_storage::read_thread};
+    use crate::chatbot::{prompting::{get_entire_prompt, get_entire_prompt_json}, thread_storage::read_thread};
 
     // The helper function to convert a StreamVariant to a ChatCompletionRequestMessage
     // has some problems, we'll test it here.
@@ -517,7 +518,7 @@ mod tests {
     #[test]
     fn test_help_convert_sv_ccrm() {
         let input = vec![
-            StreamVariant::Prompt(STARTING_PROMPT_JSON.to_string()),
+            StreamVariant::Prompt(get_entire_prompt_json("testing", "testing").expect("Error getting prompt JSON")), // This can panic because it's in a test.
             StreamVariant::ServerHint("{\"thread_id\": \"wLRFKFPcDgRJdZwSFBF82LWulvAaS5MR\"}".to_string()),            
             StreamVariant::User("plot a cirlce".to_string()),
             StreamVariant::Assistant("To plot a circle, we can use the `matplotlib` library to create a simple visualization. Let's create a plot with a circle centered at the origin (0, 0) with a specified radius. I'll use a radius of 1 for this example.\n\nLet's proceed with the code to generate this plot.".to_string()),
@@ -528,8 +529,8 @@ mod tests {
             StreamVariant::StreamEnd("Generation complete".to_string())
         ];
         let output = help_convert_sv_ccrm(input);
-        assert_eq!(output.len(), STARTING_PROMPT.len() + 5); // The length is dependant on the prompt, so we'll have to make it depend on the prompt's length.
-        assert_eq!(output[STARTING_PROMPT.len() + 1], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+        assert_eq!(output.len(), get_entire_prompt("testing", "testing").len() + 4); // The length is dependant on the prompt, so we'll have to make it depend on the prompt's length.
+        assert_eq!(output[get_entire_prompt("testing", "testing").len() + 1], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("To plot a circle, we can use the `matplotlib` library to create a simple visualization. Let's create a plot with a circle centered at the origin (0, 0) with a specified radius. I'll use a radius of 1 for this example.\n\nLet's proceed with the code to generate this plot.".to_string())),
             name: Some("frevaGPT".to_string()),
             tool_calls: Some(vec![ChatCompletionMessageToolCall{

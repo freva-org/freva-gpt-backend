@@ -24,7 +24,7 @@ use crate::{
             new_conversation_id, save_and_remove_conversation,
         },
         heartbeat::heartbeat_content,
-        prompting::{STARTING_PROMPT, STARTING_PROMPT_JSON},
+        prompting::{get_entire_prompt, get_entire_prompt_json},
         select_client,
         thread_storage::read_thread,
         types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
@@ -79,6 +79,27 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         }
         Some(thread_id) => (thread_id.to_string(), false),
     };
+
+    // New in Version 1.19.1: require the user_id to be set.
+    // Later, proper authentication will take over.
+    let user_id = match qstring.get("user_id") {
+        None | Some("") => {
+            // If the user ID is not found, we'll return a 400
+            warn!("The User requested a stream without a user_id.");
+            // For convenience, we'll also return the list of recieved parameters.
+            let query_parameter_keys = qstring.to_pairs()
+                .iter()
+                .map(|(key, _)| *key)
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            return HttpResponse::BadRequest().body(
+                "User ID not found. Please provide a non-empty user_id in the query parameters.\nHint: The following query parameters were received: ".to_string() + &query_parameter_keys,
+            );
+        }
+        Some(user_id) => user_id.to_string(),
+    };
+
 
     let input = match qstring.get("input") {
         None | Some("") => {
@@ -155,11 +176,21 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     let messages = if create_new {
         // If the thread is new, we'll start with the base messages and the user's input.
-        let mut base_message: Vec<ChatCompletionRequestMessage> = STARTING_PROMPT.clone();
+        let mut base_message: Vec<ChatCompletionRequestMessage> = get_entire_prompt(&user_id, &thread_id);
 
         trace!("Adding base message to stream.");
 
-        let starting_prompt = StreamVariant::Prompt((*STARTING_PROMPT_JSON).clone());
+        let entire_prompt = match get_entire_prompt_json(&user_id, &thread_id) {
+            Ok(entire_prompt) => entire_prompt,
+            Err(()) => {
+                // If we can't get the entire prompt, we'll return the information that we require the user_id and thread_id to be alphanumeric.
+                warn!("Error getting entire prompt, either user_id or thread_id are not alphanumeric.");
+                trace!("User ID: {}, Thread ID: {}", user_id, thread_id);
+                return HttpResponse::InternalServerError().body("Error creating prompt. Both user_id and thread_id need to be alphanumeric.");
+            }
+        };
+
+        let starting_prompt = StreamVariant::Prompt(entire_prompt);
         add_to_conversation(&thread_id, vec![starting_prompt], freva_config_path.clone());
 
         let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
