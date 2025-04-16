@@ -26,12 +26,12 @@ fn flush_stdout_stderr() {
 /// - Checks Auth setup.
 /// - Runs a few basic tests agains the code interpreter.
 pub async fn run_runtime_checks() {
-    // The lazy static STARTING_MESSAGE_JSON can fail if the prompt or messages cannot be converted to a string.
+    // The function can fail if the prompt or messages cannot be converted to a string.
     // To make sure that this is caught early, we'll just test it here.
-    let _ = chatbot::prompting::STARTING_PROMPT_JSON.clone();
+    let entire_prompt_json = chatbot::prompting::get_entire_prompt_json("testing", "testing");
     trace!(
         "Starting messages JSON: {:?}",
-        chatbot::prompting::STARTING_PROMPT_JSON
+        entire_prompt_json
     );
 
     trace!("Ping Response: {:?}", static_serve::RESPONSE_STRING);

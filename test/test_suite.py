@@ -242,7 +242,7 @@ def test_persistant_xarray_storage():
 
 def test_qwen_available():
     ''' Can the backend use non-OpenAI chatbots, such as Qwen? ''' # Since Version 1.7.1
-    response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit.", chatbot="qwen2.5:3b")
+    response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="qwen2.5:3b")
     # The assistant output should now contain "200 Ok"
     assert any("(200 ok)" in i.lower() for i in response.assistant_variants)
 

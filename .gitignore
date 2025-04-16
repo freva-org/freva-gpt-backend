@@ -6,6 +6,7 @@ target
 logs
 threads
 python_pickles
+rw_dir 
 
 # I keep the testing notebook the same between version unless something changes
 testing_copy.ipynb

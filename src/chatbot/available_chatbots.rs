@@ -8,6 +8,9 @@ pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
     // AvailableChatbots::OpenAI(OpenAIModels::o1_mini), // In Beta, doesn't do streaming yet.
     AvailableChatbots::OpenAI(OpenAIModels::gpt_3_5_turbo),
     AvailableChatbots::OpenAI(OpenAIModels::o3_mini),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1_mini),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1_nano),
     // AvailableChatbots::Ollama(OllamaModels::llama3_2_3B),
     // AvailableChatbots::Ollama(OllamaModels::llama3_1_70B),
     // AvailableChatbots::Ollama(OllamaModels::llama3_1_8B),
@@ -45,6 +48,9 @@ impl From<AvailableChatbots> for String {
                 OpenAIModels::gpt_4_turbo => "gpt-4-turbo".to_string(),
                 OpenAIModels::gpt_3_5_turbo => "gpt-3.5-turbo".to_string(),
                 OpenAIModels::o3_mini => "o3-mini".to_string(),
+                OpenAIModels::gpt_4_1 => "gpt-4.1".to_string(),
+                OpenAIModels::gpt_4_1_mini => "gpt-4.1-mini".to_string(),
+                OpenAIModels::gpt_4_1_nano => "gpt-4.1-nano".to_string(),
             },
             AvailableChatbots::Ollama(model) => match model {
                 OllamaModels::llama3_2_3B => "llama3.2".to_string(),
@@ -100,6 +106,13 @@ pub enum OpenAIModels {
     gpt_3_5_turbo,
     #[allow(non_camel_case_types)]
     o3_mini,
+    #[allow(non_camel_case_types)]
+    gpt_4_1,
+    #[allow(non_camel_case_types)]
+    gpt_4_1_mini,
+    #[allow(non_camel_case_types)]
+    gpt_4_1_nano,
+
 }
 
 #[derive(Debug, Clone, Copy)]
