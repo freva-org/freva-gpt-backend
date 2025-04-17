@@ -112,20 +112,6 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         Some(input) => input.to_string(),
     };
 
-    let user_id = match qstring.get("user_id") {
-        None | Some("") => {
-            warn!("The User requested a stream without a user_id being set, using temporary dummy user_id.");
-            // // If the user_id is not found, we'll return a 400
-            // return HttpResponse::BadRequest().body(
-            //     "User ID not found. Please provide a user_id in the query parameters.",
-            // );
-            
-            // For now, we will put a dummy user ID into there, but in a week or so, the user ID will be required.
-            "EMPTY USER!! TODO".to_string()
-        }
-        Some(user_id) => user_id.to_string(),
-    };
-
     debug!("Thread ID: {}, Input: {}", thread_id, input);
 
     // Because the call to conversation_state writes a warning if the thread is not found, we'll temporarily silence the logging.
