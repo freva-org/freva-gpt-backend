@@ -126,20 +126,29 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     }
 
     // We also require the freva_config_path to be set. From the frontend, it's called "freva_config".
+    // It can also be send via headers, there it is called "X-Freva-ConfigPath".
     let freva_config_path = match qstring
         .get("freva_config")
         .or_else(|| qstring.get("freva-config"))
     {
         // allow both freva_config and freva-config
         None | Some("") => {
-            warn!("The User requested a stream without a freva_config path being set.");
-            // // If the freva_config is not found, we'll return a 400
-            // return HttpResponse::BadRequest().body(
-            //     "Freva config not found. Please provide a freva_config in the query parameters.",
-            // );
 
-            // FIXME: remove this temporary fix
-            "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
+            // If the freva_config is not found in the parameters, we'll check the headers.
+            if let Some(header_val) =  headers.get("X-Freva-ConfigPath") {
+                if let Ok(header_val) = header_val.to_str() {
+                    debug!("Using header freva_config because parameter freva_config is empty: {:?}", header_val);
+                    header_val.to_string()
+                } else {
+                    warn!("The User requested a stream without a freva_config path being set.");
+                    // FIXME: remove this temporary fix
+                    "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
+                }
+            } else {   
+                warn!("The User requested a stream without a freva_config path being set.");
+                // FIXME: remove this temporary fix
+                "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
+            }
         }
         Some(freva_config_path) => freva_config_path.to_string(),
     };
