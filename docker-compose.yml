@@ -16,7 +16,7 @@ services:
       - /container/da/freva-gpt-backend-links/logs:/app/logs
       - /container/da/freva-gpt-backend-links/threads:/app/threads
       - /container/da/freva-gpt-backend-links/target:/app/target
-      - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles
+      - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles # Deprecated, once used for test data before freva support was added. Now used for debugging. 
       - /container/da/freva-gpt-backend-links/python_pickles:/app/python_pickles
     networks:
       freva-gpt:
