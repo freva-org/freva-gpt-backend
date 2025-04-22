@@ -13,11 +13,12 @@ use tracing::trace;
 #[docs_const]
 pub async fn available_chatbots_endpoint(req: HttpRequest) -> impl Responder {
     let qstring = qstring::QString::from(req.query_string());
+    let headers = req.headers();
 
     trace!("Query string: {:?}", qstring);
 
     // First try to authorize the user.
-    crate::auth::authorize_or_fail!(qstring);
+    crate::auth::authorize_or_fail!(qstring, headers);
 
     // The user wants a list of Strings, not the enum.
     let chatbot_string_list = crate::chatbot::available_chatbots::AVAILABLE_CHATBOTS

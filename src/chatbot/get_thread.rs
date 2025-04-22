@@ -27,9 +27,10 @@ use super::thread_storage::read_thread;
 #[docs_const] // writes the docstring into a variable called GET_THREAD_DOCS
 pub async fn get_thread(req: HttpRequest) -> impl Responder {
     let qstring = QString::from(req.query_string());
+    let headers = req.headers();
 
     // First try to authorize the user.
-    crate::auth::authorize_or_fail!(qstring);
+    crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {

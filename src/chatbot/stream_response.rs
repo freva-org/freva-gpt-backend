@@ -70,7 +70,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     trace!("Headers: {:?}", headers);
 
     // First try to authorize the user.
-    crate::auth::authorize_or_fail!(qstring);
+    crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID and input from the request's query parameters.
     let (thread_id, create_new) = match qstring.get("thread_id") {

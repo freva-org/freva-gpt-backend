@@ -30,9 +30,10 @@ pub async fn stop(req: HttpRequest) -> impl Responder {
         Error(String),
     }
     let qstring = qstring::QString::from(req.query_string());
+    let headers = req.headers();
 
     // First try to authorize the user.
-    crate::auth::authorize_or_fail!(qstring);
+    crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {
