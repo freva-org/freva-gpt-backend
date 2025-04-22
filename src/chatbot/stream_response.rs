@@ -939,7 +939,7 @@ async fn oai_stream_to_variants(
             // If we can't get the response, we'll return a generic error.
             warn!("Error getting response: {:?}", e);
             vec![StreamVariant::OpenAIError(
-                "Error getting response.".to_string(),
+                format!("Error getting response. Recieved error: {:?}", e),
             )]
         }
         None => {
@@ -1093,7 +1093,7 @@ async fn restart_stream(
                     // If we can't build the request, we'll return a generic error.
                     warn!("Error building request: {:?}", e);
                     vec![StreamVariant::ServerError(
-                        "Error building request.".to_string(),
+                        format!("Error building request: {:?}", e),
                     )]
                 }
                 Ok(request) => {
@@ -1108,7 +1108,7 @@ async fn restart_stream(
                             // If we can't create the stream, we'll return a generic error.
                             warn!("Error creating stream: {:?}", e);
                             vec![StreamVariant::ServerError(
-                                "Error creating new stream.".to_string(),
+                                format!("Error creating stream: {:?}", e),
                             )]
                         }
                         Ok(stream) => {
