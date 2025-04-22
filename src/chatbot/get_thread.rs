@@ -16,8 +16,9 @@ use super::thread_storage::read_thread;
 ///
 /// The auth key needs to match the one on the backend for the request to be authorized.
 /// To get the auth key, the user needs to contact the backend administrator.
+/// Authentication can also occur using a OpenID Connect token, which is then checked against the OpenID Connect provider of freva.
 ///
-/// If the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.
+/// If OpenIDConnect authentication fails and the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.
 ///
 /// If the thread id is not given, a BadRequest response is returned.
 ///

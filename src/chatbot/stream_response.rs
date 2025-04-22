@@ -36,7 +36,9 @@ use crate::{
 use super::{available_chatbots::AvailableChatbots, handle_active_conversations::generate_id};
 
 /// # Stream Response
-/// Takes in a thread_id, an input, a path to the freva config file, an auth_key and a chatbot and returns a stream of StreamVariants and their content.
+/// Takes in a thread_id, an input, a path to the freva_config file path, an auth_key, the user_id and a chatbot and returns a stream of StreamVariants and their content.
+/// All parameters can be sent via query parameters, but input, freva_config (as X-Freva-ConfigPath) and auth_key (In Authorization bearer format) are also accepted as headers.
+/// If the Authorization with header token via OpenIDConnect succeeds, that username is used.
 ///
 /// The thread_id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
 /// If it's empty or not given, a new thread is created.
