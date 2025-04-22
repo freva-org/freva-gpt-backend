@@ -13,8 +13,8 @@ use super::types::StreamVariant;
 /// TODO: move to other module?
 pub fn generate_id() -> String {
     trace!("Generating new ID.");
-    rand::thread_rng()
-        .sample_iter(rand::distributions::Alphanumeric)
+    rand::rng()
+        .sample_iter(rand::distr::Alphanumeric)
         .take(32)
         .map(char::from)
         .collect()

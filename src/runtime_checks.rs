@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 
 use crate::{
     auth::{AUTH_KEY, AUTH_URL},
