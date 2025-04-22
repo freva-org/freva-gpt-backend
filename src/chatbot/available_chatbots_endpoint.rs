@@ -18,7 +18,7 @@ pub async fn available_chatbots_endpoint(req: HttpRequest) -> impl Responder {
     trace!("Query string: {:?}", qstring);
 
     // First try to authorize the user.
-    crate::auth::authorize_or_fail!(qstring, headers);
+    let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
 
     // The user wants a list of Strings, not the enum.
     let chatbot_string_list = crate::chatbot::available_chatbots::AVAILABLE_CHATBOTS

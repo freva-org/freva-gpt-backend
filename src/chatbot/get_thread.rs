@@ -30,7 +30,7 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
     let headers = req.headers();
 
     // First try to authorize the user.
-    crate::auth::authorize_or_fail!(qstring, headers);
+    let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {
