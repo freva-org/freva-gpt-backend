@@ -64,8 +64,10 @@ use super::{available_chatbots::AvailableChatbots, handle_active_conversations::
 #[docs_const]
 pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let qstring = qstring::QString::from(req.query_string());
+    let headers = req.headers();
 
     trace!("Query string: {:?}", qstring);
+    trace!("Headers: {:?}", headers);
 
     // First try to authorize the user.
     crate::auth::authorize_or_fail!(qstring);
@@ -80,13 +82,27 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         Some(thread_id) => (thread_id.to_string(), false),
     };
 
+    let header_input = headers.get("input");
     let input = match qstring.get("input") {
         None | Some("") => {
-            // If the input is not found, we'll return a 400
-            warn!("The User requested a stream without an input.");
-            return HttpResponse::BadRequest().body(
-                "Input not found. Please provide a non-empty input in the query parameters.",
-            );
+            // The input may instead be inside the header.
+            if let Some(header_input) = header_input {
+                debug!("Using header input because parameter input is empty: {:?}", header_input);
+                // If the header is not empty, we'll use it as the input.
+                match header_input.to_str() {
+                    Ok(input) => input.to_string(),
+                    Err(e) => {
+                        warn!("Error converting header input to string: {:?}", e);
+                        return HttpResponse::BadRequest().body("Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.");
+                    }
+                }
+            } else {
+                // If the input is not found (neither in header nor parameters), we'll return a 400
+                warn!("The User requested a stream without an input.");
+                return HttpResponse::BadRequest().body(
+                    "Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.",
+                );
+            }
         }
         Some(input) => input.to_string(),
     };
