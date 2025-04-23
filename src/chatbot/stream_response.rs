@@ -18,7 +18,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     chatbot::{
-        available_chatbots::DEFAULTCHATBOT,
+        available_chatbots::{model_ends_on_no_choice, DEFAULTCHATBOT},
         handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
             new_conversation_id, save_and_remove_conversation,
@@ -26,7 +26,7 @@ use crate::{
         heartbeat::heartbeat_content,
         prompting::{get_entire_prompt, get_entire_prompt_json},
         select_client,
-        thread_storage::read_thread,
+        storage_router::read_thread,
         types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
     },
     logging::{silence_logger, undo_silence_logger},
@@ -116,7 +116,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     // Because the call to conversation_state writes a warning if the thread is not found, we'll temporarily silence the logging.
     silence_logger();
-    let state = conversation_state(&thread_id);
+    let state = conversation_state(&thread_id).await;
     undo_silence_logger();
 
     // To avoid one thread being streamed more than once at the same time, we'll check if the thread is already being streamed.
@@ -191,7 +191,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         };
 
         let starting_prompt = StreamVariant::Prompt(entire_prompt);
-        add_to_conversation(&thread_id, vec![starting_prompt], freva_config_path.clone());
+        add_to_conversation(&thread_id, vec![starting_prompt], freva_config_path.clone(), user_id.clone());
 
         let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
             name: Some("user".to_string()),
@@ -204,7 +204,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     } else {
         // Don't create a new thread, but continue the existing one.
         debug!("Expecting there to be a file for thread_id {}", thread_id);
-        let content = match read_thread(thread_id.as_str()) {
+        let content = match read_thread(thread_id.as_str()).await {
             Ok(content) => content,
             Err(e) => {
                 // If we can't read the thread, we'll return a generic error.
@@ -235,6 +235,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         &thread_id,
         vec![server_hint, StreamVariant::User(input.clone())],
         freva_config_path.clone(),
+        user_id.clone(),
     );
 
     let request: CreateChatCompletionRequest = match build_request(messages, chatbot) {
@@ -247,7 +248,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     };
     trace!("Request built!");
 
-    create_and_stream(request, thread_id, freva_config_path, chatbot).await
+    create_and_stream(request, thread_id, freva_config_path, chatbot, user_id).await
 }
 
 /// A simple helper function to build the stream.
@@ -310,6 +311,7 @@ async fn create_and_stream(
     thread_id: String,
     freva_config_path: String,
     chatbot: AvailableChatbots,
+    user_id: String,
 ) -> actix_web::HttpResponse {
     let open_ai_stream = match select_client(chatbot)
         .await
@@ -351,8 +353,9 @@ async fn create_and_stream(
             mut llama_tool_call_content,
             mut reciever,
         )| {
-            // It is required to clone the freva_config_path, because it is moved into the closure.
+            // It is required to clone the freva_config_path, because it is moved into the closure. Same with the user_id.
             let freva_config_path_clone = freva_config_path.clone();
+            let user_id = user_id.clone();
             async move {
                 // Even higher priority than stopping the stream is sending the thread_id hint.
                 if should_hint_thread_id {
@@ -425,14 +428,14 @@ async fn create_and_stream(
 
                     // We do it in this order to be able to send one last event to the client signaling the end of the stream.
                     trace!("Stream is stopping, sent one last event, removing the conversation from the pool and then aborting stream.");
-                    save_and_remove_conversation(&thread_id);
+                    save_and_remove_conversation(&thread_id).await;
                     None
                 } else {
                     // If the stream should not stop, we'll continue.
 
                     // First checks whether it should stop the stream. (This happens if the client sent a stop request.)
                     if matches!(
-                        conversation_state(&thread_id),
+                        conversation_state(&thread_id).await,
                         Some(ConversationState::Stopping)
                     ) {
                         debug!("Conversation with thread_id {} has been stopped, sending one last event and then aborting stream.", thread_id);
@@ -441,6 +444,7 @@ async fn create_and_stream(
                             &thread_id,
                             vec![StreamVariant::StreamEnd("Conversation aborted".to_string())],
                             freva_config_path_clone,
+                            user_id.clone(),
                         );
                         end_conversation(&thread_id);
                         Some((
@@ -493,6 +497,7 @@ async fn create_and_stream(
                                         &thread_id,
                                         vec![heartbeat.clone()],
                                         freva_config_path_clone.clone(),
+                                        user_id.clone(),
                                     );
                                     // Actually sleep three seconds
                                     // std::thread::sleep(std::time::Duration::from_secs(5)); // Works
@@ -549,6 +554,7 @@ async fn create_and_stream(
                                 &thread_id,
                                 output.clone(),
                                 freva_config_path_clone.clone(),
+                                user_id.clone(),
                             );
 
                             // The output can contain more than one variant, so we'll add them to the queue.
@@ -601,6 +607,7 @@ async fn create_and_stream(
                             &thread_id,
                             variants.clone(),
                             freva_config_path_clone.clone(),
+                            user_id.clone(),
                         );
 
                         // Check whether the stream should end by checking the variants.
@@ -810,7 +817,7 @@ async fn oai_stream_to_variants(
                         debug!("Got stop event from OpenAI: {:?}", reason);
                         handle_stop_event(
                             reason,
-                            choice,
+                            Some(choice),
                             tool_arguments,
                             tool_name,
                             tool_id,
@@ -937,8 +944,21 @@ async fn oai_stream_to_variants(
                     }
                 }
             } else {
-                debug!("No response found, ending stream.");
-                vec![StreamVariant::OpenAIError("No response found.".to_string())]
+                // Some models (specifically some of the qwen family, have the tendency to not return any choices to mark the end of the stream.)
+                if model_ends_on_no_choice(chatbot) {
+                    debug!("Qwen-like model ended stream without choice, simulating stop event.");
+                    // Differentiatie between a tool call and a standard stop by the tool arguments and tool name. 
+                    let finish_reason = if !tool_arguments.is_empty() && tool_name.is_some() {
+                        FinishReason::ToolCalls
+                    } else {
+                        FinishReason::Stop
+                    };
+                    handle_stop_event(finish_reason, None, tool_arguments, tool_name, tool_id, thread_id, open_ai_stream, &response, chatbot, reciever).await
+                    // vec![StreamVariant::StreamEnd("Qwen-like stream ended".to_string())]
+                } else {
+                    info!("No response found, ending stream.");
+                    vec![StreamVariant::OpenAIError("No response found.".to_string())]
+                }
             }
         }
         Some(Err(e)) => {
@@ -986,7 +1006,7 @@ async fn oai_stream_to_variants(
 
 async fn handle_stop_event(
     reason: async_openai::types::FinishReason,
-    choice: &ChatChoiceStream,
+    choice: Option<&ChatChoiceStream>,
     tool_arguments: &mut String,
     tool_name: &mut Option<String>,
     tool_id: &mut String,
@@ -1019,10 +1039,12 @@ async fn handle_stop_event(
         }
         async_openai::types::FinishReason::ToolCalls => {
             // We expect there to now be a tool call in the response.
+            if let Some(choice) = choice {
 
-            if let Some(content) = choice.delta.tool_calls.clone() {
-                // Handle the tool call
-                trace!("Tool call: {:?}", content);
+                if let Some(content) = choice.delta.tool_calls.clone() {
+                    // Handle the tool call
+                    trace!("Tool call: {:?}", content);
+                }
             }
 
             let mut all_generated_variants = vec![];

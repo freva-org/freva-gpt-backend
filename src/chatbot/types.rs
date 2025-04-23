@@ -28,6 +28,8 @@ pub struct ActiveConversation {
     pub conversation: Conversation,
 
     pub last_activity: std::time::Instant, // The last time the conversation was active. If the conversation is inactive for too long, it will be ended.
+
+    pub user_id: String, // The ID of the user, as sent from the frontend/client.
 }
 
 ///
@@ -549,7 +551,7 @@ mod tests {
     fn test_help_convert_sv_ccrm_real_data() {
         // Instead of using constructed data, we'll actually read the data from a file.
         // In this case, from a file that, when read, triggered the error this test is supposed to catch.
-        let input = read_thread("testthread");
+        let input = crate::chatbot::thread_storage::read_thread("testthread"); // Always read from disk
         assert!(
             input.is_ok(),
             "Error reading test thread file: {:?}",

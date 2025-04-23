@@ -16,8 +16,14 @@ pub mod get_thread;
 /// Internal use: handles the storing and retrieval of the streamed data
 pub mod thread_storage;
 
+/// Internal use: handles the storing and retrieval of the streamed data in a mongoDB database
+pub mod mongodb_storage;
+
 /// Streams the response from the chatbot
 pub mod stream_response;
+
+/// Routes requests to the storage backend (disk or mongoDB)
+pub mod storage_router;
 
 /// Handles the logic for storing and using the global conversation state
 pub mod handle_active_conversations;

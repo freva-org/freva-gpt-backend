@@ -10,3 +10,6 @@ rw_dir
 
 # I keep the testing notebook the same between version unless something changes
 testing_copy.ipynb
+
+# Python caches for the tests are binary and it doesn't make sense to keep them in the repo
+__pycache__

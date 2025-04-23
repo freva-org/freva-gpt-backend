@@ -6,7 +6,7 @@ use tracing::{debug, info, trace, warn};
 use crate::{
     chatbot::{
         handle_active_conversations::{conversation_state, get_conversation},
-        thread_storage::read_thread,
+        storage_router::read_thread,
         types::{ConversationState, StreamVariant},
     },
     logging::{silence_logger, undo_silence_logger},
@@ -36,7 +36,7 @@ pub async fn start_code_interpeter(
             info!("Thread_id not set, assuming in testing mode. Not setting freva_config_path.");
             "".to_string()
         }
-        Some(thread_id) => match conversation_state(&thread_id) {
+        Some(thread_id) => match conversation_state(&thread_id).await {
             None => {
                 warn!("No conversation state found while trying to run the code interpreter. Not setting freva_config_path, this WILL break any calls to the code interpreter that require it.");
                 "".to_string()
@@ -62,7 +62,7 @@ pub async fn start_code_interpeter(
     // Also retrieve all previous code interpreter inputs to get all libraries that are needed.
     let previous_code_interpreter_imports = match thread_id.clone() {
         None => vec![],
-        Some(thread_id) => retrieve_previous_code_interpreter_imports(&thread_id),
+        Some(thread_id) => retrieve_previous_code_interpreter_imports(&thread_id).await,
     };
 
     // Now, we have to convert the arguments from JSON to a struct.
@@ -253,12 +253,12 @@ pub fn run_code_interpeter(arguments: String) {
 
 /// Retrieves all previous code interpreter inputs from the conversation state.
 /// Returns a string with all the imports, seperated by newlines.
-fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> Vec<String> {
+async fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> Vec<String> {
     // The running conversation is in the global variable.
     let mut this_conversation = get_conversation(thread_id).unwrap_or_default();
     // The past conversation is stored on disk.
     silence_logger();
-    let past_conversation = read_thread(thread_id).unwrap_or_default(); // We don't want to log an error if the file doesn't exist.
+    let past_conversation = read_thread(thread_id).await.unwrap_or_default(); // We don't want to log an error if the file doesn't exist.
     undo_silence_logger();
     this_conversation.extend(past_conversation);
 
