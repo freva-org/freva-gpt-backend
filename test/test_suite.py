@@ -23,6 +23,11 @@ def get_avail_chatbots():
     print(response.text)
     return response.json()
 
+def get_user_threads():
+    response = get_request("/getuserthreads?")
+    print(response.text)
+    return response.json()
+
 @dataclass
 class StreamResult:
     chatbot: str | None
@@ -319,3 +324,32 @@ def test_third_request():
     response3 = generate_full_respone("What was my name again?", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
     
     assert any("Sebastian" in i for i in response3.assistant_variants)
+
+
+def test_get_user_threads():
+    ''' Can the Frontend request the threads of a user? ''' # Since Version 1.9.0
+    # Version 1.9.0 introduced the ability to request the threads of a user.
+    # This requires MongoDB to be turned on, so this switch can be turned off to disable this feature.
+    should_test = True
+    if should_test:
+        response = get_user_threads()
+        # The response should be a list of threads, each with a thread_id and a chatbot name
+        assert isinstance(response, list)
+        assert all(isinstance(i, dict) for i in response)
+        assert all("thread_id" in i for i in response)
+        assert all("user_id" in i for i in response)
+        assert all("date" in i for i in response)
+        assert all("topic" in i for i in response)
+        assert all("content" in i for i in response)
+        for i in response:
+            assert isinstance(i["thread_id"], str)
+            assert isinstance(i["user_id"], str)
+            assert isinstance(i["date"], str)
+            assert isinstance(i["topic"], str)
+            assert isinstance(i["content"], list)
+            inner_content = i["content"]
+            # The content is a list of Stream Variants. Each must have a variant and a content
+            assert all(isinstance(j, dict) for j in inner_content)
+            assert all("variant" in j for j in inner_content)
+            assert all("content" in j for j in inner_content)
+        

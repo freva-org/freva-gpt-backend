@@ -1,5 +1,6 @@
 use std::env;
 
+use futures::TryStreamExt;
 use mongodb::bson::doc;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -165,6 +166,40 @@ pub async fn read_thread(thread_id: &str) -> Option<MongoDBThread> {
         }
     }
 
+}
+
+/// Recieves a user_id and returns the last 10 threads of the user.
+pub async fn read_threads(user_id: &str) -> Vec<MongoDBThread> {
+    debug!("Will load threads for user {}", user_id);
+
+    // Query the database by user_id.
+    let result = MONGODB_CLIENT.force().await.database(&MONGODB_DATABASE_NAME).collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME).find(
+        doc! {
+            "user_id": user_id
+        }
+    ).limit(-10) // Don't do 10 requests, do a single one for all 10. 
+    .sort(doc! {
+        "date": -1
+    }).await;
+
+    match result {
+        Ok (mut inner) => {
+            debug!("Loaded threads from database.");
+            // The logic for collecting the theads is a bit tricky.
+            let mut thread_vec = Vec::new();
+            // inner.collect::<Vec<MongoDBThread>>().await.unwrap_or_default().into()
+            while let Ok(Some(inner)) = inner.try_next().await {
+                thread_vec.push(inner);
+            };
+            // Is the order correct? TODO!
+            thread_vec
+
+        },
+        Err (e) => {
+            info!("Failed to load threads: {:?}; expecting it to not exist", e);
+            vec![]
+        }
+    }
 }
 
 

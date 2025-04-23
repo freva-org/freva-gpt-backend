@@ -178,9 +178,9 @@ fn check_token(token: &str) -> Result<String, HttpResponse> {
     Ok(username)
 }
 
-// The authorize_or_fail macro is wrapping the function and return the error variant
-// if it fails. If it succeeds because a good authentication token was given via header, the 
-// username is returned. If the token was given via query string, None is returned.
+/// The authorize_or_fail macro is wrapping the function and return the error variant
+/// if it fails. If it succeeds because a good authentication token was given via header, the 
+/// username is returned. If the token was given via query string, None is returned.
 macro_rules! authorize_or_fail {
     ($qstring:expr, $headers:expr) => {
         match $crate::auth::authorize_or_fail_fn(&$qstring, $headers) {

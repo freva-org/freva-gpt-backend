@@ -2,13 +2,13 @@ use super::types::Conversation;
 
 #[allow(dead_code)] // Only one variant of this enum is ever used, so this shuts up the warning
 /// Represents the possible available storage options for the threads
-enum AvailableStorages {
+pub enum AvailableStorages {
     Disk,
     MongoDB,
 }
 
 /// The currently active storage for the threads
-static STORAGE: AvailableStorages = AvailableStorages::MongoDB;
+pub static STORAGE: AvailableStorages = AvailableStorages::MongoDB;
 
 /// Appends a thread to the storage. User_Id is ignored for the disk storage.
 pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation) {

@@ -37,6 +37,9 @@ pub mod available_chatbots_endpoint;
 /// Internally used to handle the heartbeat that is happening while the code interpreter is running.
 pub mod heartbeat;
 
+/// Returns the latest few threads for a given authenticated user
+pub mod get_user_threads;
+
 // Defines a few useful static variables that are used throughout the chatbot.
 
 use std::sync::{Arc, Mutex};
