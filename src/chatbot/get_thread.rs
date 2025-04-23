@@ -16,8 +16,9 @@ use super::storage_router::read_thread;
 ///
 /// The auth key needs to match the one on the backend for the request to be authorized.
 /// To get the auth key, the user needs to contact the backend administrator.
+/// Authentication can also occur using a OpenID Connect token, which is then checked against the OpenID Connect provider of freva.
 ///
-/// If the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.
+/// If OpenIDConnect authentication fails and the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.
 ///
 /// If the thread id is not given, a BadRequest response is returned.
 ///
@@ -27,9 +28,10 @@ use super::storage_router::read_thread;
 #[docs_const] // writes the docstring into a variable called GET_THREAD_DOCS
 pub async fn get_thread(req: HttpRequest) -> impl Responder {
     let qstring = QString::from(req.query_string());
+    let headers = req.headers();
 
     // First try to authorize the user.
-    crate::auth::authorize_or_fail!(qstring);
+    let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {

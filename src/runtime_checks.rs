@@ -1,9 +1,9 @@
 use std::io::Write;
 
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, info, trace};
 
 use crate::{
-    auth::AUTH_KEY,
+    auth::{AUTH_KEY, AUTH_URL},
     chatbot::{self, stream_response::STREAM_STOP_CONTENT, types::StreamVariant},
     static_serve,
     tool_calls::route_call::print_and_clear_tool_logs,
@@ -59,12 +59,31 @@ pub async fn run_runtime_checks() {
             std::process::exit(1);
         }
     };
+
     AUTH_KEY.set(auth_string).unwrap_or_else(|_| {
         error!("Error setting the authentication string. Exiting...");
         eprintln!("Error setting the authentication string. Exiting...");
         std::process::exit(1);
     });
-    info!("Authentication string set successfully.");
+    
+    let auth_url = match std::env::var("AUTH_URL") {
+        Ok(auth_url) => auth_url,
+        Err(e) => {
+            error!("Error reading the authentication URL from the environment variables: {e:?}",);
+            eprintln!(
+                "Error reading the authentication URL from the environment variables: {e:?}"
+            );
+            std::process::exit(1);
+        }
+    };
+    
+    AUTH_URL.set(auth_url).unwrap_or_else(|_| {
+        error!("Error setting the authentication URL. Exiting...");
+        eprintln!("Error setting the authentication URL. Exiting...");
+        std::process::exit(1);
+    });
+
+    info!("Authentication strings set successfully.");
     println!("Success!");
     
     // Run the basic checks for the code interpreter.
@@ -102,10 +121,6 @@ pub async fn run_runtime_checks() {
     } else {
         println!("Some required directories are missing or not readable");
         error!("Some required directories are missing or not readable");
-    }
-    if !check_directory("/data/inputFiles") {
-        println!("The test data is not accessable. This means that the test data will not be available for the runtime.");
-        warn!("The test data is not accessable. This means that the test data will not be available for the runtime.");
     }
     
     print!("Checking robustness and jupyter like behavior of the code interpreter... ");

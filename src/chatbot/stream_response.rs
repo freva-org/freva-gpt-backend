@@ -36,7 +36,9 @@ use crate::{
 use super::{available_chatbots::AvailableChatbots, handle_active_conversations::generate_id};
 
 /// # Stream Response
-/// Takes in a thread_id, an input, a path to the freva config file, an auth_key and a chatbot and returns a stream of StreamVariants and their content.
+/// Takes in a thread_id, an input, a path to the freva_config file path, an auth_key, the user_id and a chatbot and returns a stream of StreamVariants and their content.
+/// All parameters can be sent via query parameters, but input, freva_config (as X-Freva-ConfigPath) and auth_key (In Authorization bearer format) are also accepted as headers.
+/// If the Authorization with header token via OpenIDConnect succeeds, that username is used.
 ///
 /// The thread_id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
 /// If it's empty or not given, a new thread is created.
@@ -64,11 +66,13 @@ use super::{available_chatbots::AvailableChatbots, handle_active_conversations::
 #[docs_const]
 pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let qstring = qstring::QString::from(req.query_string());
+    let headers = req.headers();
 
     trace!("Query string: {:?}", qstring);
+    trace!("Headers: {:?}", headers);
 
     // First try to authorize the user.
-    crate::auth::authorize_or_fail!(qstring);
+    let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID and input from the request's query parameters.
     let (thread_id, create_new) = match qstring.get("thread_id") {
@@ -80,34 +84,57 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         Some(thread_id) => (thread_id.to_string(), false),
     };
 
+
     // New in Version 1.19.1: require the user_id to be set.
     // Later, proper authentication will take over.
-    let user_id = match qstring.get("user_id") {
-        None | Some("") => {
-            // If the user ID is not found, we'll return a 400
-            warn!("The User requested a stream without a user_id.");
-            // For convenience, we'll also return the list of recieved parameters.
-            let query_parameter_keys = qstring.to_pairs()
-                .iter()
-                .map(|(key, _)| *key)
-                .collect::<Vec<_>>()
-                .join(", ");
-
-            return HttpResponse::BadRequest().body(
-                "User ID not found. Please provide a non-empty user_id in the query parameters.\nHint: The following query parameters were received: ".to_string() + &query_parameter_keys,
-            );
+    let user_id = match maybe_username {
+        Some(username) => {
+            // If the user is authenticated, we'll use their username as the user_id.
+            debug!("User is authenticated, using their username as user_id: {}", username);
+            username
         }
-        Some(user_id) => user_id.to_string(),
+        None => {
+            match qstring.get("user_id") {
+                None | Some("") => {
+                    // If the user ID is not found, we'll return a 400
+                    warn!("The User requested a stream without a user_id.");
+                    // For convenience, we'll also return the list of recieved parameters.
+                    let query_parameter_keys = qstring.to_pairs()
+                        .iter()
+                        .map(|(key, _)| *key)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    
+                    return HttpResponse::BadRequest().body(
+                        "User ID not found. Please provide a non-empty user_id in the query parameters.\nHint: The following query parameters were received: ".to_string() + &query_parameter_keys,
+                    );
+                }
+                Some(user_id) => user_id.to_string(),
+            }
+        }
     };
 
-
+    let header_input = headers.get("input");
     let input = match qstring.get("input") {
         None | Some("") => {
-            // If the input is not found, we'll return a 400
-            warn!("The User requested a stream without an input.");
-            return HttpResponse::BadRequest().body(
-                "Input not found. Please provide a non-empty input in the query parameters.",
-            );
+            // The input may instead be inside the header.
+            if let Some(header_input) = header_input {
+                debug!("Using header input because parameter input is empty: {:?}", header_input);
+                // If the header is not empty, we'll use it as the input.
+                match header_input.to_str() {
+                    Ok(input) => input.to_string(),
+                    Err(e) => {
+                        warn!("Error converting header input to string: {:?}", e);
+                        return HttpResponse::BadRequest().body("Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.");
+                    }
+                }
+            } else {
+                // If the input is not found (neither in header nor parameters), we'll return a 400
+                warn!("The User requested a stream without an input.");
+                return HttpResponse::BadRequest().body(
+                    "Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.",
+                );
+            }
         }
         Some(input) => input.to_string(),
     };
@@ -131,20 +158,29 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     }
 
     // We also require the freva_config_path to be set. From the frontend, it's called "freva_config".
+    // It can also be send via headers, there it is called "X-Freva-ConfigPath".
     let freva_config_path = match qstring
         .get("freva_config")
         .or_else(|| qstring.get("freva-config"))
     {
         // allow both freva_config and freva-config
         None | Some("") => {
-            warn!("The User requested a stream without a freva_config path being set.");
-            // // If the freva_config is not found, we'll return a 400
-            // return HttpResponse::BadRequest().body(
-            //     "Freva config not found. Please provide a freva_config in the query parameters.",
-            // );
 
-            // FIXME: remove this temporary fix
-            "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
+            // If the freva_config is not found in the parameters, we'll check the headers.
+            if let Some(header_val) =  headers.get("X-Freva-ConfigPath") {
+                if let Ok(header_val) = header_val.to_str() {
+                    debug!("Using header freva_config because parameter freva_config is empty: {:?}", header_val);
+                    header_val.to_string()
+                } else {
+                    warn!("The User requested a stream without a freva_config path being set.");
+                    // FIXME: remove this temporary fix
+                    "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
+                }
+            } else {   
+                warn!("The User requested a stream without a freva_config path being set.");
+                // FIXME: remove this temporary fix
+                "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
+            }
         }
         Some(freva_config_path) => freva_config_path.to_string(),
     };
@@ -965,7 +1001,7 @@ async fn oai_stream_to_variants(
             // If we can't get the response, we'll return a generic error.
             warn!("Error getting response: {:?}", e);
             vec![StreamVariant::OpenAIError(
-                "Error getting response.".to_string(),
+                format!("Error getting response. Recieved error: {:?}", e),
             )]
         }
         None => {
@@ -1121,7 +1157,7 @@ async fn restart_stream(
                     // If we can't build the request, we'll return a generic error.
                     warn!("Error building request: {:?}", e);
                     vec![StreamVariant::ServerError(
-                        "Error building request.".to_string(),
+                        format!("Error building request: {:?}", e),
                     )]
                 }
                 Ok(request) => {
@@ -1136,7 +1172,7 @@ async fn restart_stream(
                             // If we can't create the stream, we'll return a generic error.
                             warn!("Error creating stream: {:?}", e);
                             vec![StreamVariant::ServerError(
-                                "Error creating new stream.".to_string(),
+                                format!("Error creating stream: {:?}", e),
                             )]
                         }
                         Ok(stream) => {

@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::io::Write;
 
 use base64::Engine;
@@ -28,9 +29,9 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
         // We need a PyDict to store the local and global variables for the call.
         let locals = match try_read_locals(py, thread_id.clone()) {
             Some(locals) => locals,
-            None => PyDict::new_bound(py),
+            None => PyDict::new(py),
         };
-        let globals = PyDict::new_bound(py);
+        let globals = PyDict::new(py);
 
         // Debug: Overhead debugging
         if let Ok(overhead_time) =
@@ -83,17 +84,28 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 debug!("Executing all but the last line.");
                 trace!("Executing code: {}", rest_lines);
                 // We'll execute the code in the locals.
-                match py.run_bound(&rest_lines, Some(&globals), Some(&locals)) {
-                    Ok(()) => {
-                        info!("Code executed successfully.");
-                        // But we continue with the last line.
+                let rest_lines_cstr = CString::new(rest_lines);
+                match rest_lines_cstr {
+                    Ok(rest_lines_cstr) => {
+                        match py.run(&rest_lines_cstr, Some(&globals), Some(&locals)) {
+                            Ok(()) => {
+                                info!("Code executed successfully.");
+                                // But we continue with the last line.
+                            }
+                            Err(e) => {
+                                // Also store the locals to a pickle file so they aren't lost
+                                if let Some(thread_id) = thread_id {
+                                    save_to_pickle_file(py, locals, thread_id);
+                                }
+                                return Err(format_pyerr(&e, py));
+                            }
+                        }
                     }
                     Err(e) => {
-                        // Also store the locals to a pickle file so they aren't lost
-                        if let Some(thread_id) = thread_id {
-                            save_to_pickle_file(py, locals, thread_id);
-                        }
-                        return Err(format_pyerr(&e, py));
+                        // If we couldn't convert the code to a C string, we'll just return an error.
+                        // This should never happen, but we'll just return an error.
+                        warn!("Error converting code to C string: {:?}", e);
+                        return Err(format!("Error converting code to C string: {e}"));
                     }
                 }
             }
@@ -130,7 +142,16 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 trace!("Last line: {}", last_line);
                 // Now the rest of the lines are executed if they exist.
                 // Now we don't execute, but evaluate the last line.
-                match py.eval_bound(&last_line, Some(&globals), Some(&locals)) {
+                let last_line_cstr = match CString::new(last_line) {
+                    Ok(last_line_cstr) => last_line_cstr,
+                    Err(e) => {
+                        // If we couldn't convert the code to a C string, we'll just return an error.
+                        // This should never happen, but we'll just return an error.
+                        warn!("Error converting code to C string: {:?}", e);
+                        return Err(format!("Error converting code to C string: {e}"));
+                    }
+                };
+                match py.eval(&last_line_cstr, Some(&globals), Some(&locals)) {
                     Ok(content) => {
                         // We now have a python value in here.
                         // To return it, we can convert it to a string and return it.
@@ -181,8 +202,8 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
 
         // Before returning the result, we'll have to flush stdout and stderr IN PYTHON.
 
-        let flush = py.run_bound(
-            "import sys;sys.stdout.flush();sys.stderr.flush()",
+        let flush = py.run(
+            &CString::new("import sys;sys.stdout.flush();sys.stderr.flush()").expect("Constant CString failed conversion"),
             Some(&globals),
             Some(&locals),
         );
@@ -234,7 +255,7 @@ fn should_eval(line: &str, py: Python) -> bool {
 
     // New approach: Python has the ast library, which we can use to parse the line and decide whether it should be evaluated.
 
-    let to_check = format!(
+    let to_check = CString::new(format!(
         r#"import ast
 should_eval = None
 try:
@@ -245,11 +266,11 @@ try:
 except Exception:
     should_eval = False
     "#
-    );
-    let locals = PyDict::new_bound(py);
-    let globals = PyDict::new_bound(py);
+    )).expect("Constant CString failed conversion");
+    let locals = PyDict::new(py);
+    let globals = PyDict::new(py);
 
-    match py.run_bound(&to_check, Some(&globals), Some(&locals)) {
+    match py.run(&to_check, Some(&globals), Some(&locals)) {
         Ok(()) => {
             let should_eval = locals.get_item("should_eval");
             match should_eval {
@@ -283,7 +304,7 @@ except Exception:
 fn format_pyerr(e: &PyErr, py: Python) -> String {
     // The type is "PyErr", which we will just just use to get the traceback.
     trace!("Error executing code: {:?}", e);
-    match e.traceback_bound(py) {
+    match e.traceback(py) {
         Some(traceback) => {
             // We'll just return the traceback for now.
             match traceback.format() {
@@ -361,7 +382,7 @@ fn try_read_locals(py: Python, thread_id: Option<String>) -> Option<Bound<PyDict
     }
 
     // The Python code to read the pickle file to a variable named loaded_vars.
-    let code = format!(
+    let code = CString::new(format!(
         r#"import dill
 
 # Load picklable variables
@@ -370,11 +391,11 @@ with open('{pickleable_path}', 'rb') as f:
 
 # Now, 'loaded_vars' contains all the variables to be used as locals
 "#
-    );
-    let temp_locals = PyDict::new_bound(py);
+    )).expect("Constant CString failed conversion");
+    let temp_locals = PyDict::new(py);
 
     // Run the code; if it doesn't work, we'll just return None.
-    py.run_bound(&code, Some(&PyDict::new_bound(py)), Some(&temp_locals))
+    py.run(&code, Some(&PyDict::new(py)), Some(&temp_locals))
         .ok()?;
 
     // Now we have the loaded_vars in the locals.
@@ -399,7 +420,7 @@ fn save_to_pickle_file(py: Python, locals: Bound<PyDict>, thread_id: String) {
 
     // First we filter the locals to only include the ones that are actually serializable.
     // We'll execute some python code to do that.
-    let code = format!(
+    let code = CString::new(format!(
         r#"import dill # like pickle, but can handle >2GB variables
 from types import ModuleType
 
@@ -424,11 +445,11 @@ for key, value in local_items.items():
 # Save picklable variables
 with open('python_pickles/{thread_id}.pickle', 'wb') as f:
     dill.dump(pickleable_vars, f)"#
-    );
+    )).expect("Constant CString failed conversion");
     let locals = locals.clone();
 
     // We'll run the code.
-    match py.run_bound(&code, Some(&PyDict::new_bound(py)), Some(&locals)) {
+    match py.run(&code, Some(&PyDict::new(py)), Some(&locals)) {
         Ok(()) => {
             // The code executed successfully.
             trace!("Successfully saved the locals to a pickle file.");

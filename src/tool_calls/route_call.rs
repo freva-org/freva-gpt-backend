@@ -6,7 +6,7 @@ use fs2::FileExt;
 use itertools::Itertools;
 use std::io::Write;
 use tokio::sync::mpsc;
-use tracing::{debug, error};
+use tracing::{debug, error, info, warn};
 
 use crate::chatbot::types::StreamVariant;
 
@@ -64,17 +64,17 @@ pub(crate) fn print_and_clear_tool_logs(
         .write(true)
         .open("logging_from_tools.log")
     {
-        Err(e) => error!("Failed to open the tool logger file: {}", e),
+        Err(e) => warn!("Failed to open the tool logger file: {}", e),
         Ok(mut file) => {
             // To be sure that it doesn't fail, lock the file.
             if let Err(e) = file.lock_exclusive() {
-                error!("Failed to lock the tool logger file: {}", e);
+                warn!("Failed to lock the tool logger file: {}", e);
                 return;
             }
 
             let mut content = Vec::new();
             if let Err(e) = file.read_to_end(&mut content) {
-                error!("Failed to read the tool logger file: {}", e);
+                warn!("Failed to read the tool logger file: {}", e);
             } else {
                 // If the content is not empty, log it to this process' logger.
                 if !content.is_empty() {
@@ -93,7 +93,7 @@ pub(crate) fn print_and_clear_tool_logs(
                             if let Ok(overhead) = overhead.1.parse::<u64>() {
                                 pits.push(UNIX_EPOCH + std::time::Duration::from_nanos(overhead));
                             } else {
-                                error!("Failed to parse the overhead time: {}", overhead.1);
+                                warn!("Failed to parse the overhead time: {}", overhead.1);
                             }
                         }
                     }
@@ -120,34 +120,34 @@ pub(crate) fn print_and_clear_tool_logs(
                             for (pit_1, pit_2) in pits.iter().tuple_windows() {
                                 if let Ok(diff) = pit_2.duration_since(*pit_1) {
                                     if let Err(e) = write!(overhead_file, "{:>25},", diff.as_micros()) {
-                                        error!("Failed to write the difference between two points in time: {}", e);
+                                        info!("Failed to write the difference between two points in time: {}", e);
                                     }
                                     // Debug only, we can throw away the result.
                                 } else {
-                                    error!("Failed to calculate the difference between two points in time. Did the clock change?");
+                                    info!("Failed to calculate the difference between two points in time. Did the clock change?");
                                 }
                             }
                             if let Err(e) = writeln!(overhead_file) {
-                                error!("Failed to write the return point in time: {}", e);
+                                info!("Failed to write the return point in time: {}", e);
                             }
                         }
-                        Err(e) => error!("Failed to open the overhead logger file: {}", e),
+                        Err(e) => info!("Failed to open the overhead logger file: {}", e),
                     }
                 }
 
                 // Clear the content of the file.
                 if let Err(e) = file.set_len(0) {
-                    error!("Failed to clear the tool logger file: {}", e);
+                    info!("Failed to clear the tool logger file: {}", e);
                 }
                 if let Err(e) = file.sync_all() {
-                    error!("Failed to sync the tool logger file: {}", e);
+                    info!("Failed to sync the tool logger file: {}", e);
                 }
             }
 
             // Unlock the file.
             if let Err(e) = file.unlock() {
-                error!("Failed to unlock the tool logger file: {}", e);
-                error!("The content of the tool logger file might not be cleared and the file might remain locked.");
+                warn!("Failed to unlock the tool logger file: {}", e);
+                warn!("The content of the tool logger file might not be cleared and the file might remain locked.");
             }
         }
     }
