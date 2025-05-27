@@ -205,18 +205,30 @@ pub async fn read_threads(user_id: &str) -> Vec<MongoDBThread> {
 
 
 static MONGODB_CLIENT: async_lazy::Lazy<mongodb::Client> = async_lazy::Lazy::new(|| {
-    let client_uri = env::var("MONGODB_URI").expect("MONGODB_URI is not set in the .env file.");
+    let client_uri = env::var("MONGODB_URI").expect("\nMONGODB_URI is not set in the .env file.\n");
     println!("Connecting to MongoDB with URI: {}", client_uri);
     // mongodb::sync::Client::with_uri_str(&client_uri).expect("Failed to create client options.")
     Box::pin(async move {
-        mongodb::Client::with_uri_str(&client_uri).await.expect("Failed to create client options.")
+        let client = mongodb::Client::with_uri_str(&client_uri).await.expect("\nFailed to create client options for mongoDB.\n");
+        
+        // Basic test: is mongoDB up? List the databases.
+        let databases = client.list_database_names().await;
+        match databases {
+            Ok(databases) => {
+                info!("MongoDB is up and running. Databases: {:?}", databases);
+            },
+            Err(e) => {
+                warn!("Error connecting to MongoDB: {:?}", e);
+            }
+        }
+        client
     })
 });
 
 static MONGODB_DATABASE_NAME: Lazy<String> = Lazy::new(|| {
-    env::var("MONGODB_DATABASE_NAME").expect("MONGODB_DATABASE_NAME is not set in the .env file.")
+    env::var("MONGODB_DATABASE_NAME").expect("\nMONGODB_DATABASE_NAME is not set in the .env file.\n")
 });
 
 static MONGODB_COLLECTION_NAME: Lazy<String> = Lazy::new(|| {
-    env::var("MONGODB_COLLECTION_NAME").expect("MONGODB_COLLECTION_NAME is not set in the .env file.")
+    env::var("MONGODB_COLLECTION_NAME").expect("\nMONGODB_COLLECTION_NAME is not set in the .env file.\n")
 });

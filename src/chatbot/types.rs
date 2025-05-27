@@ -162,15 +162,6 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     prompt
                 };
 
-                // Templating was added to the starting prompt, which is why this cannot work for now. TODO!
-                // // For debugging, check whether the prompt is the same as we are currently using.
-                // if s == crate::chatbot::prompting::STARTING_PROMPT_JSON.to_string() {
-                //     trace!("Prompt is the same as the starting prompt.");
-                // } else {
-                //     warn!("Recieved prompt that is different from the current starting prompt. Did the prompt change?");
-                // };
-
-
                 trace!("Prompt: {:?}", prompt);
 
                 Ok(prompt)},
@@ -221,14 +212,9 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                         warn!("ServerHint content is empty! Passing to the client nonetheless.");
                         return Err(ConversionError::ParseError("ServerHint content is empty."));
                     }
-                    // We now know that the hint is a non-empty JSON object, we can return it.
-                    // TODO: Is this correct? Should we really tell the LLM about the thread_id?
-                    // Ok(vec![ChatCompletionRequestMessage::System(
-                    //     ChatCompletionRequestSystemMessage {
-                    //         name: Some("ServerHint".to_string()),
-                    //         content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(s),
-                    //     },
-                    // )])
+
+                    // Server Hints are only for the server side, so we don't need to pass them to the LLM.
+                    // While the LLM does get to see the thread_id, it isn't the only thing the Server Hint can contain.
                     Err(ConversionError::VariantHide("ServerHint variants are only for use on the server side, not for the LLM."))
                 } else {
                     warn!("ServerHint content is not an object, ignoring and passing value to client blindly.");

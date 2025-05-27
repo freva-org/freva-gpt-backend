@@ -976,7 +976,7 @@ async fn oai_stream_to_variants(
                     }
                     StreamEvents::LiveToolCall => {
                         // The tool call is still running, so we'll just send an empty event.
-                        vec![StreamVariant::Code(String::new(), String::new())] // Just empty ID??? TODO: is this important?
+                        vec![StreamVariant::Code(String::new(), String::new())] // Just empty ID because it is necessary.
                     }
                 }
             } else {

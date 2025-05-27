@@ -3,10 +3,13 @@ import requests
 import json
 import pytest
 from dataclasses import dataclass, field
+from dotenv import load_dotenv
+import os
 
 base_url = "http://localhost:8502/api/chatbot"
 
-auth_key = "qA94VhroHMHFN55inWgfAAkt1WEmzQ4J" # Only for testing
+load_dotenv()
+auth_key = os.getenv("AUTH_KEY")
 auth_string = "&auth_key=" + auth_key + "&user_id=testing" # Only for testing
 # In Version 1.6.1, the freva_config also needs to be set to a specific path. We won't be using this for now.
 auth_string = auth_string + "&freva_config=" + "Cargo.toml" # Dummy value
