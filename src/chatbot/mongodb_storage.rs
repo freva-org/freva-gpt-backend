@@ -207,7 +207,7 @@ pub async fn read_threads(user_id: &str, database: Database) -> Vec<MongoDBThrea
 /// If no Vault URL is given, the manually constructed database connection (which is mainly for testing purposes) is used.
 pub async fn get_database(vault_url: Option<&str>) -> Result<Database, HttpResponse> {
     let mongodb_uri = match vault_url {
-        Some(vault_url) => get_mongodb_uri(vault_url)?, // Bubble the error up if it fails.
+        Some(vault_url) => get_mongodb_uri(vault_url).await?, // Bubble the error up if it fails.
         None => {
             warn!("Using local MongoDB connection!");
             warn!("Make sure the clients will be using the main authentication method in the future.");

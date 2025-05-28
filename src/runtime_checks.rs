@@ -3,8 +3,8 @@ use std::io::Write;
 use tracing::{debug, error, info, trace};
 
 use crate::{
-    auth::{AUTH_KEY, AUTH_URL},
-    chatbot::{self, mongodb_storage::get_database, storage_router::{AvailableStorages, STORAGE}, stream_response::STREAM_STOP_CONTENT, types::StreamVariant},
+    auth::AUTH_KEY,
+    chatbot::{self, is_ollama_running, mongodb_storage::get_database, storage_router::{AvailableStorages, STORAGE}, stream_response::STREAM_STOP_CONTENT, types::StreamVariant},
     static_serve,
     tool_calls::route_call::print_and_clear_tool_logs,
 };
@@ -65,25 +65,8 @@ pub async fn run_runtime_checks() {
         eprintln!("Error setting the authentication string. Exiting...");
         std::process::exit(1);
     });
-    
-    let auth_url = match std::env::var("AUTH_URL") {
-        Ok(auth_url) => auth_url,
-        Err(e) => {
-            error!("Error reading the authentication URL from the environment variables: {e:?}",);
-            eprintln!(
-                "Error reading the authentication URL from the environment variables: {e:?}"
-            );
-            std::process::exit(1);
-        }
-    };
-    
-    AUTH_URL.set(auth_url).unwrap_or_else(|_| {
-        error!("Error setting the authentication URL. Exiting...");
-        eprintln!("Error setting the authentication URL. Exiting...");
-        std::process::exit(1);
-    });
 
-    info!("Authentication strings set successfully.");
+    info!("Authentication string set successfully.");
     println!("Success!");
 
     // Check whether the mongoDB is set up correctly by retrieving the threads by the testing user. 
@@ -154,6 +137,15 @@ pub async fn run_runtime_checks() {
     check_eval_exec().await;
     println!("Success!");
     info!("The code interpreter is robust enough and behaves like a Jupyter notebook in all tests.");
+
+    // Finally, check whether ollama is running.
+    if is_ollama_running().await {
+        info!("Ollama is running and available.");
+        println!("Ollama is running and available.");
+    } else {
+        info!("Ollama is either not running or not available, some LLMs might not work.");
+        println!("Ollama is either not running or not available, some LLMs might not work.");
+    }
 
     // To make sure not to confuse the backend, clear the tool logger.
     // Due to debugging, this now needs two arguments.

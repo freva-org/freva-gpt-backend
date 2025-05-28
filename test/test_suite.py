@@ -14,12 +14,19 @@ auth_string = "&auth_key=" + auth_key + "&user_id=testing" # Only for testing
 # In Version 1.6.1, the freva_config also needs to be set to a specific path. We won't be using this for now.
 auth_string = auth_string + "&freva_config=" + "Cargo.toml" # Dummy value
 
+# Starting with Version 1.10.0, a vault url needs to be supplied in the headers.
+vault_url = "http://127.0.0.1:5001" # TODO: This might not work because of the local/docker devide.
+headers = {
+    "x-freva-vault-url": vault_url
+}
+
+
 # ======================================
 # ---- Helper Functions and Classes ----
 # ======================================
 
 def get_request(url, stream=False):
-    return requests.get(base_url + url + auth_string, stream=stream)
+    return requests.get(base_url + url + auth_string, stream=stream, headers=headers)
 
 def get_avail_chatbots():
     response = get_request("/availablechatbots?")
@@ -356,3 +363,62 @@ def test_get_user_threads():
             assert all("variant" in j for j in inner_content)
             assert all("content" in j for j in inner_content)
         
+
+
+
+
+# --------------------------------
+# -- Mock Authentication Server --
+# --------------------------------
+
+# In the update 1.10.0, the frevaGPT backend was updated to use a proper authentication server.
+# While in production, this is populated by nginx, in testing, we will use a mock authentication server.
+
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+@app.route("/", methods=["GET"])
+def auth():
+    # This would usually be a proper authentication check, but for testing, we just return a dummy response.
+    # The backend needs to retrieve the MongoDB URI from here, so we return the credentials to the local MongoDB instance.
+    username = os.getenv("LOCAL_MONGODB_USER", "testing")
+    password = os.getenv("LOCAL_MONGODB_PASSWORD", "testing")
+    # return jsonify({"mongodb.url": "mongodb://localhost:8503"}), 200
+    return jsonify({
+        "mongodb.url": f"mongodb://{username}:{password}@localhost:8503",
+    }), 200
+
+# Run the mock authentication server
+def run_auth_server():
+    app.run(port=5001, debug=True, use_reloader=False)  # Use a different port than the main server
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_auth_server():
+    import multiprocessing
+    auth_thread = multiprocessing.Process(target=run_auth_server)
+    auth_thread.start()
+
+    # Wait for the server to start
+    import time
+    time.sleep(1)
+    attempts = 0
+    while attempts < 5:
+        try:
+            response = requests.get("http://localhost:5001/")
+            if response.status_code == 200:
+                print("Mock authentication server is up and running.")
+                break
+        except requests.ConnectionError:
+            print("Waiting for mock authentication server to start...")
+            time.sleep(1)
+            attempts += 1
+    else:
+        raise RuntimeError("Mock authentication server did not start in time.")
+
+    # Yield to allow tests to run
+    yield
+
+    # Teardown
+    auth_thread.terminate()
+    auth_thread.join(timeout=1)  # Wait for the thread to finish, if it doesn't, just ignore it.

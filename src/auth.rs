@@ -3,9 +3,6 @@
 /// For now, we'll just read the auth key from the environment and check it against the key provided in the request.
 pub static AUTH_KEY: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::new();
 
-/// The URL to use to chec the token, read from the environment.
-pub static AUTH_URL: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::new();
-
 use actix_web::{http::header::HeaderMap, HttpResponse};
 use qstring::QString;
 /// Very simple macro for the API points to call at the beginning to make sure that a request is authorized.
@@ -13,7 +10,7 @@ use qstring::QString;
 /// If a username was found in the token check, it will be returned.
 use tracing::{debug, error, info, warn};
 
-pub fn authorize_or_fail_fn(
+pub async fn authorize_or_fail_fn(
     qstring: &QString,
     headers: &HeaderMap,
 ) -> Result<Option<String>, HttpResponse> {
@@ -67,7 +64,7 @@ pub fn authorize_or_fail_fn(
                 }
             };
 
-            let token_check = get_username_from_token(token, &vault_url);
+            let token_check = get_username_from_token(token, &vault_url).await;
 
             // Depending on whether the token was valid or not, check the query string token.
             match token_check {
@@ -121,7 +118,7 @@ pub fn authorize_or_fail_fn(
 }
 
 /// Recives a token, checks it against the URL provided in the header and returns the username.
-fn get_username_from_token(token: &str, vault_url: &str) -> Result<String, HttpResponse> {
+async fn get_username_from_token(token: &str, vault_url: &str) -> Result<String, HttpResponse> {
     debug!("Checking token: {}", token);
     debug!("Using vault URL: {}", vault_url);
 
@@ -133,11 +130,11 @@ fn get_username_from_token(token: &str, vault_url: &str) -> Result<String, HttpR
     // }
 
     // If the URL is set, we'll send a GET request to it with the token in the header.
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let response = client
         .get(vault_url.to_string() + "/auth/v2/userinfo") // The endpoint is at "/auth/v2/userinfo"
         .header("Authorization", format!("Bearer {}", token));
-    let response = response.send();
+    let response = response.send().await;
 
     let result = match response {
         Ok(res) => {
@@ -145,6 +142,7 @@ fn get_username_from_token(token: &str, vault_url: &str) -> Result<String, HttpR
                 // If the response is successful, we'll return the username.
                 let content = res
                     .text()
+                    .await
                     .unwrap_or_else(|_| "Empty JSON!".to_string())
                     .trim()
                     .to_owned(); // just signals that an error happened
@@ -192,13 +190,14 @@ fn get_username_from_token(token: &str, vault_url: &str) -> Result<String, HttpR
 }
 
 /// Receives the vault URL and returns the URL to the MongoDB database to use.
-pub fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
+pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
     // The vault URL will be contained in the answer to the request to the vault. (No endpoint or authentication needed.)
     debug!("Getting MongoDB URL from vault: {}", vault_url);
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let response = client
         .get(vault_url) 
-        .send();
+        .send()
+        .await;
 
     // Extract the result or fail
     let result = match response {
@@ -207,6 +206,7 @@ pub fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
                 // If the response is successful, we'll return the MongoDB URL.
                 let content = res
                     .text()
+                    .await
                     .unwrap_or_else(|_| "Empty JSON!".to_string()) // TODO: Code smell; this should be handled better.
                     .trim()
                     .to_owned();
@@ -231,7 +231,7 @@ pub fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
     let mongodb_url = match serde_json::from_str::<serde_json::Value>(&result) {
         Ok(json) => {
             // If the JSON is valid, we'll return the MongoDB URL.
-            match json["mongodb"]["url"].as_str() {
+            match json["mongodb.url"].as_str() {
                 Some(url) => url.to_string(),
                 None => {
                     // If the MongoDB URL is not found, we'll return a 500.
@@ -259,7 +259,7 @@ pub fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
 /// username is returned. If the token was given via query string, None is returned.
 macro_rules! authorize_or_fail {
     ($qstring:expr, $headers:expr) => {
-        match $crate::auth::authorize_or_fail_fn(&$qstring, $headers) {
+        match $crate::auth::authorize_or_fail_fn(&$qstring, $headers).await {
             Ok(maybe_username) => maybe_username,
             Err(e) => return e,
         }
