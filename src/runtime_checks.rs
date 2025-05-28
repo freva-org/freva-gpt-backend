@@ -4,7 +4,7 @@ use tracing::{debug, error, info, trace};
 
 use crate::{
     auth::{AUTH_KEY, AUTH_URL},
-    chatbot::{self, storage_router::{AvailableStorages, STORAGE}, stream_response::STREAM_STOP_CONTENT, types::StreamVariant},
+    chatbot::{self, mongodb_storage::get_database, storage_router::{AvailableStorages, STORAGE}, stream_response::STREAM_STOP_CONTENT, types::StreamVariant},
     static_serve,
     tool_calls::route_call::print_and_clear_tool_logs,
 };
@@ -91,7 +91,15 @@ pub async fn run_runtime_checks() {
         print!("Checking whether the MongoDB is set up correctly... ");
         flush_stdout_stderr();
         info!("Checking whether the MongoDB is set up correctly.");
-        let _threads = crate::chatbot::mongodb_storage::read_threads("testing").await;
+        let database = match get_database(None).await {
+            Ok(database) => database,
+            Err(e) => {
+                error!("Error getting the MongoDB database: {e:?}",);
+                eprintln!("Error getting the MongoDB database: {e:?}");
+                std::process::exit(1);
+            }
+        };
+        let _threads = crate::chatbot::mongodb_storage::read_threads("testing", database).await;
         // We'll just throw away the result because we can't be sure that the user already created some threads.
 
         info!("MongoDB seems to be set up correctly.");

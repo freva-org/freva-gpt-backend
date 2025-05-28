@@ -498,7 +498,7 @@ pub fn unescape_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
 
-    use crate::chatbot::{prompting::{get_entire_prompt, get_entire_prompt_json}, thread_storage::read_thread};
+    use crate::chatbot::prompting::{get_entire_prompt, get_entire_prompt_json};
 
     // The helper function to convert a StreamVariant to a ChatCompletionRequestMessage
     // has some problems, we'll test it here.

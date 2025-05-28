@@ -1,3 +1,4 @@
+use mongodb::Database;
 use rand::Rng;
 use tracing::{debug, error, trace, warn};
 
@@ -80,7 +81,7 @@ pub fn add_to_conversation(
 }
 
 /// Returns the state of the conversation, if possible
-pub async fn conversation_state(thread_id: &str) -> Option<ConversationState> {
+pub async fn conversation_state(thread_id: &str, database: Database) -> Option<ConversationState> {
     trace!("Checking the state of conversation with id: {}", thread_id);
 
     let mut to_save = None;
@@ -114,7 +115,7 @@ pub async fn conversation_state(thread_id: &str) -> Option<ConversationState> {
     // In order to not save the conversations while the mutex is locked, we'll save it here.
     if let Some(conversations) = to_save {
         for conversation in conversations {
-            save_conversation(conversation).await;
+            save_conversation(conversation, database.clone()).await;
         }
     }
 
@@ -140,7 +141,7 @@ pub fn end_conversation(thread_id: &str) {
 }
 
 /// Removes the conversation with the given ID, clearing it from the active conversations and writing it to disk.
-pub async fn save_and_remove_conversation(thread_id: &str) {
+pub async fn save_and_remove_conversation(thread_id: &str, database: Database) {
     trace!("Removing conversation with id: {}", thread_id);
 
     // We extract the conversation from the global variable to minimize the time we lock the mutex.
@@ -159,19 +160,19 @@ pub async fn save_and_remove_conversation(thread_id: &str) {
     };
 
     if let Some(conversation) = conversation {
-        save_conversation(conversation).await;
+        save_conversation(conversation, database).await;
     }
 }
 
 /// Helper function to save a conversation to disk.
-async fn save_conversation(conversation: ActiveConversation) {
+async fn save_conversation(conversation: ActiveConversation, database: Database) {
     debug!("Writing conversation to disk.");
 
     // Before we'll write it to disk, we'll fold all the consecutive Assistant messages into one.
 
     let new_conversation = concat_variants(conversation.conversation);
 
-    crate::chatbot::storage_router::append_thread(&conversation.id, &conversation.user_id ,new_conversation).await;
+    crate::chatbot::storage_router::append_thread(&conversation.id, &conversation.user_id ,new_conversation, database).await;
 }
 
 /// The assistant and code messages are streamed, so the variants that come from OpenAI contain only one or a few tokens of the message.

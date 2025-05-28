@@ -3,7 +3,7 @@ use documented::docs_const;
 use qstring::QString;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::chatbot::types::StreamVariant;
+use crate::chatbot::{mongodb_storage::get_database, types::StreamVariant};
 
 use super::storage_router::read_thread;
 
@@ -29,9 +29,12 @@ use super::storage_router::read_thread;
 pub async fn get_thread(req: HttpRequest) -> impl Responder {
     let qstring = QString::from(req.query_string());
     let headers = req.headers();
-
+    
     // First try to authorize the user.
-    let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
+    let _maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
+    
+    // First try to get the Vault URL from the headers.
+    let maybe_vault_url = headers.get("x-freva-vault-url").and_then(|h| h.to_str().ok());
 
     // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {
@@ -39,13 +42,39 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
             // If the thread ID is not found, we'll return a 400
             warn!("The User requested a thread without a thread ID.");
             return HttpResponse::BadRequest()
-                .body("Thread ID not found. Please provide a thread_id in the query parameters.");
+            .body("Thread ID not found. Please provide a thread_id in the query parameters.");
         }
         Some(thread_id) => thread_id,
     };
 
+
+    // If we have a specific vault URL, we can use it to initialize the database.
+    // Otherwise, we'll use the local database.
+    let database = match maybe_vault_url {
+        Some(vault_url) => {
+            // Initialize the database with the vault URL.
+            debug!("Using vault URL: {}", vault_url);
+            get_database(Some(vault_url)).await
+        }
+        None => {
+            // Initialize the database without a vault URL.
+            warn!("Using local database, no vault URL provided.");
+            get_database(None).await
+        }
+    };
+
+    let database = match database {
+        Ok(db) => db,
+        Err(e) => {
+            // If we cannot initialize the database connection, we'll return a 500
+            error!("Error initializing database connection: {:?}", e);
+            return HttpResponse::InternalServerError()
+                .body("Error initializing database connection.");
+        }
+    };
+
     // Instead of retrieving from OpenAI, we need to retrieve from disk since that is where all streamed data is stored.
-    let result = match read_thread(thread_id).await {
+    let result = match read_thread(thread_id, database).await {
         Ok(content) => content,
         Err(e) => {
             // Further handle the error, as we know what possible IO errors can occur.

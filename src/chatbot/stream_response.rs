@@ -12,22 +12,17 @@ use futures::{
     stream::{self, Fuse},
     StreamExt,
 };
+use mongodb::Database;
 use once_cell::sync::Lazy;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     chatbot::{
-        available_chatbots::{model_ends_on_no_choice, DEFAULTCHATBOT},
-        handle_active_conversations::{
+        available_chatbots::{model_ends_on_no_choice, DEFAULTCHATBOT}, handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
             new_conversation_id, save_and_remove_conversation,
-        },
-        heartbeat::heartbeat_content,
-        prompting::{get_entire_prompt, get_entire_prompt_json},
-        select_client,
-        storage_router::read_thread,
-        types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
+        }, heartbeat::heartbeat_content, mongodb_storage::get_database, prompting::{get_entire_prompt, get_entire_prompt_json}, select_client, storage_router::read_thread, types::{help_convert_sv_ccrm, ConversationState, StreamVariant}
     },
     logging::{silence_logger, undo_silence_logger},
     tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS},
@@ -140,10 +135,22 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     };
 
     debug!("Thread ID: {}, Input: {}", thread_id, input);
+    
+    // First try to get the vault_url from the headers, if it is not set, we'll use the default database.
+    let maybe_vault_url = headers.get("x-freva-vault-url")
+        .and_then(|h| h.to_str().ok());
+
+    let database = match get_database(maybe_vault_url).await {
+        Ok(db) => db,
+        Err(e) => {
+            warn!("Failed to connect to the database: {:?}", e);
+            return HttpResponse::InternalServerError().body("Failed to connect to the database.");
+        }
+    };
 
     // Because the call to conversation_state writes a warning if the thread is not found, we'll temporarily silence the logging.
     silence_logger();
-    let state = conversation_state(&thread_id).await;
+    let state = conversation_state(&thread_id, database.clone()).await;
     undo_silence_logger();
 
     // To avoid one thread being streamed more than once at the same time, we'll check if the thread is already being streamed.
@@ -240,7 +247,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     } else {
         // Don't create a new thread, but continue the existing one.
         debug!("Expecting there to be a file for thread_id {}", thread_id);
-        let content = match read_thread(thread_id.as_str()).await {
+        let content = match read_thread(thread_id.as_str(), database.clone()).await {
             Ok(content) => content,
             Err(e) => {
                 // If we can't read the thread, we'll return a generic error.
@@ -284,7 +291,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     };
     trace!("Request built!");
 
-    create_and_stream(request, thread_id, freva_config_path, chatbot, user_id).await
+    create_and_stream(request, thread_id, freva_config_path, chatbot, user_id, database).await
 }
 
 /// A simple helper function to build the stream.
@@ -348,6 +355,7 @@ async fn create_and_stream(
     freva_config_path: String,
     chatbot: AvailableChatbots,
     user_id: String,
+    database: Database,
 ) -> actix_web::HttpResponse {
     let open_ai_stream = match select_client(chatbot)
         .await
@@ -389,9 +397,10 @@ async fn create_and_stream(
             mut llama_tool_call_content,
             mut reciever,
         )| {
-            // It is required to clone the freva_config_path, because it is moved into the closure. Same with the user_id.
+            // It is required to clone the freva_config_path, because it is moved into the closure. Same with the user_id. And the database.
             let freva_config_path_clone = freva_config_path.clone();
             let user_id = user_id.clone();
+            let database = database.clone();
             async move {
                 // Even higher priority than stopping the stream is sending the thread_id hint.
                 if should_hint_thread_id {
@@ -464,14 +473,14 @@ async fn create_and_stream(
 
                     // We do it in this order to be able to send one last event to the client signaling the end of the stream.
                     trace!("Stream is stopping, sent one last event, removing the conversation from the pool and then aborting stream.");
-                    save_and_remove_conversation(&thread_id).await;
+                    save_and_remove_conversation(&thread_id, database).await;
                     None
                 } else {
                     // If the stream should not stop, we'll continue.
 
                     // First checks whether it should stop the stream. (This happens if the client sent a stop request.)
                     if matches!(
-                        conversation_state(&thread_id).await,
+                        conversation_state(&thread_id, database.clone()).await,
                         Some(ConversationState::Stopping)
                     ) {
                         debug!("Conversation with thread_id {} has been stopped, sending one last event and then aborting stream.", thread_id);
@@ -631,6 +640,7 @@ async fn create_and_stream(
                             &mut tool_arguments,
                             &mut tool_id,
                             &thread_id,
+                            database,
                             &mut open_ai_stream,
                             chatbot,
                             &mut llama_tool_call_content,
@@ -711,6 +721,7 @@ async fn oai_stream_to_variants(
     tool_arguments: &mut String,
     tool_id: &mut String,
     thread_id: &String,
+    database: Database,
     open_ai_stream: &mut Fuse<ChatCompletionResponseStream>,
     chatbot: AvailableChatbots,
     llama_tool_call_content: &mut Cell<Option<Cell<String>>>,
@@ -858,6 +869,7 @@ async fn oai_stream_to_variants(
                             tool_name,
                             tool_id,
                             thread_id,
+                            database,
                             open_ai_stream,
                             &response,
                             chatbot,
@@ -989,7 +1001,7 @@ async fn oai_stream_to_variants(
                     } else {
                         FinishReason::Stop
                     };
-                    handle_stop_event(finish_reason, None, tool_arguments, tool_name, tool_id, thread_id, open_ai_stream, &response, chatbot, reciever).await
+                    handle_stop_event(finish_reason, None, tool_arguments, tool_name, tool_id, thread_id, database,open_ai_stream, &response, chatbot, reciever).await
                     // vec![StreamVariant::StreamEnd("Qwen-like stream ended".to_string())]
                 } else {
                     info!("No response found, ending stream.");
@@ -1047,6 +1059,7 @@ async fn handle_stop_event(
     tool_name: &mut Option<String>,
     tool_id: &mut String,
     thread_id: &String,
+    database: Database,
     open_ai_stream: &mut Fuse<ChatCompletionResponseStream>,
     response: &CreateChatCompletionStreamResponse,
     chatbot: AvailableChatbots,
@@ -1097,6 +1110,7 @@ async fn handle_stop_event(
                     tool_id.to_string(),
                     thread_id.to_string(),
                     tx,
+                    database
                 ));
                 // Reset the tool_name and tool_arguments
                 *tool_name = None;

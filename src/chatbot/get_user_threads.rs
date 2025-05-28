@@ -2,7 +2,7 @@ use actix_web::{HttpRequest, HttpResponse, Responder};
 use documented::docs_const;
 use tracing::debug;
 
-use crate::chatbot::mongodb_storage::read_threads;
+use crate::chatbot::mongodb_storage::{get_database, read_threads};
 
 /// # getuserthreads
 /// Takes in a user_id and returns the latest 10 threads of the user.
@@ -16,7 +16,6 @@ use crate::chatbot::mongodb_storage::read_threads;
 /// If the user_id is not given or cannot be derived from the OID token, a BadRequest response is returned.
 #[docs_const]
 pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
-
     let qstring = qstring::QString::from(req.query_string());
     let headers = req.headers();
     
@@ -42,8 +41,22 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
     
     debug!("User ID: {}", user_id);
 
+    // We first need to check whether we have a vault URL to connect to the database from.
+    let maybe_vault_url = headers.get("x-freva-vault-url")
+        .and_then(|h| h.to_str().ok());
+
+    // If we don't have a vault URL, we'll automatically fall back to the local (testing) database.
+    let database = match get_database(maybe_vault_url).await {
+        Ok(db) => db,
+        Err(e) => {
+            debug!("Failed to connect to the database: {:?}", e);
+            return HttpResponse::InternalServerError()
+                .body("Failed to connect to the database.");
+        }
+    };
+
     // Retrieve the latest 10 threads of the user from the database.
-    let threads = read_threads(&user_id).await;
+    let threads = read_threads(&user_id, database).await;
 
     debug!("Threads: {:?}", threads);
     HttpResponse::Ok()

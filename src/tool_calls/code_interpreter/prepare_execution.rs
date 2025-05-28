@@ -1,6 +1,7 @@
 use async_process::Command;
 
 use itertools::Itertools;
+use mongodb::Database;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
@@ -23,7 +24,7 @@ use crate::{
 pub async fn start_code_interpeter(
     arguments: Option<String>,
     id: String,
-    thread_id: Option<String>,
+    thread_id_and_database: Option<(String, Database)>,
 ) -> Vec<StreamVariant> {
     trace!(
         "Running the code interpreter with the following arguments: {:?}",
@@ -31,12 +32,12 @@ pub async fn start_code_interpeter(
     );
 
     // We also need to get the freva_config_path from the thread_id.
-    let freva_config_path = match thread_id.clone() {
+    let freva_config_path = match thread_id_and_database.clone() {
         None => {
             info!("Thread_id not set, assuming in testing mode. Not setting freva_config_path.");
             "".to_string()
         }
-        Some(thread_id) => match conversation_state(&thread_id).await {
+        Some((thread_id, database)) => match conversation_state(&thread_id, database.clone()).await {
             None => {
                 warn!("No conversation state found while trying to run the code interpreter. Not setting freva_config_path, this WILL break any calls to the code interpreter that require it.");
                 "".to_string()
@@ -60,9 +61,9 @@ pub async fn start_code_interpeter(
     }
 
     // Also retrieve all previous code interpreter inputs to get all libraries that are needed.
-    let previous_code_interpreter_imports = match thread_id.clone() {
+    let previous_code_interpreter_imports = match thread_id_and_database.clone() {
         None => vec![],
-        Some(thread_id) => retrieve_previous_code_interpreter_imports(&thread_id).await,
+        Some((thread_id, database)) => retrieve_previous_code_interpreter_imports(&thread_id, database).await,
     };
 
     // Now, we have to convert the arguments from JSON to a struct.
@@ -121,7 +122,7 @@ pub async fn start_code_interpeter(
         .arg("--code-interpreter")
         .arg(code.code.clone())
         .env("EVALUATION_SYSTEM_CONFIG_FILE", freva_config_path)
-        .env("THREAD_ID", thread_id.unwrap_or_default())
+        .env("THREAD_ID", thread_id_and_database.map(|t_a_d| t_a_d.0 ).unwrap_or_default()) // Extracts the thread_id from the tuple, or uses an empty string if it is None.
         .output()
         .await; // It's a future now, so we have to await it.
 
@@ -253,12 +254,12 @@ pub fn run_code_interpeter(arguments: String) {
 
 /// Retrieves all previous code interpreter inputs from the conversation state.
 /// Returns a string with all the imports, seperated by newlines.
-async fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> Vec<String> {
+async fn retrieve_previous_code_interpreter_imports(thread_id: &str, database: Database) -> Vec<String> {
     // The running conversation is in the global variable.
     let mut this_conversation = get_conversation(thread_id).unwrap_or_default();
     // The past conversation is stored on disk.
     silence_logger();
-    let past_conversation = read_thread(thread_id).await.unwrap_or_default(); // We don't want to log an error if the file doesn't exist.
+    let past_conversation = read_thread(thread_id, database).await.unwrap_or_default(); // We don't want to log an error if the file doesn't exist.
     undo_silence_logger();
     this_conversation.extend(past_conversation);
 

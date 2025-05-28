@@ -4,6 +4,7 @@ use std::{fs::OpenOptions, io::Read, time::UNIX_EPOCH};
 
 use fs2::FileExt;
 use itertools::Itertools;
+use mongodb::Database;
 use std::io::Write;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -19,6 +20,7 @@ pub async fn route_call(
     id: String,
     thread_id: String,
     sender: mpsc::Sender<Vec<StreamVariant>>,
+    database: Database,
 ) {
     // // Placeholder to disable the code interpreter
     // let variant = StreamVariant::CodeOutput("The code interpreter was successfully called, but is currently disabled. Please wait for the next major version for it to be stabilized. ".to_string(), id);
@@ -33,7 +35,7 @@ pub async fn route_call(
         let routing_pit = std::time::SystemTime::now(); // The point in time when the routing function is reached.
 
         let result = sender
-            .send(start_code_interpeter(arguments, id, Some(thread_id)).await)
+            .send(start_code_interpeter(arguments, id, Some((thread_id, database))).await)
             .await;
 
         let return_pit = std::time::SystemTime::now(); // The point in time when the code interpreter returns.

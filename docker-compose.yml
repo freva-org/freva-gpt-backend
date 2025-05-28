@@ -37,6 +37,16 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+  mongodb: # Non-persistent MongoDB instance
+    image: mongo:latest
+    container_name: mongodb-instance
+    hostname: mongodb-instance
+    ports:
+      - "8503:27017" # Expose MongoDB on port 8503
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${LOCAL_MONGODB_USER:-testing}
+      - MONGO_INITDB_ROOT_PASSWORD=${LOCAL_MONGODB_PASSWORD:-testing}
+    
 
 
 networks:

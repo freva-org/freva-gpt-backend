@@ -1,12 +1,13 @@
 use std::env;
 
+use actix_web::HttpResponse;
 use futures::TryStreamExt;
-use mongodb::bson::doc;
+use mongodb::{bson::doc, Database};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
-use crate::chatbot::{thread_storage::cleanup_conversation, types};
+use crate::{auth::get_mongodb_uri, chatbot::{thread_storage::cleanup_conversation, types}};
 
 /// Stores and loads threads from the mongoDB
 use super::types::Conversation;
@@ -24,7 +25,7 @@ pub struct MongoDBThread {
 
 
 /// Stores a thread in the mongoDB database, appending the content if the thread already exists.
-pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation) {
+pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation, database: Database) {
     debug!("Will append content to thread {} for user {}", thread_id, user_id);
     trace!("Content: {:?}", content);
     let mut content = content;
@@ -37,7 +38,7 @@ pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation
     }
 
     // We first need to retrieve the thread from the database, if it exists.
-    let existing_thread = read_thread(thread_id).await;
+    let existing_thread = read_thread(thread_id, database.clone()).await;
 
     // If there is some existing thread, we need to update the content.
     // The new content is the old content + the new content.
@@ -91,7 +92,7 @@ pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation
 
     // If the topic exists, we need to update the thread.
     if thread_exists {
-        let result = MONGODB_CLIENT.force().await.database(&MONGODB_DATABASE_NAME).collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME).update_one(
+        let result = database.clone().collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME).update_one(
             doc! {
                 "thread_id": thread_id
             },
@@ -124,7 +125,7 @@ pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation
             content,
         };
 
-        let result = MONGODB_CLIENT.force().await.database(&MONGODB_DATABASE_NAME).collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME).insert_one(
+        let result = database.collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME).insert_one(
             thread,
         ).await;
 
@@ -144,11 +145,11 @@ pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation
 
 /// Loads a thread from the mongoDB database, by thread_id.
 /// Also loads all other data from the thread, such as the user_id, date and "topic".
-pub async fn read_thread(thread_id: &str) -> Option<MongoDBThread> {
+pub async fn read_thread(thread_id: &str, database: Database) -> Option<MongoDBThread> {
     debug!("Will load thread with id {}", thread_id);
 
     // Query the database by thread_id.
-    let result = MONGODB_CLIENT.force().await.database(&MONGODB_DATABASE_NAME).collection(&MONGODB_COLLECTION_NAME).find_one(
+    let result = database.collection(&MONGODB_COLLECTION_NAME).find_one(
         doc! {
             "thread_id": thread_id
         },
@@ -169,11 +170,11 @@ pub async fn read_thread(thread_id: &str) -> Option<MongoDBThread> {
 }
 
 /// Recieves a user_id and returns the last 10 threads of the user.
-pub async fn read_threads(user_id: &str) -> Vec<MongoDBThread> {
+pub async fn read_threads(user_id: &str, database: Database) -> Vec<MongoDBThread> {
     debug!("Will load threads for user {}", user_id);
 
     // Query the database by user_id.
-    let result = MONGODB_CLIENT.force().await.database(&MONGODB_DATABASE_NAME).collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME).find(
+    let result = database.collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME).find(
         doc! {
             "user_id": user_id
         }
@@ -202,28 +203,70 @@ pub async fn read_threads(user_id: &str) -> Vec<MongoDBThread> {
     }
 }
 
+/// Constructs a MongoDB database connection using the Vault URL.
+/// If no Vault URL is given, the manually constructed database connection (which is mainly for testing purposes) is used.
+pub async fn get_database(vault_url: Option<&str>) -> Result<Database, HttpResponse> {
+    let mongodb_uri = match vault_url {
+        Some(vault_url) => get_mongodb_uri(vault_url)?, // Bubble the error up if it fails.
+        None => {
+            warn!("Using local MongoDB connection!");
+            warn!("Make sure the clients will be using the main authentication method in the future.");
+            // The thread_id means that we are using a manually constructed database connection.
+            // Format: mongodb://<username>:<password>@<host>:<port>
 
 
-static MONGODB_CLIENT: async_lazy::Lazy<mongodb::Client> = async_lazy::Lazy::new(|| {
-    let client_uri = env::var("MONGODB_URI").expect("\nMONGODB_URI is not set in the .env file.\n");
-    println!("Connecting to MongoDB with URI: {}", client_uri);
-    // mongodb::sync::Client::with_uri_str(&client_uri).expect("Failed to create client options.")
-    Box::pin(async move {
-        let client = mongodb::Client::with_uri_str(&client_uri).await.expect("\nFailed to create client options for mongoDB.\n");
-        
-        // Basic test: is mongoDB up? List the databases.
-        let databases = client.list_database_names().await;
-        match databases {
-            Ok(databases) => {
-                info!("MongoDB is up and running. Databases: {:?}", databases);
-            },
-            Err(e) => {
-                warn!("Error connecting to MongoDB: {:?}", e);
-            }
+            // Depending on whether it's the testing or production environment, we have different hosts. 
+            // Testing uses localhost, but production uses the containers' host.
+
+            #[cfg(target_os="macos")]
+            let host = "localhost"; // For testing on macOS, we use localhost.
+            #[cfg(not(target_os="macos"))]
+            let host = "host.docker.internal"; // Docker for Linux uses this to access the host machine.
+
+            let mongodb_uri = format!(
+                "mongodb://{}:{}@{}:8503",
+                MONGODB_USERNAME.as_str(),
+                MONGODB_PASSWORD.as_str(),
+                host,
+            );  
+            debug!("Using local MongoDB connection: {}", mongodb_uri);
+            mongodb_uri
         }
-        client
-    })
-});
+    };
+
+    // We have a URI to connect to, so we can create a MongoDB client.
+    let client = match mongodb::Client::with_uri_str(&mongodb_uri).await {
+        Ok(client) => {
+            debug!("Successfully connected to MongoDB at {}", mongodb_uri);
+            client
+        },
+        Err(e) => {
+            error!("Failed to connect to MongoDB: {:?}", e);
+            return Err(HttpResponse::InternalServerError().body("Failed to connect to MongoDB"));
+        }
+    };
+        
+    // Basic test: is mongoDB up? List the databases.
+    let databases = client.list_database_names().await;
+    match databases {
+        Ok(dbs) => {
+            debug!("MongoDB is up and running. Databases: {:?}", dbs);
+        },
+        Err(e) => {
+            // We treat this as a warning, because it might be that the MongoDB server is not running.
+            error!("Failed to make sure the MongoDB is running: {:?}", e);
+            return Err(HttpResponse::InternalServerError().body("MongoDB is not running or cannot be reached"));
+        }
+    }
+
+    //TODO: Maybe initialize the database? MongoDB is a bit finnicky about that.
+
+    // We don't need the entire client, just the database.
+    let database = client.database(&MONGODB_DATABASE_NAME);
+    debug!("Using database: {}", *MONGODB_DATABASE_NAME);
+    Ok(database)
+
+}
 
 static MONGODB_DATABASE_NAME: Lazy<String> = Lazy::new(|| {
     env::var("MONGODB_DATABASE_NAME").expect("\nMONGODB_DATABASE_NAME is not set in the .env file.\n")
@@ -231,4 +274,12 @@ static MONGODB_DATABASE_NAME: Lazy<String> = Lazy::new(|| {
 
 static MONGODB_COLLECTION_NAME: Lazy<String> = Lazy::new(|| {
     env::var("MONGODB_COLLECTION_NAME").expect("\nMONGODB_COLLECTION_NAME is not set in the .env file.\n")
+});
+
+static MONGODB_USERNAME: Lazy<String> = Lazy::new(|| {
+    env::var("LOCAL_MONGODB_USER").expect("\nLOCAL_MONGODB_USER is not set in the .env file.\n")
+});
+
+static MONGODB_PASSWORD: Lazy<String> = Lazy::new(|| {
+    env::var("LOCAL_MONGODB_PASSWORD").expect("\nLOCAL_MONGODB_PASSWORD is not set in the .env file.\n")
 });

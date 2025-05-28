@@ -23,8 +23,26 @@ pub fn authorize_or_fail_fn(
             .body("No auth key found in the environment; Authorization failed."));
     };
 
+    // The new authentication system requires the client to (usually over nginx) send a vault url in the headers.
+    // Against this URL, the token will be checked.
+    let vault_url = headers
+        .get("x-freva-vault-url")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let vault_url = if let Some(url) = vault_url {
+        // Success case
+        debug!("Vault URL found in headers: {}", url);
+        url
+    } else {
+        // Because we expect all requests to go through nginx or to be done manually, we expect the vault URL to be present.
+        warn!("No vault URL found in headers, expecting incorrect or malicous usage.");
+        return Err(HttpResponse::BadRequest()
+            .body("Authentication not successful; please use the nginx proxy.")); // Deliberately vague
+    };
+
     // Read from the variable `qstring`
-    match (qstring.get("auth_key"), headers.get("Authorization")) {
+    match (qstring.get("auth_key"), headers.get("Authorization").or(headers.get("x-freva-user-token"))) {
         (maybe_key, Some(header_val)) => {
             // The user (maybe) sent both an auth_key in the query string and an Authorization header.
             // The header takes priority, but we'll emit a warning if they don't match.
@@ -49,7 +67,7 @@ pub fn authorize_or_fail_fn(
                 }
             };
 
-            let token_check = check_token(token);
+            let token_check = get_username_from_token(token, &vault_url);
 
             // Depending on whether the token was valid or not, check the query string token.
             match token_check {
@@ -102,27 +120,22 @@ pub fn authorize_or_fail_fn(
     }
 }
 
-/// Recives a token, checks it against the URL provided in the environment and returns the username.
-fn check_token(token: &str) -> Result<String, HttpResponse> {
-    // To make sure the token is valid, we need to send it to the URL provided in the environment.
-    // If the URL is not set, we'll return a 500.
-    let Some(auth_url) = crate::auth::AUTH_URL.get() else {
-        error!("No URL found in the environment. Sending 500.");
-        return Err(HttpResponse::InternalServerError()
-            .body("No auth URL found in the environment; Authorization failed."));
-    };
+/// Recives a token, checks it against the URL provided in the header and returns the username.
+fn get_username_from_token(token: &str, vault_url: &str) -> Result<String, HttpResponse> {
+    debug!("Checking token: {}", token);
+    debug!("Using vault URL: {}", vault_url);
 
-    // Also, for development, if the AUTH_URL is set to NO_AUTH, we'll skip the check. This is so I don't have to
-    // set up a server to check the token against.
-    if auth_url == "NO_AUTH" {
-        debug!("Skipping token check, AUTH_URL is set to NO_AUTH.");
-        return Ok("testing".to_string()); // "testing" is the username for development.
-    }
+    // // Also, for development, if the AUTH_URL is set to NO_AUTH, we'll skip the check. This is so I don't have to
+    // // set up a server to check the token against.
+    // if auth_url == "NO_AUTH" {
+    //     debug!("Skipping token check, AUTH_URL is set to NO_AUTH.");
+    //     return Ok("testing".to_string()); // "testing" is the username for development.
+    // }
 
     // If the URL is set, we'll send a GET request to it with the token in the header.
     let client = reqwest::blocking::Client::new();
     let response = client
-        .get(auth_url)
+        .get(vault_url.to_string() + "/auth/v2/userinfo") // The endpoint is at "/auth/v2/userinfo"
         .header("Authorization", format!("Bearer {}", token));
     let response = response.send();
 
@@ -177,6 +190,69 @@ fn check_token(token: &str) -> Result<String, HttpResponse> {
     debug!("Token check successful, username: {}", username);
     Ok(username)
 }
+
+/// Receives the vault URL and returns the URL to the MongoDB database to use.
+pub fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
+    // The vault URL will be contained in the answer to the request to the vault. (No endpoint or authentication needed.)
+    debug!("Getting MongoDB URL from vault: {}", vault_url);
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .get(vault_url) 
+        .send();
+
+    // Extract the result or fail
+    let result = match response {
+        Ok(res) => {
+            if res.status().is_success() {
+                // If the response is successful, we'll return the MongoDB URL.
+                let content = res
+                    .text()
+                    .unwrap_or_else(|_| "Empty JSON!".to_string()) // TODO: Code smell; this should be handled better.
+                    .trim()
+                    .to_owned();
+                debug!("Vault response: {}", content);
+                content
+            } else {
+                // If the response is not successful, we'll return a 500.
+                warn!("Failed to get MongoDB URL, status code: {}", res.status());
+                return Err(HttpResponse::InternalServerError()
+                    .body("Failed to get MongoDB URL."));
+            }
+        }
+        Err(e) => {
+            // If there was an error sending the request, we'll return a 500.
+            error!("Error sending request to vault: {}", e);
+            return Err(HttpResponse::InternalServerError()
+                .body("Error sending request to vault."));
+        }
+    };
+
+    // The result is a JSON object containing a bunch of stuff, but we only care about the MongoDB URL ("mongodb.url").
+    let mongodb_url = match serde_json::from_str::<serde_json::Value>(&result) {
+        Ok(json) => {
+            // If the JSON is valid, we'll return the MongoDB URL.
+            match json["mongodb"]["url"].as_str() {
+                Some(url) => url.to_string(),
+                None => {
+                    // If the MongoDB URL is not found, we'll return a 500.
+                    error!("MongoDB URL not found in vault response.");
+                    return Err(HttpResponse::InternalServerError()
+                        .body("MongoDB URL not found in vault response."));
+                }
+            }
+        }
+        Err(e) => {
+            // If the JSON is not valid, we'll return a 500.
+            error!("Error parsing vault response: {}", e);
+            return Err(HttpResponse::InternalServerError()
+                .body("Error parsing vault response."));
+        }
+    };
+    debug!("MongoDB URL: {}", mongodb_url);
+    Ok(mongodb_url)
+
+}
+
 
 /// The authorize_or_fail macro is wrapping the function and return the error variant
 /// if it fails. If it succeeds because a good authentication token was given via header, the 
