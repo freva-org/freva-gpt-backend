@@ -112,7 +112,6 @@ pub enum OpenAIModels {
     gpt_4_1_mini,
     #[allow(non_camel_case_types)]
     gpt_4_1_nano,
-
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -160,7 +159,7 @@ pub fn model_ends_on_no_choice(model: AvailableChatbots) -> bool {
         | AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B)
         | AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B_tool)
         | AvailableChatbots::Ollama(OllamaModels::qwen2_5_32B) => true,
-        // | AvailableChatbots::Ollama(OllamaModels::qwq) => true, // Test this! 
+        // | AvailableChatbots::Ollama(OllamaModels::qwq) => true, // Test this!
         _ => false,
     }
 }

@@ -1,12 +1,10 @@
 // Handles basic prompting for the chatbot.
 
-use async_openai::types::{
-    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
-};
+use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage};
 use once_cell::sync::Lazy;
 use std::fs;
 use std::io::Read;
-use tracing::{trace, warn, error};
+use tracing::{error, trace, warn};
 
 /// The basic starting prompt as a const of the correct type.
 static STARTING_PROMPT_STR: Lazy<String> = Lazy::new(|| {
@@ -52,7 +50,7 @@ pub static STARTING_PROMPT_CCRM: Lazy<ChatCompletionRequestSystemMessage> =
 
 /// Function that holds the example conversations as a type that the async_openai library can use.
 /// Takes in the user_id and thread_id as arguments for templating.
-fn example_conversations_ccrm(user_id: &str, thread_id: &str) -> Vec<ChatCompletionRequestMessage>  {
+fn example_conversations_ccrm(user_id: &str, thread_id: &str) -> Vec<ChatCompletionRequestMessage> {
     let mut content = EXAMPLE_CONVERSATIONS_STR.clone();
     // Replace the user_id and thread_id in the content.
     let replacements = [("{user_id}", user_id), ("{thread_id}", thread_id)];
@@ -95,7 +93,7 @@ fn entire_prompt_ccrm(user_id: &str, thread_id: &str) -> Vec<ChatCompletionReque
 /// If either the user_id or thread_id are non-alphanumeric, it will error.
 pub fn get_entire_prompt_json(user_id: &str, thread_id: &str) -> Result<String, ()> {
     // If either the user_id or thread_id are non-alphanumeric, return an error.
-    // This is because else, the json parsing might be thrown off. 
+    // This is because else, the json parsing might be thrown off.
     if !user_id.chars().all(|c| c.is_alphanumeric()) {
         error!("user_id is not alphanumeric: {}", user_id);
         return Err(());
@@ -111,8 +109,8 @@ pub fn get_entire_prompt_json(user_id: &str, thread_id: &str) -> Result<String, 
     // For now, it just returns the JSON string of the starting prompt.
     let ep_crrm = entire_prompt_ccrm(user_id, thread_id);
 
-    let mut result = serde_json::to_string(&ep_crrm)
-        .expect("Error converting starting prompt to JSON."); 
+    let mut result =
+        serde_json::to_string(&ep_crrm).expect("Error converting starting prompt to JSON.");
     // Safety: The conversion currently has no paths to error. However, if it does, the first call before the server is started will fail, causing the server to not start.
     // Note that the templating makes it not pure, but if one templating is correct, and everything is alphanumeric, the rest should be too.
 

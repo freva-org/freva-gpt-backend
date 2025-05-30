@@ -3,7 +3,17 @@ use std::io::Write;
 use tracing::{debug, error, info, trace};
 
 use crate::{
-    auth::{ALLOW_GUESTS, AUTH_KEY}, chatbot::{self, is_ollama_running, mongodb_storage::get_database, storage_router::{AvailableStorages, STORAGE}, stream_response::STREAM_STOP_CONTENT, types::StreamVariant}, logging::{silence_logger, undo_silence_logger}, static_serve, tool_calls::route_call::print_and_clear_tool_logs
+    auth::{ALLOW_GUESTS, AUTH_KEY},
+    chatbot::{
+        self, is_ollama_running,
+        mongodb_storage::get_database,
+        storage_router::{AvailableStorages, STORAGE},
+        stream_response::STREAM_STOP_CONTENT,
+        types::StreamVariant,
+    },
+    logging::{silence_logger, undo_silence_logger},
+    static_serve,
+    tool_calls::route_call::print_and_clear_tool_logs,
 };
 
 /// Helper function to flush stdout and stderr.
@@ -26,10 +36,7 @@ pub async fn run_runtime_checks() {
     // The function can fail if the prompt or messages cannot be converted to a string.
     // To make sure that this is caught early, we'll just test it here.
     let entire_prompt_json = chatbot::prompting::get_entire_prompt_json("testing", "testing");
-    trace!(
-        "Starting messages JSON: {:?}",
-        entire_prompt_json
-    );
+    trace!("Starting messages JSON: {:?}", entire_prompt_json);
 
     trace!("Ping Response: {:?}", static_serve::RESPONSE_STRING);
 
@@ -73,16 +80,18 @@ pub async fn run_runtime_checks() {
         }
     };
 
-    ALLOW_GUESTS.set(allow_guests == "true").unwrap_or_else(|_| {
-        error!("Error setting the ALLOW_GUESTS variable. Exiting...");
-        eprintln!("Error setting the ALLOW_GUESTS variable. Exiting...");
-        std::process::exit(1);
-    });
+    ALLOW_GUESTS
+        .set(allow_guests == "true")
+        .unwrap_or_else(|_| {
+            error!("Error setting the ALLOW_GUESTS variable. Exiting...");
+            eprintln!("Error setting the ALLOW_GUESTS variable. Exiting...");
+            std::process::exit(1);
+        });
 
     info!("Authentication string set successfully.");
     println!("Success!");
 
-    // Check whether the mongoDB is set up correctly by retrieving the threads by the testing user. 
+    // Check whether the mongoDB is set up correctly by retrieving the threads by the testing user.
     if matches!(STORAGE, AvailableStorages::MongoDB) {
         print!("Checking whether the MongoDB is set up correctly... ");
         flush_stdout_stderr();
@@ -104,7 +113,7 @@ pub async fn run_runtime_checks() {
         println!("Success!");
         flush_stdout_stderr();
     }
-    
+
     // Run the basic checks for the code interpreter.
     // Note that those checks need to be runtime, not compiletime, as the code interpreter calles the binary itself.
     print!("Running runtime checks including library checks for the code interpreter... ");
@@ -119,7 +128,7 @@ pub async fn run_runtime_checks() {
     println!("Success!");
     flush_stdout_stderr();
     info!("Runtime checks for the code interpreter were successful and all required libraries are available.");
-    
+
     // Also check that the code interpreter can handle hard and soft crashes.
     print!("Checking whether the code interpreter can handle crashes... ");
     flush_stdout_stderr();
@@ -129,11 +138,11 @@ pub async fn run_runtime_checks() {
     println!("Success!");
     flush_stdout_stderr();
     info!("The code interpreter can handle crashes.");
-    
+
     // Also check that required directories exist.
     if check_directory("/app/logs")
-    & check_directory("/app/threads")
-    & check_directory("/app/python_pickles")
+        & check_directory("/app/threads")
+        & check_directory("/app/python_pickles")
     {
         println!("All required directories exist and are readable.");
         info!("All required directories exist and are readable.");
@@ -141,7 +150,7 @@ pub async fn run_runtime_checks() {
         println!("Some required directories are missing or not readable");
         error!("Some required directories are missing or not readable");
     }
-    
+
     print!("Checking robustness and jupyter like behavior of the code interpreter... ");
     flush_stdout_stderr();
     info!("Checking robustness and jupyter like behavior of the code interpreter.");
@@ -151,7 +160,9 @@ pub async fn run_runtime_checks() {
     check_traceback_error_surround().await;
     check_eval_exec().await;
     println!("Success!");
-    info!("The code interpreter is robust enough and behaves like a Jupyter notebook in all tests.");
+    info!(
+        "The code interpreter is robust enough and behaves like a Jupyter notebook in all tests."
+    );
 
     // Finally, check whether ollama is running.
     if is_ollama_running().await {

@@ -48,7 +48,10 @@ pub async fn route_call(
     } else {
         // If the function name is not recognized, we'll return an error message.
         let supported_tools = SUPPORTED_TOOLS.join(", ");
-        warn!("The chatbot tried to call a function with the name '{}' . Supported tools are: {}", func_name, supported_tools);
+        warn!(
+            "The chatbot tried to call a function with the name '{}' . Supported tools are: {}",
+            func_name, supported_tools
+        );
         let answer = vec![StreamVariant::CodeOutput(format!("The function '{func_name}' is not recognized. Supported tools are: {supported_tools}"), id)];
         sender.send(answer).await
     };
@@ -107,9 +110,9 @@ pub(crate) fn print_and_clear_tool_logs(
 
                     // Debugging: write the overhead times to a file.
                     // Note that I want to be able to debug this on my local machine too where docker doesn't work.
-                    #[cfg(target_os="macos")]
+                    #[cfg(target_os = "macos")]
                     const FILE_PATH: &str = "./testdata/debug_overhead.log";
-                    #[cfg(not(target_os="macos"))]
+                    #[cfg(not(target_os = "macos"))]
                     const FILE_PATH: &str = "/data/inputFiles/debug_overhead.log";
 
                     // We now have the starting, multiple intermediate, and ending points in time.

@@ -13,7 +13,12 @@ pub enum AvailableStorages {
 pub static STORAGE: AvailableStorages = AvailableStorages::MongoDB;
 
 /// Appends a thread to the storage. User_Id is ignored for the disk storage.
-pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation, database: Database) {
+pub async fn append_thread(
+    thread_id: &str,
+    user_id: &str,
+    content: Conversation,
+    database: Database,
+) {
     match STORAGE {
         AvailableStorages::Disk => {
             super::thread_storage::append_thread(thread_id, content);
@@ -25,7 +30,10 @@ pub async fn append_thread(thread_id: &str, user_id: &str, content: Conversation
 }
 
 /// Reads a thread from the storage. Returns an error if the thread is not found, most likely because it doesn't exist.
-pub async fn read_thread(thread_id: &str, database: Database) -> Result<Conversation, std::io::Error> {
+pub async fn read_thread(
+    thread_id: &str,
+    database: Database,
+) -> Result<Conversation, std::io::Error> {
     match STORAGE {
         AvailableStorages::Disk => super::thread_storage::read_thread(thread_id),
         AvailableStorages::MongoDB => {

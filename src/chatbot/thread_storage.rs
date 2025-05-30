@@ -5,7 +5,7 @@
 // Reading and writing is just manipulating files, so we can use the `std::fs` module.
 // Note that the file of a conversation is opened at the start of the stream, so it cannot be read from while it is being written to.
 
-// The File will store the conversation in the JSON lines format, where each line is a JSON object, 
+// The File will store the conversation in the JSON lines format, where each line is a JSON object,
 // specifying the variant, as serialized by serde_json.
 
 use std::{
@@ -217,12 +217,11 @@ fn split_colon_at_end(s: &str) -> Option<(&str, &str)> {
     Some((first, last))
 }
 
-/// When a conversation is saved, it might be corrupted in some way. 
+/// When a conversation is saved, it might be corrupted in some way.
 /// For us, this means that every Code variant needs to be followed by a CodeOutput variant
 /// after some number of ServerHint variants,
 /// and that the very last variant needs to be a StreamEnd variant.
 pub fn cleanup_conversation(content: &mut Conversation) {
-    
     // Insert a CodeOutput variant after every Code variant.
     let mut i = 0; // The index of the current variant.
     let mut active_code_id = None; // The ID of the current code variant.
@@ -240,13 +239,13 @@ pub fn cleanup_conversation(content: &mut Conversation) {
                 continue;
             }
             _ => {
-
-                if let Some(id) = active_code_id.take() { // Also resets the active code ID.
+                if let Some(id) = active_code_id.take() {
+                    // Also resets the active code ID.
                     // If we're in a variant that is not a CodeOutput, but we have an active code ID, we need to insert a CodeOutput variant.
                     content.insert(i, StreamVariant::CodeOutput("".to_string(), id));
                     i += 1;
                     continue;
-                } 
+                }
             }
         }
         i += 1;
@@ -255,7 +254,9 @@ pub fn cleanup_conversation(content: &mut Conversation) {
     // If the last variant is not a StreamEnd variant, we'll need to insert one.
     if let Some(last) = content.last() {
         if !matches!(last, StreamVariant::StreamEnd(_)) {
-            content.push(StreamVariant::StreamEnd("Stream ended in a very unexpected manner".to_string()));
+            content.push(StreamVariant::StreamEnd(
+                "Stream ended in a very unexpected manner".to_string(),
+            ));
         }
     }
 }

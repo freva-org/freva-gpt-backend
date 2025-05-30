@@ -29,12 +29,14 @@ use super::storage_router::read_thread;
 pub async fn get_thread(req: HttpRequest) -> impl Responder {
     let qstring = QString::from(req.query_string());
     let headers = req.headers();
-    
+
     // First try to authorize the user.
     let _maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
-    
+
     // First try to get the Vault URL from the headers.
-    let maybe_vault_url = headers.get("x-freva-vault-url").and_then(|h| h.to_str().ok());
+    let maybe_vault_url = headers
+        .get("x-freva-vault-url")
+        .and_then(|h| h.to_str().ok());
 
     // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {
@@ -42,11 +44,10 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
             // If the thread ID is not found, we'll return a 400
             warn!("The User requested a thread without a thread ID.");
             return HttpResponse::BadRequest()
-            .body("Thread ID not found. Please provide a thread_id in the query parameters.");
+                .body("Thread ID not found. Please provide a thread_id in the query parameters.");
         }
         Some(thread_id) => thread_id,
     };
-
 
     // If we have a specific vault URL, we can use it to initialize the database.
     // Otherwise, we'll use the local database.

@@ -172,7 +172,13 @@ async fn save_conversation(conversation: ActiveConversation, database: Database)
 
     let new_conversation = concat_variants(conversation.conversation);
 
-    crate::chatbot::storage_router::append_thread(&conversation.id, &conversation.user_id ,new_conversation, database).await;
+    crate::chatbot::storage_router::append_thread(
+        &conversation.id,
+        &conversation.user_id,
+        new_conversation,
+        database,
+    )
+    .await;
 }
 
 /// The assistant and code messages are streamed, so the variants that come from OpenAI contain only one or a few tokens of the message.

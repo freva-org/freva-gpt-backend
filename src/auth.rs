@@ -38,11 +38,17 @@ pub async fn authorize_or_fail_fn(
         // Because we expect all requests to go through nginx or to be done manually, we expect the vault URL to be present.
         warn!("No vault URL found in headers, expecting incorrect or malicous usage.");
         return Err(HttpResponse::BadRequest()
-            .body("Authentication not successful; please use the nginx proxy.")); // Deliberately vague
+            .body("Authentication not successful; please use the nginx proxy."));
+        // Deliberately vague
     };
 
     // Read from the variable `qstring`
-    match (qstring.get("auth_key"), headers.get("Authorization").or(headers.get("x-freva-user-token"))) {
+    match (
+        qstring.get("auth_key"),
+        headers
+            .get("Authorization")
+            .or(headers.get("x-freva-user-token")),
+    ) {
         (maybe_key, Some(header_val)) => {
             // The user (maybe) sent both an auth_key in the query string and an Authorization header.
             // The header takes priority, but we'll emit a warning if they don't match.
@@ -197,19 +203,14 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
     // The vault URL will be contained in the answer to the request to the vault. (No endpoint or authentication needed.)
     debug!("Getting MongoDB URL from vault: {}", vault_url);
     let client = reqwest::Client::new();
-    let response = client
-        .get(vault_url) 
-        .send()
-        .await;
+    let response = client.get(vault_url).send().await;
 
     // Extract the result or fail
     let result = match response {
         Ok(res) => {
             if res.status().is_success() {
                 // If the response is successful, we'll return the MongoDB URL.
-                let content = res
-                    .text()
-                    .await;
+                let content = res.text().await;
                 debug!("Response from vault: {:?}", content);
                 let content = match content {
                     Ok(text) => text.trim().to_owned(),
@@ -224,15 +225,13 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
             } else {
                 // If the response is not successful, we'll return a 500.
                 warn!("Failed to get MongoDB URL, status code: {}", res.status());
-                return Err(HttpResponse::InternalServerError()
-                    .body("Failed to get MongoDB URL."));
+                return Err(HttpResponse::InternalServerError().body("Failed to get MongoDB URL."));
             }
         }
         Err(e) => {
             // If there was an error sending the request, we'll return a 500.
             error!("Error sending request to vault: {}", e);
-            return Err(HttpResponse::InternalServerError()
-                .body("Error sending request to vault."));
+            return Err(HttpResponse::InternalServerError().body("Error sending request to vault."));
         }
     };
 
@@ -253,18 +252,15 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
         Err(e) => {
             // If the JSON is not valid, we'll return a 500.
             error!("Error parsing vault response: {}", e);
-            return Err(HttpResponse::InternalServerError()
-                .body("Error parsing vault response."));
+            return Err(HttpResponse::InternalServerError().body("Error parsing vault response."));
         }
     };
     debug!("MongoDB URL: {}", mongodb_url);
     Ok(mongodb_url)
-
 }
 
-
 /// The authorize_or_fail macro is wrapping the function and return the error variant
-/// if it fails. If it succeeds because a good authentication token was given via header, the 
+/// if it fails. If it succeeds because a good authentication token was given via header, the
 /// username is returned. If the token was given via query string, None is returned.
 macro_rules! authorize_or_fail {
     ($qstring:expr, $headers:expr) => {
@@ -295,7 +291,10 @@ pub fn is_guest(username: &str) -> bool {
     if username == "testing" {
         return false;
     }
-    if (username.starts_with('k') || username.starts_with('b')) && username.len() == 7 && username[1..].chars().all(|c| c.is_ascii_digit()) {
+    if (username.starts_with('k') || username.starts_with('b'))
+        && username.len() == 7
+        && username[1..].chars().all(|c| c.is_ascii_digit())
+    {
         return false; // It's a valid user ID, not a guest.
     }
     // If it doesn't match any of the above patterns, it's a guest.

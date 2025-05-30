@@ -37,7 +37,8 @@ pub async fn start_code_interpeter(
             info!("Thread_id not set, assuming in testing mode. Not setting freva_config_path.");
             "".to_string()
         }
-        Some((thread_id, database)) => match conversation_state(&thread_id, database.clone()).await {
+        Some((thread_id, database)) => match conversation_state(&thread_id, database.clone()).await
+        {
             None => {
                 warn!("No conversation state found while trying to run the code interpreter. Not setting freva_config_path, this WILL break any calls to the code interpreter that require it.");
                 "".to_string()
@@ -63,7 +64,9 @@ pub async fn start_code_interpeter(
     // Also retrieve all previous code interpreter inputs to get all libraries that are needed.
     let previous_code_interpreter_imports = match thread_id_and_database.clone() {
         None => vec![],
-        Some((thread_id, database)) => retrieve_previous_code_interpreter_imports(&thread_id, database).await,
+        Some((thread_id, database)) => {
+            retrieve_previous_code_interpreter_imports(&thread_id, database).await
+        }
     };
 
     // Now, we have to convert the arguments from JSON to a struct.
@@ -111,7 +114,6 @@ pub async fn start_code_interpeter(
     // Secondly, the python module likes to crash hard sometimes, so if the code interpreter crashes, it won't take the whole chatbot down with it.
     // The code we use will be the same as in the execute_code function.
 
-    
     #[cfg(debug_assertions)]
     static BIN_PATH: &str = "./target/debug/freva-gpt2-backend";
     // But when it is run in release mode, the binary is in a different location.
@@ -122,7 +124,12 @@ pub async fn start_code_interpeter(
         .arg("--code-interpreter")
         .arg(code.code.clone())
         .env("EVALUATION_SYSTEM_CONFIG_FILE", freva_config_path)
-        .env("THREAD_ID", thread_id_and_database.map(|t_a_d| t_a_d.0 ).unwrap_or_default()) // Extracts the thread_id from the tuple, or uses an empty string if it is None.
+        .env(
+            "THREAD_ID",
+            thread_id_and_database
+                .map(|t_a_d| t_a_d.0)
+                .unwrap_or_default(),
+        ) // Extracts the thread_id from the tuple, or uses an empty string if it is None.
         .output()
         .await; // It's a future now, so we have to await it.
 
@@ -206,7 +213,7 @@ struct CodeInterpreterArguments {
 }
 
 /// The function that is called when the program is started and the code_interpreter argument is passed.
-pub fn run_code_interpeter(arguments: String) -> !{
+pub fn run_code_interpeter(arguments: String) -> ! {
     // We'll first initialize the logger.
     let logger = setup_logging(); // can't drop the logger, because we need it to be alive for the whole program.
     debug!(
@@ -218,10 +225,11 @@ pub fn run_code_interpeter(arguments: String) -> !{
     // This is needed for the code interpreter to save the pickle file.
 
     // Debug: Overhead debugging
-    if let Ok(overhead_time) = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-    {
-        debug!("The code interpreter has been called. OVERHEAD={}", overhead_time.as_nanos());
+    if let Ok(overhead_time) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        debug!(
+            "The code interpreter has been called. OVERHEAD={}",
+            overhead_time.as_nanos()
+        );
     }
 
     let mut thread_id = match std::env::var("THREAD_ID") {
@@ -254,7 +262,10 @@ pub fn run_code_interpeter(arguments: String) -> !{
 
 /// Retrieves all previous code interpreter inputs from the conversation state.
 /// Returns a string with all the imports, seperated by newlines.
-async fn retrieve_previous_code_interpreter_imports(thread_id: &str, database: Database) -> Vec<String> {
+async fn retrieve_previous_code_interpreter_imports(
+    thread_id: &str,
+    database: Database,
+) -> Vec<String> {
     // The running conversation is in the global variable.
     let mut this_conversation = get_conversation(thread_id).unwrap_or_default();
     // The past conversation is stored on disk.

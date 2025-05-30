@@ -203,7 +203,8 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
         // Before returning the result, we'll have to flush stdout and stderr IN PYTHON.
 
         let flush = py.run(
-            &CString::new("import sys;sys.stdout.flush();sys.stderr.flush()").expect("Constant CString failed conversion"),
+            &CString::new("import sys;sys.stdout.flush();sys.stderr.flush()")
+                .expect("Constant CString failed conversion"),
             Some(&globals),
             Some(&locals),
         );
@@ -266,7 +267,8 @@ try:
 except Exception:
     should_eval = False
     "#
-    )).expect("Constant CString failed conversion");
+    ))
+    .expect("Constant CString failed conversion");
     let locals = PyDict::new(py);
     let globals = PyDict::new(py);
 
@@ -391,7 +393,8 @@ with open('{pickleable_path}', 'rb') as f:
 
 # Now, 'loaded_vars' contains all the variables to be used as locals
 "#
-    )).expect("Constant CString failed conversion");
+    ))
+    .expect("Constant CString failed conversion");
     let temp_locals = PyDict::new(py);
 
     // Run the code; if it doesn't work, we'll just return None.

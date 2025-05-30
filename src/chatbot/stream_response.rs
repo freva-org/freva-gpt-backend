@@ -18,12 +18,22 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    auth::is_guest, chatbot::{
-        available_chatbots::{model_ends_on_no_choice, DEFAULTCHATBOT}, handle_active_conversations::{
+    auth::is_guest,
+    chatbot::{
+        available_chatbots::{model_ends_on_no_choice, DEFAULTCHATBOT},
+        handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
             new_conversation_id, save_and_remove_conversation,
-        }, heartbeat::heartbeat_content, mongodb_storage::get_database, prompting::{get_entire_prompt, get_entire_prompt_json}, select_client, storage_router::read_thread, types::{help_convert_sv_ccrm, ConversationState, StreamVariant}
-    }, logging::{silence_logger, undo_silence_logger}, tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS}
+        },
+        heartbeat::heartbeat_content,
+        mongodb_storage::get_database,
+        prompting::{get_entire_prompt, get_entire_prompt_json},
+        select_client,
+        storage_router::read_thread,
+        types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
+    },
+    logging::{silence_logger, undo_silence_logger},
+    tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS},
 };
 
 use super::{available_chatbots::AvailableChatbots, handle_active_conversations::generate_id};
@@ -77,13 +87,15 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         Some(thread_id) => (thread_id.to_string(), false),
     };
 
-
     // New in Version 1.9.1: require the user_id to be set.
     // Later, proper authentication will take over.
     let user_id = match maybe_username {
         Some(username) => {
             // If the user is authenticated, we'll use their username as the user_id.
-            debug!("User is authenticated, using their username as user_id: {}", username);
+            debug!(
+                "User is authenticated, using their username as user_id: {}",
+                username
+            );
             username
         }
         None => {
@@ -92,12 +104,13 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
                     // If the user ID is not found, we'll return a 400
                     warn!("The User requested a stream without a user_id.");
                     // For convenience, we'll also return the list of recieved parameters.
-                    let query_parameter_keys = qstring.to_pairs()
+                    let query_parameter_keys = qstring
+                        .to_pairs()
                         .iter()
                         .map(|(key, _)| *key)
                         .collect::<Vec<_>>()
                         .join(", ");
-                    
+
                     return HttpResponse::BadRequest().body(
                         "User ID not found. Please provide a non-empty user_id in the query parameters.\nHint: The following query parameters were received: ".to_string() + &query_parameter_keys,
                     );
@@ -110,7 +123,10 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     // Martin doesn't want the guests to be able to use the chatbot, so we'll check if the user is considered a guest.
     // Note that the check does take into account the environment variable.
     if is_guest(&user_id) {
-        warn!("The User requested a stream, but is considered a guest. User ID: {}", user_id);
+        warn!(
+            "The User requested a stream, but is considered a guest. User ID: {}",
+            user_id
+        );
         return HttpResponse::Unauthorized().body("You are not allowed to use the chatbot as a guest. Please log in with a Levante account.");
     }
 
@@ -119,7 +135,10 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         None | Some("") => {
             // The input may instead be inside the header.
             if let Some(header_input) = header_input {
-                debug!("Using header input because parameter input is empty: {:?}", header_input);
+                debug!(
+                    "Using header input because parameter input is empty: {:?}",
+                    header_input
+                );
                 // If the header is not empty, we'll use it as the input.
                 match header_input.to_str() {
                     Ok(input) => input.to_string(),
@@ -140,9 +159,10 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     };
 
     debug!("Thread ID: {}, Input: {}", thread_id, input);
-    
+
     // First try to get the vault_url from the headers, if it is not set, we'll use the default database.
-    let maybe_vault_url = headers.get("x-freva-vault-url")
+    let maybe_vault_url = headers
+        .get("x-freva-vault-url")
         .and_then(|h| h.to_str().ok());
 
     let database = match get_database(maybe_vault_url).await {
@@ -177,18 +197,20 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     {
         // allow both freva_config and freva-config
         None | Some("") => {
-
             // If the freva_config is not found in the parameters, we'll check the headers.
-            if let Some(header_val) =  headers.get("X-Freva-ConfigPath") {
+            if let Some(header_val) = headers.get("X-Freva-ConfigPath") {
                 if let Ok(header_val) = header_val.to_str() {
-                    debug!("Using header freva_config because parameter freva_config is empty: {:?}", header_val);
+                    debug!(
+                        "Using header freva_config because parameter freva_config is empty: {:?}",
+                        header_val
+                    );
                     header_val.to_string()
                 } else {
                     warn!("The User requested a stream without a freva_config path being set.");
                     // FIXME: remove this temporary fix
                     "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
                 }
-            } else {   
+            } else {
                 warn!("The User requested a stream without a freva_config path being set.");
                 // FIXME: remove this temporary fix
                 "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
@@ -224,7 +246,8 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     let messages = if create_new {
         // If the thread is new, we'll start with the base messages and the user's input.
-        let mut base_message: Vec<ChatCompletionRequestMessage> = get_entire_prompt(&user_id, &thread_id);
+        let mut base_message: Vec<ChatCompletionRequestMessage> =
+            get_entire_prompt(&user_id, &thread_id);
 
         trace!("Adding base message to stream.");
 
@@ -234,12 +257,19 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
                 // If we can't get the entire prompt, we'll return the information that we require the user_id and thread_id to be alphanumeric.
                 warn!("Error getting entire prompt, either user_id or thread_id are not alphanumeric.");
                 trace!("User ID: {}, Thread ID: {}", user_id, thread_id);
-                return HttpResponse::InternalServerError().body("Error creating prompt. Both user_id and thread_id need to be alphanumeric.");
+                return HttpResponse::InternalServerError().body(
+                    "Error creating prompt. Both user_id and thread_id need to be alphanumeric.",
+                );
             }
         };
 
         let starting_prompt = StreamVariant::Prompt(entire_prompt);
-        add_to_conversation(&thread_id, vec![starting_prompt], freva_config_path.clone(), user_id.clone());
+        add_to_conversation(
+            &thread_id,
+            vec![starting_prompt],
+            freva_config_path.clone(),
+            user_id.clone(),
+        );
 
         let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
             name: Some("user".to_string()),
@@ -296,7 +326,15 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     };
     trace!("Request built!");
 
-    create_and_stream(request, thread_id, freva_config_path, chatbot, user_id, database).await
+    create_and_stream(
+        request,
+        thread_id,
+        freva_config_path,
+        chatbot,
+        user_id,
+        database,
+    )
+    .await
 }
 
 /// A simple helper function to build the stream.
@@ -322,14 +360,15 @@ fn build_request(
         .stream_options(async_openai::types::ChatCompletionStreamOptions {
             include_usage: true,
         });
-        
-        match chatbot {
-            AvailableChatbots::OpenAI(crate::chatbot::available_chatbots::OpenAIModels::o1_mini)
-            | AvailableChatbots::OpenAI(crate::chatbot::available_chatbots::OpenAIModels::o3_mini) => {
-                partial_request = partial_request.max_completion_tokens(16000u32) // The max tokens parameter is called differently for the reasoning models.
-            }
-            _ => {
-                partial_request = partial_request.parallel_tool_calls(false) // No parallel tool calls!
+
+    match chatbot {
+        AvailableChatbots::OpenAI(crate::chatbot::available_chatbots::OpenAIModels::o1_mini)
+        | AvailableChatbots::OpenAI(crate::chatbot::available_chatbots::OpenAIModels::o3_mini) => {
+            partial_request = partial_request.max_completion_tokens(16000u32) // The max tokens parameter is called differently for the reasoning models.
+        }
+        _ => {
+            partial_request = partial_request
+                .parallel_tool_calls(false) // No parallel tool calls!
                 .temperature(0.4) // The model shouldn't be too creative, but also not too boring.
                 .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
                 .max_tokens(16000u32);
@@ -953,7 +992,10 @@ async fn oai_stream_to_variants(
                                             }
                                             vec![StreamVariant::Code(arguments, tool_id.clone())]
                                         } else {
-                                            warn!("Tool call expected known tool, but found: {:?}", name_copy);
+                                            warn!(
+                                                "Tool call expected known tool, but found: {:?}",
+                                                name_copy
+                                            );
                                             // Instead of ending the stream, we'll just ignore the tool call, but send the user a ServerHint.
                                             // Depending on the implementation of the OpenAI API, this might result in a unspecified Server Error on the LLM side.
                                             vec![StreamVariant::ServerHint(format!("{{\"warning\": \"Tool call expected known tool, but found ->{}<-; content: ->{}<-\"}}", name_copy.unwrap_or_default(), arguments))]
@@ -1000,13 +1042,26 @@ async fn oai_stream_to_variants(
                 // Some models (specifically some of the qwen family, have the tendency to not return any choices to mark the end of the stream.)
                 if model_ends_on_no_choice(chatbot) {
                     debug!("Qwen-like model ended stream without choice, simulating stop event.");
-                    // Differentiatie between a tool call and a standard stop by the tool arguments and tool name. 
+                    // Differentiatie between a tool call and a standard stop by the tool arguments and tool name.
                     let finish_reason = if !tool_arguments.is_empty() && tool_name.is_some() {
                         FinishReason::ToolCalls
                     } else {
                         FinishReason::Stop
                     };
-                    handle_stop_event(finish_reason, None, tool_arguments, tool_name, tool_id, thread_id, database,open_ai_stream, &response, chatbot, reciever).await
+                    handle_stop_event(
+                        finish_reason,
+                        None,
+                        tool_arguments,
+                        tool_name,
+                        tool_id,
+                        thread_id,
+                        database,
+                        open_ai_stream,
+                        &response,
+                        chatbot,
+                        reciever,
+                    )
+                    .await
                     // vec![StreamVariant::StreamEnd("Qwen-like stream ended".to_string())]
                 } else {
                     info!("No response found, ending stream.");
@@ -1017,9 +1072,10 @@ async fn oai_stream_to_variants(
         Some(Err(e)) => {
             // If we can't get the response, we'll return a generic error.
             warn!("Error getting response: {:?}", e);
-            vec![StreamVariant::OpenAIError(
-                format!("Error getting response. Recieved error: {:?}", e),
-            )]
+            vec![StreamVariant::OpenAIError(format!(
+                "Error getting response. Recieved error: {:?}",
+                e
+            ))]
         }
         None => {
             // The llama chatbot sometimes forgets to write </tool_call> at the end of the tool call.
@@ -1094,7 +1150,6 @@ async fn handle_stop_event(
         async_openai::types::FinishReason::ToolCalls => {
             // We expect there to now be a tool call in the response.
             if let Some(choice) = choice {
-
                 if let Some(content) = choice.delta.tool_calls.clone() {
                     // Handle the tool call
                     trace!("Tool call: {:?}", content);
@@ -1115,7 +1170,7 @@ async fn handle_stop_event(
                     tool_id.to_string(),
                     thread_id.to_string(),
                     tx,
-                    database
+                    database,
                 ));
                 // Reset the tool_name and tool_arguments
                 *tool_name = None;
@@ -1175,9 +1230,10 @@ async fn restart_stream(
                 Err(e) => {
                     // If we can't build the request, we'll return a generic error.
                     warn!("Error building request: {:?}", e);
-                    vec![StreamVariant::ServerError(
-                        format!("Error building request: {:?}", e),
-                    )]
+                    vec![StreamVariant::ServerError(format!(
+                        "Error building request: {:?}",
+                        e
+                    ))]
                 }
                 Ok(request) => {
                     trace!("Request built successfully: {:?}", request);
@@ -1190,9 +1246,10 @@ async fn restart_stream(
                         Err(e) => {
                             // If we can't create the stream, we'll return a generic error.
                             warn!("Error creating stream: {:?}", e);
-                            vec![StreamVariant::ServerError(
-                                format!("Error creating stream: {:?}", e),
-                            )]
+                            vec![StreamVariant::ServerError(format!(
+                                "Error creating stream: {:?}",
+                                e
+                            ))]
                         }
                         Ok(stream) => {
                             // Everything worked, so we'll return the new stream and the new state.
