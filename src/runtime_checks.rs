@@ -3,10 +3,7 @@ use std::io::Write;
 use tracing::{debug, error, info, trace};
 
 use crate::{
-    auth::AUTH_KEY,
-    chatbot::{self, is_ollama_running, mongodb_storage::get_database, storage_router::{AvailableStorages, STORAGE}, stream_response::STREAM_STOP_CONTENT, types::StreamVariant},
-    static_serve,
-    tool_calls::route_call::print_and_clear_tool_logs,
+    auth::{ALLOW_GUESTS, AUTH_KEY}, chatbot::{self, is_ollama_running, mongodb_storage::get_database, storage_router::{AvailableStorages, STORAGE}, stream_response::STREAM_STOP_CONTENT, types::StreamVariant}, logging::{silence_logger, undo_silence_logger}, static_serve, tool_calls::route_call::print_and_clear_tool_logs
 };
 
 /// Helper function to flush stdout and stderr.
@@ -66,6 +63,22 @@ pub async fn run_runtime_checks() {
         std::process::exit(1);
     });
 
+    // Also part of the authentication check is whether or not to allow guests.
+    let allow_guests = match std::env::var("ALLOW_GUESTS") {
+        Ok(allow_guests) => allow_guests,
+        Err(e) => {
+            error!("Error reading the ALLOW_GUESTS environment variable: {e:?}",);
+            eprintln!("Error reading the ALLOW_GUESTS environment variable: {e:?}");
+            std::process::exit(1);
+        }
+    };
+
+    ALLOW_GUESTS.set(allow_guests == "true").unwrap_or_else(|_| {
+        error!("Error setting the ALLOW_GUESTS variable. Exiting...");
+        eprintln!("Error setting the ALLOW_GUESTS variable. Exiting...");
+        std::process::exit(1);
+    });
+
     info!("Authentication string set successfully.");
     println!("Success!");
 
@@ -74,6 +87,7 @@ pub async fn run_runtime_checks() {
         print!("Checking whether the MongoDB is set up correctly... ");
         flush_stdout_stderr();
         info!("Checking whether the MongoDB is set up correctly.");
+        silence_logger(); // Retrieving the database with a none value will log a warning, so we silence the logger for this check.
         let database = match get_database(None).await {
             Ok(database) => database,
             Err(e) => {
@@ -82,6 +96,7 @@ pub async fn run_runtime_checks() {
                 std::process::exit(1);
             }
         };
+        undo_silence_logger();
         let _threads = crate::chatbot::mongodb_storage::read_threads("testing", database).await;
         // We'll just throw away the result because we can't be sure that the user already created some threads.
 

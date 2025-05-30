@@ -3,12 +3,15 @@
 /// For now, we'll just read the auth key from the environment and check it against the key provided in the request.
 pub static AUTH_KEY: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCell::new();
 
+/// Same with whether or not guests should be allowed to access the streaming API.
+pub static ALLOW_GUESTS: once_cell::sync::OnceCell<bool> = once_cell::sync::OnceCell::new();
+
 use actix_web::{http::header::HeaderMap, HttpResponse};
 use qstring::QString;
 /// Very simple macro for the API points to call at the beginning to make sure that a request is authorized.
 /// If it isn't, it automatically returns the correct response.
 /// If a username was found in the token check, it will be returned.
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 pub async fn authorize_or_fail_fn(
     qstring: &QString,
@@ -273,3 +276,29 @@ macro_rules! authorize_or_fail {
 }
 
 pub(crate) use authorize_or_fail;
+
+/// Whether or not a username is considered a guest.
+pub fn is_guest(username: &str) -> bool {
+    trace!("Checking if username '{}' is a guest.", username);
+    // If the ALLOW_GUESTS is true, we just allow all usernames.
+    if let Some(allow_guests) = crate::auth::ALLOW_GUESTS.get() {
+        if *allow_guests {
+            return true;
+        }
+    } else {
+        warn!("ALLOW_GUESTS is not set, this should not happen! defaulting to false.");
+    }
+
+    // Usernames are by default guests, unless they follow one of these patterns:
+    // "kXXXXXX" (where X is a digit) or "bXXXXXX" (where X is a digit).
+    // "testing" is also considered a non-guest
+    if username == "testing" {
+        return false;
+    }
+    if (username.starts_with('k') || username.starts_with('b')) && username.len() == 7 && username[1..].chars().all(|c| c.is_ascii_digit()) {
+        return false; // It's a valid user ID, not a guest.
+    }
+    // If it doesn't match any of the above patterns, it's a guest.
+    debug!("Username '{}' is considered a guest.", username);
+    true
+}

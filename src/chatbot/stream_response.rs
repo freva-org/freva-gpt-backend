@@ -18,14 +18,12 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    chatbot::{
+    auth::is_guest, chatbot::{
         available_chatbots::{model_ends_on_no_choice, DEFAULTCHATBOT}, handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
             new_conversation_id, save_and_remove_conversation,
         }, heartbeat::heartbeat_content, mongodb_storage::get_database, prompting::{get_entire_prompt, get_entire_prompt_json}, select_client, storage_router::read_thread, types::{help_convert_sv_ccrm, ConversationState, StreamVariant}
-    },
-    logging::{silence_logger, undo_silence_logger},
-    tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS},
+    }, logging::{silence_logger, undo_silence_logger}, tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS}
 };
 
 use super::{available_chatbots::AvailableChatbots, handle_active_conversations::generate_id};
@@ -80,7 +78,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     };
 
 
-    // New in Version 1.19.1: require the user_id to be set.
+    // New in Version 1.9.1: require the user_id to be set.
     // Later, proper authentication will take over.
     let user_id = match maybe_username {
         Some(username) => {
@@ -108,6 +106,13 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
             }
         }
     };
+
+    // Martin doesn't want the guests to be able to use the chatbot, so we'll check if the user is considered a guest.
+    // Note that the check does take into account the environment variable.
+    if is_guest(&user_id) {
+        warn!("The User requested a stream, but is considered a guest. User ID: {}", user_id);
+        return HttpResponse::Unauthorized().body("You are not allowed to use the chatbot as a guest. Please log in with a Levante account.");
+    }
 
     let header_input = headers.get("input");
     let input = match qstring.get("input") {
