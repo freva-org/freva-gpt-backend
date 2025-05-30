@@ -11,17 +11,17 @@ keywords = ["LLM", "Freva", "API"]
 categories = ["science", "science::geo", "web-programming::http-server"]
 
 [dependencies]
-actix-web = "4.10.2"
+actix-web = "4.11.0"
 async-openai = { git = "https://github.com/SeseMueller/async-openai", version = "0.27.2" }
 base64 = "0.22.1"
-clap = { version = "4.5.37", features = ["derive", "cargo"] }
+clap = { version = "4.5.39", features = ["derive", "cargo"] }
 const_format = "0.2.34"
 documented = { version = "0.9.1" }
 dotenvy = "0.15.7"
-flexi_logger = { version = "0.30.1", features = ["trc"] }
+flexi_logger = { version = "0.30.2", features = ["trc"] }
 futures = "0.3.31"
 once_cell = "1.21.3"
-pyo3 = { version = "0.24.2", features = ["auto-initialize"] }
+pyo3 = { version = "0.25.0", features = ["auto-initialize"] }
 qstring = "0.7.2"
 rand = "0.9.1"
 serde = "1.0.219"
@@ -29,16 +29,16 @@ serde_json = "1.0.140"
 strum = { version = "0.27.1", features = ["strum_macros", "derive"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
-reqwest = { version = "0.12.15", features = [
+reqwest = { version = "0.12.18", features = [
     "blocking",
 ], default-features = false }
-tokio = { version = "1.44.2", features = ["time"] }
-sysinfo = "0.34.2"
+tokio = { version = "1.45.1", features = ["time"] }
+sysinfo = "0.35.1"
 fs2 = "0.4.3"
-async-process = "2.3.0"
+async-process = "2.3.1"
 itertools = "0.14.0"
-mongodb = { version = "3.2.2" }
-chrono = { version = "0.4.40", default-features = false }
+mongodb = { version = "3.2.3" }
+chrono = { version = "0.4.41", default-features = false }
 async-lazy = "0.1.2"
 
 [lints.rust]

@@ -122,7 +122,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     // Martin doesn't want the guests to be able to use the chatbot, so we'll check if the user is considered a guest.
     // Note that the check does take into account the environment variable.
-    if is_guest(&user_id) {
+    if !is_guest(&user_id) {
         warn!(
             "The User requested a stream, but is considered a guest. User ID: {}",
             user_id
