@@ -206,10 +206,16 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
                 // If the response is successful, we'll return the MongoDB URL.
                 let content = res
                     .text()
-                    .await
-                    .unwrap_or_else(|_| "Empty JSON!".to_string()) // TODO: Code smell; this should be handled better.
-                    .trim()
-                    .to_owned();
+                    .await;
+                debug!("Response from vault: {:?}", content);
+                let content = match content {
+                    Ok(text) => text.trim().to_owned(),
+                    Err(e) => {
+                        error!("Error reading response text: {}", e);
+                        return Err(HttpResponse::InternalServerError()
+                            .body("Error reading response text from vault."));
+                    }
+                };
                 debug!("Vault response: {}", content);
                 content
             } else {

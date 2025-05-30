@@ -260,6 +260,7 @@ pub async fn get_database(vault_url: Option<&str>) -> Result<Database, HttpRespo
     }
 
     //TODO: Maybe initialize the database? MongoDB is a bit finnicky about that.
+    // While that wasn't tested explicetly, the testing battery ran 15/15 even with a fresh database.
 
     // We don't need the entire client, just the database.
     let database = client.database(&MONGODB_DATABASE_NAME);
