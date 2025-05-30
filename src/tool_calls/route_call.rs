@@ -13,6 +13,8 @@ use crate::chatbot::types::StreamVariant;
 
 use super::code_interpreter::prepare_execution::start_code_interpeter;
 
+pub static SUPPORTED_TOOLS: &[&str] = &["code_interpreter"];
+
 /// Routes a tool call to the appropriate function.
 pub async fn route_call(
     func_name: String,
@@ -45,7 +47,9 @@ pub async fn route_call(
         result
     } else {
         // If the function name is not recognized, we'll return an error message.
-        let answer = vec![StreamVariant::CodeOutput(format!("The function '{func_name}' is not recognized. Currently, only \"code_interpreter\" is supported."), id)];
+        let supported_tools = SUPPORTED_TOOLS.join(", ");
+        warn!("The chatbot tried to call a function with the name '{}' . Supported tools are: {}", func_name, supported_tools);
+        let answer = vec![StreamVariant::CodeOutput(format!("The function '{func_name}' is not recognized. Supported tools are: {supported_tools}"), id)];
         sender.send(answer).await
     };
 

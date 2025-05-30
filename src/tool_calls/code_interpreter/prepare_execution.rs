@@ -206,7 +206,7 @@ struct CodeInterpreterArguments {
 }
 
 /// The function that is called when the program is started and the code_interpreter argument is passed.
-pub fn run_code_interpeter(arguments: String) {
+pub fn run_code_interpeter(arguments: String) -> !{
     // We'll first initialize the logger.
     let logger = setup_logging(); // can't drop the logger, because we need it to be alive for the whole program.
     debug!(

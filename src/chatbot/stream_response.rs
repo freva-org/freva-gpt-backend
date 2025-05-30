@@ -937,12 +937,7 @@ async fn oai_stream_to_variants(
                                         }
 
                                         let name_copy = tool_name.clone(); // because tool_name will be used at the end to pass the tool name to the next iteration of the stream, we need to clone it here.
-                                        if name_copy != Some("code_interpreter".to_string()) {
-                                            warn!("Tool call expected code_interpreter, but found: {:?}", name_copy);
-                                            // Instead of ending the stream, we'll just ignore the tool call, but send the user a ServerHint.
-                                            // Depending on the implementation of the OpenAI API, this might result in a unspecified Server Error on the LLM side.
-                                            vec![StreamVariant::ServerHint(format!("{{\"warning\": \"Tool call expected code_interpreter, but found ->{}<-; content: ->{}<-\"}}", name_copy.unwrap_or_default(), arguments))]
-                                        } else {
+                                        if name_copy == Some("code_interpreter".to_string()) {
                                             // We know it's the code interpreter and can send it as a delta.
                                             trace!(
                                                 "Tool call: {:?} with arguments: {:?} and id: {}",
@@ -957,6 +952,11 @@ async fn oai_stream_to_variants(
                                                 );
                                             }
                                             vec![StreamVariant::Code(arguments, tool_id.clone())]
+                                        } else {
+                                            warn!("Tool call expected known tool, but found: {:?}", name_copy);
+                                            // Instead of ending the stream, we'll just ignore the tool call, but send the user a ServerHint.
+                                            // Depending on the implementation of the OpenAI API, this might result in a unspecified Server Error on the LLM side.
+                                            vec![StreamVariant::ServerHint(format!("{{\"warning\": \"Tool call expected known tool, but found ->{}<-; content: ->{}<-\"}}", name_copy.unwrap_or_default(), arguments))]
                                         }
                                     }
                                     None => {
