@@ -34,12 +34,12 @@ pub async fn heartbeat_content() -> StreamVariant {
 
     // Add CPU information.
     let cpu_usage = sys.global_cpu_usage();
-    if let Some(cpu_usage) = serde_json::Number::from_f64(cpu_usage as f64) {
+    if let Some(cpu_usage) = serde_json::Number::from_f64(f64::from(cpu_usage)) {
         heartbeat_json.insert(
             "cpu_usage".to_string(),
             serde_json::Value::Number(cpu_usage),
         );
-    };
+    }
 
     let cpu_last_minute = sysinfo::System::load_average().one;
     if let Some(cpu_last_minute) = serde_json::Number::from_f64(cpu_last_minute) {
@@ -47,7 +47,7 @@ pub async fn heartbeat_content() -> StreamVariant {
             "cpu_last_minute".to_string(),
             serde_json::Value::Number(cpu_last_minute),
         );
-    };
+    }
 
     // Create a list of all the processes we are interested in.
     // These are this process and all its children.
@@ -79,12 +79,12 @@ pub async fn heartbeat_content() -> StreamVariant {
     }
 
     // The conversion from f64 might fail, so we'll check if it's possible.
-    if let Some(process_cpu) = serde_json::Number::from_f64(process_cpu as f64) {
+    if let Some(process_cpu) = serde_json::Number::from_f64(f64::from(process_cpu)) {
         heartbeat_json.insert(
             "process_cpu".to_string(),
             serde_json::Value::Number(process_cpu),
         );
-    };
+    }
     heartbeat_json.insert(
         "process_memory".to_string(),
         serde_json::Value::Number(serde_json::Number::from(process_memory)),

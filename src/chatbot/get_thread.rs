@@ -51,17 +51,14 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
 
     // If we have a specific vault URL, we can use it to initialize the database.
     // Otherwise, we'll use the local database.
-    let database = match maybe_vault_url {
-        Some(vault_url) => {
-            // Initialize the database with the vault URL.
-            debug!("Using vault URL: {}", vault_url);
-            get_database(Some(vault_url)).await
-        }
-        None => {
-            // Initialize the database without a vault URL.
-            warn!("Using local database, no vault URL provided.");
-            get_database(None).await
-        }
+    let database = if let Some(vault_url) = maybe_vault_url {
+        // Initialize the database with the vault URL.
+        debug!("Using vault URL: {}", vault_url);
+        get_database(Some(vault_url)).await
+    } else {
+        // Initialize the database without a vault URL.
+        warn!("Using local database, no vault URL provided.");
+        get_database(None).await
     };
 
     let database = match database {

@@ -68,7 +68,7 @@ pub struct ActiveConversation {
 /// The Content is in JSON format, with the key being the hint and the value being the content. Currently, only the keys "thread_id" and "warning" are used.
 /// An example for a ServerHint packet would be `{"variant": "ServerHint", "content": "{\"thread_id\":\"1234\"}"}`.
 /// That means that the content needs to be parsed as JSON to get the actual content.
-#[derive(Debug, Serialize, Deserialize, Clone, Documented, PartialEq, strum::VariantNames)]
+#[derive(Debug, Serialize, Deserialize, Clone, Documented, PartialEq, Eq, strum::VariantNames)]
 #[serde(tag = "variant", content = "content")] // Makes it so that the variant names are inside the object and the content is held in the content field.
 pub enum StreamVariant {
     /// The Prompt for the LLM, as JSON; not to be displayed to the user.
@@ -297,7 +297,7 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
                         "Assistant Message contained an unknown name instead of frevaGPT: {:?}",
                         content.name
                     );
-                };
+                }
 
                 // There should never be tool or function calls here
                 #[allow(deprecated)]
@@ -305,38 +305,33 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
                 if let (Some(_), _) | (_, Some(_)) = (content.tool_calls, content.function_call) {
                     error!("Tried to convert an Assistant Message that contained a tool or function call. This should not happen and is not supported.");
                     Err("Assistant Message contained a tool or function call. This should not happen and is not supported.")
-                } else {
-                    match content.content {
-                        Some(s) => {
-                            match s {
-                                async_openai::types::ChatCompletionRequestAssistantMessageContent::Text(s) => {
-                                    Ok(Self::Assistant(s))
-                                },
-                                async_openai::types::ChatCompletionRequestAssistantMessageContent::Array(vector) => {
-                                    let mut text_vec = vec![];
-                                    for elem in vector {
-                                        // There are two variants, the text and refusal. We handle text as expected, and inform the user about refusal.
-                                        match elem {
-                                            async_openai::types::ChatCompletionRequestAssistantMessageContentPart::Text(s) => {
-                                                text_vec.push(s.text);
-                                            },
-                                            async_openai::types::ChatCompletionRequestAssistantMessageContentPart::Refusal(s) => {
-                                                warn!("Assistant Message contained a refusal: {:?}", s);
-                                                text_vec.push(format!("\n(Assistant refused to generate text: {:?})\n", s));
-                                            }
-                                        }
+                } else if let Some(s) = content.content {
+                    match s {
+                        async_openai::types::ChatCompletionRequestAssistantMessageContent::Text(s) => {
+                            Ok(Self::Assistant(s))
+                        },
+                        async_openai::types::ChatCompletionRequestAssistantMessageContent::Array(vector) => {
+                            let mut text_vec = vec![];
+                            for elem in vector {
+                                // There are two variants, the text and refusal. We handle text as expected, and inform the user about refusal.
+                                match elem {
+                                    async_openai::types::ChatCompletionRequestAssistantMessageContentPart::Text(s) => {
+                                        text_vec.push(s.text);
+                                    },
+                                    async_openai::types::ChatCompletionRequestAssistantMessageContentPart::Refusal(s) => {
+                                        warn!("Assistant Message contained a refusal: {:?}", s);
+                                        text_vec.push(format!("\n(Assistant refused to generate text: {s:?})\n"));
                                     }
-                                    let concat = text_vec.join("\n");
-
-                                    Ok(Self::Assistant(concat))
                                 }
                             }
-                        }
-                        None => {
-                            warn!("Assistant Message contained no content.");
-                            Ok(Self::Assistant(String::new()))
+                            let concat = text_vec.join("\n");
+
+                            Ok(Self::Assistant(concat))
                         }
                     }
+                } else {
+                    warn!("Assistant Message contained no content.");
+                    Ok(Self::Assistant(String::new()))
                 }
             }
             ChatCompletionRequestMessage::Tool(content) => {
@@ -478,7 +473,7 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
             Err(ConversionError::VariantHide(e)) => {
                 debug!("Hiding StreamVariant from LLM: {:?}", e);
             }
-        };
+        }
     }
 
     // If the buffer is not empty, we need to push it to the output.

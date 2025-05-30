@@ -28,7 +28,7 @@ pub async fn authorize_or_fail_fn(
     let vault_url = headers
         .get("x-freva-vault-url")
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+        .map(|s| s.to_owned());
 
     let vault_url = if let Some(url) = vault_url {
         // Success case
@@ -47,7 +47,7 @@ pub async fn authorize_or_fail_fn(
         qstring.get("auth_key"),
         headers
             .get("Authorization")
-            .or(headers.get("x-freva-user-token")),
+            .or_else(|| headers.get("x-freva-user-token")),
     ) {
         (maybe_key, Some(header_val)) => {
             // The user (maybe) sent both an auth_key in the query string and an Authorization header.
@@ -65,12 +65,11 @@ pub async fn authorize_or_fail_fn(
             debug!("Authorization header: {}", auth_string);
             debug!("Query string auth_key: {:?}", maybe_key);
             // The Authentication header is a Bearer token, so we need to extract the token from it.
-            let token = match auth_string.strip_prefix("Bearer ") {
-                Some(token) => token,
-                None => {
-                    warn!("Authorization header is not a Bearer token.");
-                    return Err(HttpResponse::BadRequest().body("Authorization header is not a Bearer token. Please use the Bearer token format."));
-                }
+            let Some(token) = auth_string.strip_prefix("Bearer ") else {
+                warn!("Authorization header is not a Bearer token.");
+                return Err(HttpResponse::BadRequest().body(
+                    "Authorization header is not a Bearer token. Please use the Bearer token format.",
+                ));
             };
 
             let token_check = get_username_from_token(token, &vault_url).await;
@@ -93,7 +92,7 @@ pub async fn authorize_or_fail_fn(
                                 "Authorization header and query string auth_key do not authorize. Sending error: {:?}", tokencheck_error
                             );
                             return Err(tokencheck_error);
-                        };
+                        }
                         // Else, the query string token is valid. This will be removed in the future.
                         debug!("Query string matches auth_key, authenticating without username.");
                         Ok(None)
@@ -142,7 +141,7 @@ async fn get_username_from_token(token: &str, vault_url: &str) -> Result<String,
     let client = reqwest::Client::new();
     let response = client
         .get(vault_url.to_string() + "/auth/v2/userinfo") // The endpoint is at "/auth/v2/userinfo"
-        .header("Authorization", format!("Bearer {}", token));
+        .header("Authorization", format!("Bearer {token}"));
     let response = response.send().await;
 
     let result = match response {
@@ -176,14 +175,13 @@ async fn get_username_from_token(token: &str, vault_url: &str) -> Result<String,
     let username = match serde_json::from_str::<serde_json::Value>(&result) {
         Ok(json) => {
             // If the JSON is valid, we'll return the username.
-            match json["username"].as_str() {
-                Some(username) => username.to_string(),
-                None => {
-                    // If the username is not found, we'll return a 500.
-                    error!("Username not found in token check response.");
-                    return Err(HttpResponse::InternalServerError()
-                        .body("Username not found in token check response."));
-                }
+            if let Some(username) = json["username"].as_str() {
+                username.to_string()
+            } else {
+                // If the username is not found, we'll return a 500.
+                error!("Username not found in token check response.");
+                return Err(HttpResponse::InternalServerError()
+                    .body("Username not found in token check response."));
             }
         }
         Err(e) => {
@@ -198,7 +196,7 @@ async fn get_username_from_token(token: &str, vault_url: &str) -> Result<String,
     Ok(username)
 }
 
-/// Receives the vault URL and returns the URL to the MongoDB database to use.
+/// Receives the vault URL and returns the URL to the `MongoDB` database to use.
 pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
     // The vault URL will be contained in the answer to the request to the vault. (No endpoint or authentication needed.)
     debug!("Getting MongoDB URL from vault: {}", vault_url);
@@ -239,14 +237,13 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
     let mongodb_url = match serde_json::from_str::<serde_json::Value>(&result) {
         Ok(json) => {
             // If the JSON is valid, we'll return the MongoDB URL.
-            match json["mongodb.url"].as_str() {
-                Some(url) => url.to_string(),
-                None => {
-                    // If the MongoDB URL is not found, we'll return a 500.
-                    error!("MongoDB URL not found in vault response.");
-                    return Err(HttpResponse::InternalServerError()
-                        .body("MongoDB URL not found in vault response."));
-                }
+            if let Some(url) = json["mongodb.url"].as_str() {
+                url.to_string()
+            } else {
+                // If the MongoDB URL is not found, we'll return a 500.
+                error!("MongoDB URL not found in vault response.");
+                return Err(HttpResponse::InternalServerError()
+                    .body("MongoDB URL not found in vault response."));
             }
         }
         Err(e) => {
@@ -259,7 +256,7 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
     Ok(mongodb_url)
 }
 
-/// The authorize_or_fail macro is wrapping the function and return the error variant
+/// The `authorize_or_fail` macro is wrapping the function and return the error variant
 /// if it fails. If it succeeds because a good authentication token was given via header, the
 /// username is returned. If the token was given via query string, None is returned.
 macro_rules! authorize_or_fail {

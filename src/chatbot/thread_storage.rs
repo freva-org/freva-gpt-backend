@@ -138,14 +138,14 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
     trace!("Successfully read from File, content: {}", content);
 
     // We now need to "split" at the first colon, so we can get the variant and the content.
-    let res = extract_variants_from_string(content);
+    let res = extract_variants_from_string(&content);
 
     trace!("Returning number of lines: {}", res.len());
 
     Ok(res)
 }
 
-pub fn extract_variants_from_string(content: String) -> Vec<StreamVariant> {
+pub fn extract_variants_from_string(content: &str) -> Vec<StreamVariant> {
     let lines = content.lines();
     let mut res = Vec::new();
     for line in lines {
@@ -160,7 +160,7 @@ pub fn extract_variants_from_string(content: String) -> Vec<StreamVariant> {
                 // If we can't deserialize the line, we'll assume that it uses the old encoding and try that.
                 info!("Error deserializing line, trying old encoding: {:?}", e);
             }
-        };
+        }
 
         let line = line.trim_matches('\"'); // Remove any quotes that might be there.
         let parts = line.split_once(':');
@@ -205,7 +205,6 @@ pub fn extract_variants_from_string(content: String) -> Vec<StreamVariant> {
             res.push(to_append);
         } else {
             warn!("Error splitting line during parsing, is there no colon? Skipping.");
-            continue;
         }
     }
     res
@@ -242,7 +241,7 @@ pub fn cleanup_conversation(content: &mut Conversation) {
                 if let Some(id) = active_code_id.take() {
                     // Also resets the active code ID.
                     // If we're in a variant that is not a CodeOutput, but we have an active code ID, we need to insert a CodeOutput variant.
-                    content.insert(i, StreamVariant::CodeOutput("".to_string(), id));
+                    content.insert(i, StreamVariant::CodeOutput(String::new(), id));
                     i += 1;
                     continue;
                 }

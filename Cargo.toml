@@ -12,7 +12,7 @@ categories = ["science", "science::geo", "web-programming::http-server"]
 
 [dependencies]
 actix-web = "4.10.2"
-async-openai = {git = "https://github.com/SeseMueller/async-openai", version = "0.27.2"}
+async-openai = { git = "https://github.com/SeseMueller/async-openai", version = "0.27.2" }
 base64 = "0.22.1"
 clap = { version = "4.5.37", features = ["derive", "cargo"] }
 const_format = "0.2.34"
@@ -37,8 +37,8 @@ sysinfo = "0.34.2"
 fs2 = "0.4.3"
 async-process = "2.3.0"
 itertools = "0.14.0"
-mongodb = {version = "3.2.2"}
-chrono = { version = "0.4.40", default-features = false}
+mongodb = { version = "3.2.2" }
+chrono = { version = "0.4.40", default-features = false }
 async-lazy = "0.1.2"
 
 [lints.rust]
@@ -47,5 +47,11 @@ unsafe_code = "forbid"
 [lints.clippy]
 unwrap_used = "deny"   # Always use expect instead
 enum_glob_use = "deny" # Bad form
+redundant_closure_for_method_calls = "allow" # Isn't that important and looks weird
+doc_markdown = "allow" # Too noisy 
+too_many_lines = "allow" # I am aware, do not mark the entire file yellow
+too_many_arguments = "allow" # I know, I might refactor it later
+congitive_complexity = "allow" # Not good, a single tracing macro can trigger it
+
 # nursery = {level = "warn", priority = -1} # General "undertested" lints, but many false positives
-# pedantic = {level = "warn", priority = -1}  # Only activate these two when preparing for major versions.
+# pedantic = { level = "warn", priority = -1 } # Only activate these two when preparing for major versions.

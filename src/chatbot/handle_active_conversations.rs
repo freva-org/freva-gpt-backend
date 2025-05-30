@@ -61,7 +61,7 @@ pub fn add_to_conversation(
             // If we can lock the mutex, we can check if the value is already in use.
             if let Some(conversation) = guard.iter_mut().find(|x| x.id == thread_id) {
                 // If we find the conversation, we'll add the variant to it.
-                conversation.conversation.append(&mut variant.clone());
+                conversation.conversation.extend(variant);
                 conversation.last_activity = std::time::Instant::now(); // ALso update the last activity.
             } else {
                 // If we don't find the conversation, we'll create a new one.
@@ -277,7 +277,7 @@ fn cleanup_conversations(guard: &mut Vec<ActiveConversation>) -> Vec<ActiveConve
             // This will be fixed once the heartbeat is working, but this is a temporary fix.
             if x.conversation
                 .last()
-                .map_or(false, |x| matches!(x, StreamVariant::ServerHint(_)))
+                .is_some_and(|x| matches!(x, StreamVariant::ServerHint(_)))
             {
                 trace!("Conversation used the code_interpreter, not removing.");
                 return true;

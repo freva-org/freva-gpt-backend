@@ -153,12 +153,14 @@ pub enum GoogleModels {
 
 /// Some models, most of the qwen family, use a response with no choice in the choice field to denote that the stream should be ended, if used through the async-openai API.
 /// If a model does this, it should return true, otherwise false.
-pub fn model_ends_on_no_choice(model: AvailableChatbots) -> bool {
+pub const fn model_ends_on_no_choice(model: AvailableChatbots) -> bool {
     match model {
-        AvailableChatbots::Ollama(OllamaModels::qwen2_5_3B)
-        | AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B)
-        | AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B_tool)
-        | AvailableChatbots::Ollama(OllamaModels::qwen2_5_32B) => true,
+        AvailableChatbots::Ollama(
+            OllamaModels::qwen2_5_3B
+            | OllamaModels::qwen2_5_7B
+            | OllamaModels::qwen2_5_7B_tool
+            | OllamaModels::qwen2_5_32B,
+        ) => true,
         // | AvailableChatbots::Ollama(OllamaModels::qwq) => true, // Test this!
         _ => false,
     }

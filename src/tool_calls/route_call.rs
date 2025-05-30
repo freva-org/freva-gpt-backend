@@ -61,9 +61,15 @@ pub async fn route_call(
     }
 }
 
+// Note that I want to be able to debug this on my local machine too where docker doesn't work.
+#[cfg(target_os = "macos")]
+const DEBUG_OVERHEAD_FILE_PATH: &str = "./testdata/debug_overhead.log";
+#[cfg(not(target_os = "macos"))]
+const DEBUG_OVERHEAD_FILE_PATH: &str = "/data/inputFiles/debug_overhead.log";
+
 /// Helper function to read and delete the content of the tool logger file.
 /// Returns (for debugging) a vector of all points in time that were reached during the code interpreter.
-pub(crate) fn print_and_clear_tool_logs(
+pub fn print_and_clear_tool_logs(
     routing_pit: std::time::SystemTime,
     return_pit: std::time::SystemTime,
 ) {
@@ -90,7 +96,7 @@ pub(crate) fn print_and_clear_tool_logs(
                     let content_as_string = String::from_utf8_lossy(&content);
 
                     // Add a tab to the beginning of each line to make it more readable and distinguishable.
-                    let to_write = content_as_string.replace("\n", "\n\t");
+                    let to_write = content_as_string.replace('\n', "\n\t");
                     debug!("Content of the tool logger file:\n {}", to_write);
 
                     // Debugging: get all relevant points in time.
@@ -109,11 +115,6 @@ pub(crate) fn print_and_clear_tool_logs(
                     pits.push(return_pit);
 
                     // Debugging: write the overhead times to a file.
-                    // Note that I want to be able to debug this on my local machine too where docker doesn't work.
-                    #[cfg(target_os = "macos")]
-                    const FILE_PATH: &str = "./testdata/debug_overhead.log";
-                    #[cfg(not(target_os = "macos"))]
-                    const FILE_PATH: &str = "/data/inputFiles/debug_overhead.log";
 
                     // We now have the starting, multiple intermediate, and ending points in time.
                     // Let's log them to the file "debug_overhead.log" (in CSV).
@@ -122,7 +123,7 @@ pub(crate) fn print_and_clear_tool_logs(
                     match OpenOptions::new()
                         .create(true)
                         .append(true)
-                        .open(FILE_PATH) // it's stored in the testdata folder for debugging. 
+                        .open(DEBUG_OVERHEAD_FILE_PATH) // it's stored in the testdata folder for debugging. 
                     {
                         Ok(overhead_file) => {
                             let mut overhead_file = std::io::BufWriter::new(overhead_file);

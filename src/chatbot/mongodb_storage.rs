@@ -52,17 +52,14 @@ pub async fn append_thread(
 
     // If there is some existing thread, we need to update the content.
     // The new content is the old content + the new content.
-    let (content, thread_exists) = match existing_thread {
-        Some(existing_thread) => {
-            let mut existing_content = existing_thread.content;
-            existing_content.append(&mut content);
-            debug!("Found existing thread, will append content.");
-            (existing_content, true)
-        }
-        None => {
-            debug!("No existing thread found, will create a new one.");
-            (content, false)
-        }
+    let (content, thread_exists) = if let Some(existing_thread) = existing_thread {
+        let mut existing_content = existing_thread.content;
+        existing_content.append(&mut content);
+        debug!("Found existing thread, will append content.");
+        (existing_content, true)
+    } else {
+        debug!("No existing thread found, will create a new one.");
+        (content, false)
     };
 
     // If the thread exists in the DB, we need to overwrite it.
@@ -74,15 +71,12 @@ pub async fn append_thread(
         _ => None,
     });
     // There should always be a User input there because at least the examples contain one.
-    let topic = match topic {
-        Some(topic) => {
-            debug!("Found topic: {:?}", topic);
-            topic.to_owned()
-        }
-        None => {
-            debug!("No topic found, will use a placeholder.");
-            "No topic found".to_owned()
-        }
+    let topic = if let Some(topic) = topic {
+        debug!("Found topic: {:?}", topic);
+        topic.to_owned()
+    } else {
+        debug!("No topic found, will use a placeholder.");
+        "No topic found".to_owned()
     };
 
     debug!("Found topic: {:?}", topic);
@@ -227,33 +221,30 @@ pub async fn read_threads(user_id: &str, database: Database) -> Vec<MongoDBThrea
 /// Constructs a MongoDB database connection using the Vault URL.
 /// If no Vault URL is given, the manually constructed database connection (which is mainly for testing purposes) is used.
 pub async fn get_database(vault_url: Option<&str>) -> Result<Database, HttpResponse> {
-    let mongodb_uri = match vault_url {
-        Some(vault_url) => get_mongodb_uri(vault_url).await?, // Bubble the error up if it fails.
-        None => {
-            warn!("Using local MongoDB connection!");
-            warn!(
-                "Make sure the clients will be using the main authentication method in the future."
-            );
-            // The thread_id means that we are using a manually constructed database connection.
-            // Format: mongodb://<username>:<password>@<host>:<port>
+    let mongodb_uri = if let Some(vault_url) = vault_url {
+        get_mongodb_uri(vault_url).await?
+    } else {
+        warn!("Using local MongoDB connection!");
+        warn!("Make sure the clients will be using the main authentication method in the future.");
+        // The thread_id means that we are using a manually constructed database connection.
+        // Format: mongodb://<username>:<password>@<host>:<port>
 
-            // Depending on whether it's the testing or production environment, we have different hosts.
-            // Testing uses localhost, but production uses the containers' host.
+        // Depending on whether it's the testing or production environment, we have different hosts.
+        // Testing uses localhost, but production uses the containers' host.
 
-            #[cfg(target_os = "macos")]
-            let host = "localhost"; // For testing on macOS, we use localhost.
-            #[cfg(not(target_os = "macos"))]
-            let host = "host.docker.internal"; // Docker for Linux uses this to access the host machine.
+        #[cfg(target_os = "macos")]
+        let host = "localhost"; // For testing on macOS, we use localhost.
+        #[cfg(not(target_os = "macos"))]
+        let host = "host.docker.internal"; // Docker for Linux uses this to access the host machine.
 
-            let mongodb_uri = format!(
-                "mongodb://{}:{}@{}:8503",
-                MONGODB_USERNAME.as_str(),
-                MONGODB_PASSWORD.as_str(),
-                host,
-            );
-            debug!("Using local MongoDB connection: {}", mongodb_uri);
-            mongodb_uri
-        }
+        let mongodb_uri = format!(
+            "mongodb://{}:{}@{}:8503",
+            MONGODB_USERNAME.as_str(),
+            MONGODB_PASSWORD.as_str(),
+            host,
+        );
+        debug!("Using local MongoDB connection: {}", mongodb_uri);
+        mongodb_uri
     };
 
     // We have a URI to connect to, so we can create a MongoDB client.

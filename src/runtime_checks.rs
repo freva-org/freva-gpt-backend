@@ -264,10 +264,7 @@ async fn check_assignments() {
     assert_eq!(output.len(), 1);
     assert_eq!(
         output,
-        vec![StreamVariant::CodeOutput(
-            "".to_string(),
-            "test".to_string()
-        )]
+        vec![StreamVariant::CodeOutput(String::new(), "test".to_string())]
     );
 }
 

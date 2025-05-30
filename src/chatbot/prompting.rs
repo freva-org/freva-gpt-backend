@@ -53,13 +53,13 @@ pub static STARTING_PROMPT_CCRM: Lazy<ChatCompletionRequestSystemMessage> =
 fn example_conversations_ccrm(user_id: &str, thread_id: &str) -> Vec<ChatCompletionRequestMessage> {
     let mut content = EXAMPLE_CONVERSATIONS_STR.clone();
     // Replace the user_id and thread_id in the content.
-    let replacements = [("{user_id}", user_id), ("{thread_id}", thread_id)];
+    let replacements = [("[user_id]", user_id), ("[thread_id]", thread_id)];
     for (placeholder, value) in &replacements {
         content = content.replace(placeholder, value);
     }
     trace!("Templated example conversations: {}", content);
 
-    let stream_variants = crate::chatbot::thread_storage::extract_variants_from_string(content);
+    let stream_variants = crate::chatbot::thread_storage::extract_variants_from_string(&content);
     trace!("Returning number of lines: {}", stream_variants.len());
 
     crate::chatbot::types::help_convert_sv_ccrm(stream_variants)
@@ -140,9 +140,11 @@ fn recursively_create_dir_at_rw_dir(user_id: &str, thread_id: &str) {
         user_id,
         thread_id
     );
-    let rw_dir = format!("rw_dir/{}/{}", user_id, thread_id);
+    let rw_dir = format!("rw_dir/{user_id}/{thread_id}");
     let path = std::path::Path::new(&rw_dir);
-    if !path.exists() {
+    if path.exists() {
+        trace!("rw_dir already exists: {}", rw_dir);
+    } else {
         let result = std::fs::create_dir_all(path);
         if let Err(e) = result {
             warn!(
@@ -151,7 +153,5 @@ fn recursively_create_dir_at_rw_dir(user_id: &str, thread_id: &str) {
             );
         }
         trace!("rw_dir created: {}", rw_dir);
-    } else {
-        trace!("rw_dir already exists: {}", rw_dir);
     }
 }

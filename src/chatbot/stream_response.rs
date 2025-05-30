@@ -20,7 +20,7 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     auth::is_guest,
     chatbot::{
-        available_chatbots::{model_ends_on_no_choice, DEFAULTCHATBOT},
+        available_chatbots::{model_ends_on_no_choice, OpenAIModels, DEFAULTCHATBOT},
         handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
             new_conversation_id, save_and_remove_conversation,
@@ -184,8 +184,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         info!("Conversation state: {:?}", state);
         // Just send an error to the client. A 409 Conflict is the most appropriate status code.
         return HttpResponse::Conflict().body(format!(
-            "Thread {} is already being streamed. Please wait until it's done.",
-            thread_id
+            "Thread {thread_id} is already being streamed. Please wait until it's done."
         ));
     }
 
@@ -219,7 +218,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         Some(freva_config_path) => freva_config_path.to_string(),
     };
 
-    if !verify_can_access(freva_config_path.clone()) {
+    if !verify_can_access(&freva_config_path) {
         warn!("The User requested a stream with a freva_config path that cannot be accessed. Path: {}", freva_config_path);
         warn!("Because it is not set, any usage of the freva library will fail.");
     }
@@ -251,16 +250,13 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
         trace!("Adding base message to stream.");
 
-        let entire_prompt = match get_entire_prompt_json(&user_id, &thread_id) {
-            Ok(entire_prompt) => entire_prompt,
-            Err(()) => {
-                // If we can't get the entire prompt, we'll return the information that we require the user_id and thread_id to be alphanumeric.
-                warn!("Error getting entire prompt, either user_id or thread_id are not alphanumeric.");
-                trace!("User ID: {}, Thread ID: {}", user_id, thread_id);
-                return HttpResponse::InternalServerError().body(
-                    "Error creating prompt. Both user_id and thread_id need to be alphanumeric.",
-                );
-            }
+        let Ok(entire_prompt) = get_entire_prompt_json(&user_id, &thread_id) else {
+            // If we can't get the entire prompt, we'll return the information that we require the user_id and thread_id to be alphanumeric.
+            warn!("Error getting entire prompt, either user_id or thread_id are not alphanumeric.");
+            trace!("User ID: {}, Thread ID: {}", user_id, thread_id);
+            return HttpResponse::InternalServerError().body(
+                "Error creating prompt. Both user_id and thread_id need to be alphanumeric.",
+            );
         };
 
         let starting_prompt = StreamVariant::Prompt(entire_prompt);
@@ -362,9 +358,8 @@ fn build_request(
         });
 
     match chatbot {
-        AvailableChatbots::OpenAI(crate::chatbot::available_chatbots::OpenAIModels::o1_mini)
-        | AvailableChatbots::OpenAI(crate::chatbot::available_chatbots::OpenAIModels::o3_mini) => {
-            partial_request = partial_request.max_completion_tokens(16000u32) // The max tokens parameter is called differently for the reasoning models.
+        AvailableChatbots::OpenAI(OpenAIModels::o1_mini | OpenAIModels::o3_mini) => {
+            partial_request = partial_request.max_completion_tokens(16000u32); // The max tokens parameter is called differently for the reasoning models.
         }
         _ => {
             partial_request = partial_request
@@ -373,7 +368,7 @@ fn build_request(
                 .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
                 .max_tokens(16000u32);
         }
-    };
+    }
 
     partial_request.build()
 }
@@ -457,7 +452,7 @@ async fn create_and_stream(
                             actix_web::web::Bytes::copy_from_slice(
                                 serde_json::to_string(&hint)
                                     .unwrap_or_else(|e| {warn!("Error converting ServerHint to string: {:?}; falling back to byte ServerHint.", e);
-                                    format!(r#"{{"variant":"ServerHint", "content":"{{\"thread_id\": \"{thread_id}\"}}"}}"#).to_owned()
+                                    format!(r#"{{"variant":"ServerHint", "content":"{{\"thread_id\": \"{thread_id}\"}}"}}"#)
                                 })
                                     .as_bytes(),
                             ),
@@ -479,7 +474,7 @@ async fn create_and_stream(
 
                 // After potentially sending a thread_id hint, but before stopping, check whether the variants queue contains something; if so, send it.
                 if let Some(content) = variant_queue.pop_front() {
-                    let bytes = variant_to_bytes(content);
+                    let bytes = variant_to_bytes(&content);
 
                     // Everything worked, so we'll return the bytes and the new state.
                     Some((
@@ -598,7 +593,7 @@ async fn create_and_stream(
                                     // println!("Sent heartbeat: {:?}", heartbeat);
 
                                     return Some((
-                                        Ok(variant_to_bytes(heartbeat)),
+                                        Ok(variant_to_bytes(&heartbeat)),
                                         (
                                             open_ai_stream,
                                             thread_id,
@@ -619,14 +614,15 @@ async fn create_and_stream(
                             trace!("Reciever sent result!");
 
                             // The output might fail if the tool call was not successful.
-                            let mut output = match output {
-                                Some(output) => output,
-                                None => {
-                                    error!("Error recieving tool call output, the reciever was closed.");
-                                    vec![StreamVariant::CodeError(
-                                        "Error recieving tool call output.".to_string(),
-                                    )]
-                                }
+                            let mut output = if let Some(output) = output {
+                                output
+                            } else {
+                                error!(
+                                    "Error recieving tool call output, the reciever was closed."
+                                );
+                                vec![StreamVariant::CodeError(
+                                    "Error recieving tool call output.".to_string(),
+                                )]
                             };
 
                             // Before returning the bytes, we need to restart the stream.
@@ -654,7 +650,7 @@ async fn create_and_stream(
                             });
                             variant_queue.extend(output.into_iter());
 
-                            let bytes = variant_to_bytes(first);
+                            let bytes = variant_to_bytes(&first);
 
                             return Some((
                                 Ok(bytes),
@@ -715,7 +711,7 @@ async fn create_and_stream(
                         let mut variants: VecDeque<StreamVariant> = variants.into();
                         let first_variant = variants.pop_front().unwrap_or(error_variant);
 
-                        let bytes = variant_to_bytes(first_variant);
+                        let bytes = variant_to_bytes(&first_variant);
 
                         // Everything worked, so we'll return the bytes and the new state.
                         Some((
@@ -901,7 +897,7 @@ async fn oai_stream_to_variants(
                     StreamEvents::Delta(string_delta) => {
                         // Basic case: the Assistant sends a text delta.
                         trace!("Delta: {}", string_delta);
-                        vec![StreamVariant::Assistant(string_delta.clone())]
+                        vec![StreamVariant::Assistant(string_delta)]
                     }
                     StreamEvents::StopEvent(reason) => {
                         // The Assistant sends a stop event.
@@ -930,92 +926,91 @@ async fn oai_stream_to_variants(
                         if tool_calls.len() > 1 {
                             warn!("Multiple tool calls found, but only one is supported. All are ignored except the first: {:?}", tool_calls);
                         }
-                        match tool_calls.first() {
-                            // This doesn't support multiple tool calls at once, but they are disabled in the request.
-                            Some(tool_call) => {
-                                // We now know that we are sending the delta of a tool call.
-                                // For the user to see a stream of i.e. the code interpreter's code being written by the LLM, we need to send the code interpreter's code as a stream.
-                                match &tool_call.function {
-                                    Some(function) => {
-                                        // Now we need to check what function was called. For now, we only have the code interpreter.
-                                        let mut arguments =
-                                            function.arguments.clone().unwrap_or(String::new());
+                        if let Some(tool_call) = tool_calls.first() {
+                            // We now know that we are sending the delta of a tool call.
+                            // For the user to see a stream of i.e. the code interpreter's code being written by the LLM, we need to send the code interpreter's code as a stream.
+                            if let Some(function) = &tool_call.function {
+                                // Now we need to check what function was called. For now, we only have the code interpreter.
+                                let mut arguments =
+                                    function.arguments.clone().unwrap_or(String::new());
 
-                                        // Instead of just storing the arguments as-is, if the arguments contain no code yet, we'll ignore whitespace and newlines.
-                                        // This will effectively trim the arguments.
-                                        if arguments.trim().is_empty() {
-                                            // Only set the arguments to the empty String, if no code was written yet.
-                                            if tool_arguments.is_empty() {
-                                                arguments = String::new();
-                                            }
-                                        }
-
-                                        // Because of the genius way OpenAI constructed this very good API, the name of the tool call is only sent in the very first delta.
-                                        // So if the name is not None, we store it in the tool_name variable that is passed to the next iteration of the stream.
-                                        // If the name is None, we try to read the tool_name from the tool_name variable.
-                                        if let Some(name) = function.name.clone() {
-                                            debug!("New tool call started: {:?}", name);
-                                            *tool_name = Some(name);
-                                        }
-
-                                        // Another things is that the arguments for the tool calls, even though they are strings, are not repeated when the actual tool call is made.
-                                        // that means that I need to add another state to the closure to keep track of the tool arguments.
-                                        tool_arguments.push_str(&arguments);
-
-                                        // The same thing goes for the tool call id, which is neccessary to be matched later on in the response.
-                                        match tool_call.id.clone() {
-                                            Some(id) => {
-                                                // We need to store the id in the tool_name variable, because the id is not repeated in the response.
-                                                *tool_id = id;
-                                            }
-                                            None => {
-                                                if tool_id.is_empty() {
-                                                    warn!("Tool call expected id, but not found in response: {:?}", response);
-                                                }
-                                            }
-                                        }
-
-                                        let name_copy = tool_name.clone(); // because tool_name will be used at the end to pass the tool name to the next iteration of the stream, we need to clone it here.
-                                        if name_copy == Some("code_interpreter".to_string()) {
-                                            // We know it's the code interpreter and can send it as a delta.
-                                            trace!(
-                                                "Tool call: {:?} with arguments: {:?} and id: {}",
-                                                name_copy,
-                                                arguments,
-                                                tool_id
-                                            );
-                                            if tool_id.is_empty() {
-                                                warn!(
-                                                    "Tool call expected id, but not set yet: {:?}",
-                                                    response
-                                                );
-                                            }
-                                            vec![StreamVariant::Code(arguments, tool_id.clone())]
-                                        } else {
-                                            warn!(
-                                                "Tool call expected known tool, but found: {:?}",
-                                                name_copy
-                                            );
-                                            // Instead of ending the stream, we'll just ignore the tool call, but send the user a ServerHint.
-                                            // Depending on the implementation of the OpenAI API, this might result in a unspecified Server Error on the LLM side.
-                                            vec![StreamVariant::ServerHint(format!("{{\"warning\": \"Tool call expected known tool, but found ->{}<-; content: ->{}<-\"}}", name_copy.unwrap_or_default(), arguments))]
-                                        }
-                                    }
-                                    None => {
-                                        warn!("Tool call expected function, but not found in response: {:?}", response);
-                                        vec![StreamVariant::CodeError("Tool call expected function, but not found in response.".to_string())]
+                                // Instead of just storing the arguments as-is, if the arguments contain no code yet, we'll ignore whitespace and newlines.
+                                // This will effectively trim the arguments.
+                                if arguments.trim().is_empty() {
+                                    // Only set the arguments to the empty String, if no code was written yet.
+                                    if tool_arguments.is_empty() {
+                                        arguments = String::new();
                                     }
                                 }
-                            }
-                            None => {
+
+                                // Because of the genius way OpenAI constructed this very good API, the name of the tool call is only sent in the very first delta.
+                                // So if the name is not None, we store it in the tool_name variable that is passed to the next iteration of the stream.
+                                // If the name is None, we try to read the tool_name from the tool_name variable.
+                                if let Some(name) = function.name.clone() {
+                                    debug!("New tool call started: {:?}", name);
+                                    *tool_name = Some(name);
+                                }
+
+                                // Another things is that the arguments for the tool calls, even though they are strings, are not repeated when the actual tool call is made.
+                                // that means that I need to add another state to the closure to keep track of the tool arguments.
+                                tool_arguments.push_str(&arguments);
+
+                                // The same thing goes for the tool call id, which is neccessary to be matched later on in the response.
+                                match tool_call.id.clone() {
+                                    Some(id) => {
+                                        // We need to store the id in the tool_name variable, because the id is not repeated in the response.
+                                        *tool_id = id;
+                                    }
+                                    None => {
+                                        if tool_id.is_empty() {
+                                            warn!("Tool call expected id, but not found in response: {:?}", response);
+                                        }
+                                    }
+                                }
+
+                                let name_copy = tool_name.clone(); // because tool_name will be used at the end to pass the tool name to the next iteration of the stream, we need to clone it here.
+                                if name_copy == Some("code_interpreter".to_string()) {
+                                    // We know it's the code interpreter and can send it as a delta.
+                                    trace!(
+                                        "Tool call: {:?} with arguments: {:?} and id: {}",
+                                        name_copy,
+                                        arguments,
+                                        tool_id
+                                    );
+                                    if tool_id.is_empty() {
+                                        warn!(
+                                            "Tool call expected id, but not set yet: {:?}",
+                                            response
+                                        );
+                                    }
+                                    vec![StreamVariant::Code(arguments, tool_id.clone())]
+                                } else {
+                                    warn!(
+                                        "Tool call expected known tool, but found: {:?}",
+                                        name_copy
+                                    );
+                                    // Instead of ending the stream, we'll just ignore the tool call, but send the user a ServerHint.
+                                    // Depending on the implementation of the OpenAI API, this might result in a unspecified Server Error on the LLM side.
+                                    vec![StreamVariant::ServerHint(format!("{{\"warning\": \"Tool call expected known tool, but found ->{}<-; content: ->{}<-\"}}", name_copy.unwrap_or_default(), arguments))]
+                                }
+                            } else {
                                 warn!(
-                                    "Tool call expected, but not found in response: {:?}",
+                                    "Tool call expected function, but not found in response: {:?}",
                                     response
                                 );
                                 vec![StreamVariant::CodeError(
-                                    "Tool call expected, but not found in response.".to_string(),
+                                    "Tool call expected function, but not found in response."
+                                        .to_string(),
                                 )]
                             }
+                        } else {
+                            warn!(
+                                "Tool call expected, but not found in response: {:?}",
+                                response
+                            );
+                            vec![StreamVariant::CodeError(
+                                "Tool call expected, but not found in response.".to_string(),
+                            )]
                         }
                     }
                     StreamEvents::Empty => {
@@ -1073,8 +1068,7 @@ async fn oai_stream_to_variants(
             // If we can't get the response, we'll return a generic error.
             warn!("Error getting response: {:?}", e);
             vec![StreamVariant::OpenAIError(format!(
-                "Error getting response. Recieved error: {:?}",
-                e
+                "Error getting response. Recieved error: {e:?}"
             ))]
         }
         None => {
@@ -1165,9 +1159,9 @@ async fn handle_stop_event(
             // The stream ending is just OpenAI's way of telling us that the tool call is done and can now be executed.
             if let Some(name) = tool_name {
                 let handle = tokio::spawn(route_call(
-                    name.to_string(),
-                    Some(tool_arguments.to_string()),
-                    tool_id.to_string(),
+                    (*name).to_string(),
+                    Some((*tool_arguments).to_string()),
+                    (*tool_id).to_string(),
                     thread_id.to_string(),
                     tx,
                     database,
@@ -1231,8 +1225,7 @@ async fn restart_stream(
                     // If we can't build the request, we'll return a generic error.
                     warn!("Error building request: {:?}", e);
                     vec![StreamVariant::ServerError(format!(
-                        "Error building request: {:?}",
-                        e
+                        "Error building request: {e:?}"
                     ))]
                 }
                 Ok(request) => {
@@ -1247,8 +1240,7 @@ async fn restart_stream(
                             // If we can't create the stream, we'll return a generic error.
                             warn!("Error creating stream: {:?}", e);
                             vec![StreamVariant::ServerError(format!(
-                                "Error creating stream: {:?}",
-                                e
+                                "Error creating stream: {e:?}"
                             ))]
                         }
                         Ok(stream) => {
@@ -1272,75 +1264,67 @@ fn try_extract_tool_call(content: &str) -> Option<(String, String)> {
 
     // Because the LLMs are sometimes bad at creating JSON, we'll help them a bit.
     // We check at all closing curly braces, if if the text were to end there, if it would be valid JSON.
-    let positions_curly = content.match_indices("}").map(|e| e.0).collect::<Vec<_>>();
+    let positions_curly = content.match_indices('}').map(|e| e.0).collect::<Vec<_>>();
 
     let mut dict = None;
 
     for pos in positions_curly {
         let new_content = &content[..=pos];
-        match serde_json::from_str::<serde_json::Value>(new_content) {
-            Ok(value) => {
-                dict = Some(value);
-                break; // we are guaranteed that the first valid JSON is the correct one.
-            }
-            Err(_) => {
-                continue;
-            }
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(new_content) {
+            dict = Some(value);
+            break; // we are guaranteed that the first valid JSON is the correct one.
         }
     }
 
-    // If we couldn't find a valid JSON, we'll return None, as the tool call is likely not finished yet.
-    let dict = match dict {
-        Some(dict) => dict,
-        None => {
-            return None;
-        }
+    let Some(dict) = dict else {
+        warn!(
+            "Could not find a valid JSON in tool call content: {:?}",
+            content
+        );
+        return None;
     };
     debug!("Tool call content: {:?}", dict);
 
     // The type should be object, because it contains the name and arguments.
-    match dict {
-        serde_json::Value::Object(inner_object) => {
-            // We have the object, so we can extract the name and arguments.
-            if let Some(serde_json::Value::String(name)) = inner_object.get("name") {
-                if let Some(serde_json::Value::Object(arguments)) = inner_object.get("arguments") {
-                    // We have the name and arguments, so we can return them.
-                    // The arguments need to pe parsed to a string from JSON.
-                    let arguments = match serde_json::to_string(arguments) {
-                        Ok(arguments) => arguments,
-                        Err(e) => {
-                            warn!("Error converting tool call arguments to string: {:?}", e);
-                            return None;
-                        }
-                    };
-                    debug!("Tool call name: {:?}, arguments: {:?}", name, arguments);
-                    Some((name.clone(), arguments.to_string()))
-                } else {
-                    // The arguments are missing, so we can't return anything.
-                    warn!(
-                        "Tool call expected arguments, but not found: {:?}",
-                        inner_object
-                    );
-                    None
-                }
+    if let serde_json::Value::Object(inner_object) = dict {
+        // We have the object, so we can extract the name and arguments.
+        if let Some(serde_json::Value::String(name)) = inner_object.get("name") {
+            if let Some(serde_json::Value::Object(arguments)) = inner_object.get("arguments") {
+                // We have the name and arguments, so we can return them.
+                // The arguments need to pe parsed to a string from JSON.
+                let arguments = match serde_json::to_string(arguments) {
+                    Ok(arguments) => arguments,
+                    Err(e) => {
+                        warn!("Error converting tool call arguments to string: {:?}", e);
+                        return None;
+                    }
+                };
+                debug!("Tool call name: {:?}, arguments: {:?}", name, arguments);
+                Some((name.clone(), arguments))
             } else {
-                // The name is missing, so we can't return anything.
-                warn!("Tool call expected name, but not found: {:?}", inner_object);
+                // The arguments are missing, so we can't return anything.
+                warn!(
+                    "Tool call expected arguments, but not found: {:?}",
+                    inner_object
+                );
                 None
             }
-        }
-        _ => {
-            // Shouldn't happen! The API specifies that it's always an object.
-            warn!("Tool call expected to be an object, but found: {:?}", dict);
+        } else {
+            // The name is missing, so we can't return anything.
+            warn!("Tool call expected name, but not found: {:?}", inner_object);
             None
         }
+    } else {
+        // Shouldn't happen! The API specifies that it's always an object.
+        warn!("Tool call expected to be an object, but found: {:?}", dict);
+        None
     }
 }
 
 /// Helper function to convert a StreamVariant to bytes.
 /// Doesn't panic, always returns a valid byte array.
-fn variant_to_bytes(variant: StreamVariant) -> Bytes {
-    let string_rep = match serde_json::to_string(&variant) {
+fn variant_to_bytes(variant: &StreamVariant) -> Bytes {
+    let string_rep = match serde_json::to_string(variant) {
         Ok(string) => string,
         Err(e) => {
             error!("Error converting StreamVariant to string with serde_json; falling back to debug representation: {:?}", e);
