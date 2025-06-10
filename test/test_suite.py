@@ -366,6 +366,21 @@ def test_get_user_threads():
 
 
 
+def test_mcp_server():
+    ''' Can the backend use an MCP server? ''' # Since Version 1.10.1
+    # Version 1.10.1 introduced the ability to use arbitrary local MCP servers.
+    # This is a simple test to make sure that the backend can connect to a local MCP server and use it.
+
+    # First, asks it whether it finds the MCP tool. 
+    response1 = generate_full_respone("Hi! I recently managed to add support for MCP servers by translating the MCP protocol. Do you see a toll called 'hostname' in your list of tools? (Please start your answer with 'Yes' or 'No')", chatbot="gpt-4o-mini")
+    # The response is never simple, but it should contain a "Yes" or "No" answer.
+    assert any("yes" in i.lower() for i in response1.assistant_variants) 
+
+    # Then ask it to use the MCP tool.
+    response2 = generate_full_respone("Please use the MCP tool 'hostname' and tell me what the result is.", chatbot="gpt-4o-mini")
+    # The response should contain the current time in the format "YYYY-MM-DD HH:MM:SS"
+    print(response2)
+    assert False # DEBUG
 
 # --------------------------------
 # -- Mock Authentication Server --

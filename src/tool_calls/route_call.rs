@@ -9,7 +9,7 @@ use std::io::Write;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
-use crate::chatbot::types::StreamVariant;
+use crate::{chatbot::types::StreamVariant, tool_calls::mcp::execute::try_execute_mcp_tool_call};
 
 use super::code_interpreter::prepare_execution::start_code_interpeter;
 
@@ -46,14 +46,28 @@ pub async fn route_call(
         print_and_clear_tool_logs(routing_pit, return_pit);
         result
     } else {
-        // If the function name is not recognized, we'll return an error message.
-        let supported_tools = SUPPORTED_TOOLS.join(", ");
-        warn!(
-            "The chatbot tried to call a function with the name '{}' . Supported tools are: {}",
-            func_name, supported_tools
-        );
-        let answer = vec![StreamVariant::CodeOutput(format!("The function '{func_name}' is not recognized. Supported tools are: {supported_tools}"), id)];
-        sender.send(answer).await
+        // Now that all hard-coded tools are handled, we can check whether the MCP servers have the function.
+        let result = try_execute_mcp_tool_call(func_name.clone(), arguments).await;
+
+        match result {
+            Ok(answer) => {
+                // If the MCP server has the function, we'll send the answer to the chatbot.
+                let answer = vec![StreamVariant::CodeOutput(answer, id)];
+                sender.send(answer).await
+            }
+            Err(e) => {
+                // If the MCP server doesn't have the function, we'll return a proper error message.
+                warn!("The chatbot tried to call a function with the name '{func_name}' but it failed: {}", e);
+
+                // If the function name is not recognized, we'll return an error message.
+                let supported_tools = SUPPORTED_TOOLS.join(", ");
+                warn!(
+                    "The chatbot tried to call a function with the name '{func_name}' . Supported tools are: {supported_tools}, as well as all tools from the MCP servers."
+                );
+                let answer = vec![StreamVariant::CodeOutput(format!("The function '{func_name}' is not recognized. Supported tools are: {supported_tools}, as well as all tools from the MCP servers."), id)];
+                sender.send(answer).await
+            }
+        }
     };
 
     if let Err(e) = senderror {

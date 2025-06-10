@@ -1,6 +1,6 @@
 [package]
 name = "freva-gpt2-backend"
-version = "1.10.0"
+version = "1.10.1"
 edition = "2021"
 authors = ["Sebastian Willmann"]
 repository = "https://gitlab.dkrz.de/k203176/freva-gpt2-backend"
@@ -12,7 +12,9 @@ categories = ["science", "science::geo", "web-programming::http-server"]
 
 [dependencies]
 actix-web = "4.11.0"
-async-openai = { git = "https://github.com/SeseMueller/async-openai", version = "0.27.2" }
+# async-openai = { git = "https://github.com/SeseMueller/async-openai", version = "0.27.2" }
+async-openai = {version = "0.28.3" }
+async-trait = "0.1.88"
 base64 = "0.22.1"
 clap = { version = "4.5.39", features = ["derive", "cargo"] }
 const_format = "0.2.34"
@@ -40,6 +42,7 @@ itertools = "0.14.0"
 mongodb = { version = "3.2.3" }
 chrono = { version = "0.4.41", default-features = false }
 async-lazy = "0.1.2"
+rust-mcp-sdk = "0.4.2"
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -13,7 +13,7 @@ use crate::{
     },
     logging::{silence_logger, undo_silence_logger},
     static_serve,
-    tool_calls::route_call::print_and_clear_tool_logs,
+    tool_calls::{mcp::execute::try_execute_mcp_tool_call, route_call::print_and_clear_tool_logs},
 };
 
 /// Helper function to flush stdout and stderr.
@@ -171,6 +171,26 @@ pub async fn run_runtime_checks() {
     } else {
         info!("Ollama is either not running or not available, some LLMs might not work.");
         println!("Ollama is either not running or not available, some LLMs might not work.");
+    }
+
+    // Check whether MCP tools can be called.
+    // TODO: replace with the actual MCP tool call.
+    print!("Checking whether MCP tools can be called... ");
+    flush_stdout_stderr();
+    info!("Checking whether MCP tools can be called.");
+
+    let mcp_result = try_execute_mcp_tool_call(
+        "hostname".to_string(),
+        // Some("Europe/Berlin".to_string()),
+        None,
+    )
+    .await;
+    if let Err(s) = mcp_result {
+        error!("Failed to call the MCP tool 'hostname': {s}");
+        eprintln!("Failed to call the MCP tool 'hostname': {s}");
+    } else {
+        println!("Success!");
+        flush_stdout_stderr();
     }
 
     // To make sure not to confuse the backend, clear the tool logger.

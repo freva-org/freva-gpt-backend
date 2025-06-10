@@ -15,6 +15,8 @@ use crate::chatbot::{
     stream_response::STREAM_RESPONSE_DOCS, types::StreamVariant,
 };
 
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// The valid methods for an endpoint.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -103,8 +105,6 @@ static STOP_SPEC: Lazy<EndpointSpec> = Lazy::new(|| EndpointSpec {
     ]),
     methods: &[EndpointMethods::Get, EndpointMethods::Post],
 });
-
-const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // Thanks to strum, there's StreamVariant::VARIANTS;
 static STREAMVARIANTS: Lazy<serde_json::Value> = Lazy::new(|| {

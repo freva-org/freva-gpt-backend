@@ -33,7 +33,7 @@ use crate::{
         types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
     },
     logging::{silence_logger, undo_silence_logger},
-    tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS},
+    tool_calls::{all_tools, code_interpreter::verify_can_access, route_call::route_call},
 };
 
 use super::{available_chatbots::AvailableChatbots, handle_active_conversations::generate_id};
@@ -312,7 +312,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         user_id.clone(),
     );
 
-    let request: CreateChatCompletionRequest = match build_request(messages, chatbot) {
+    let request: CreateChatCompletionRequest = match build_request(messages, chatbot).await {
         Ok(request) => request,
         Err(e) => {
             // If we can't build the request, we'll return a generic error.
@@ -334,7 +334,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 }
 
 /// A simple helper function to build the stream.
-fn build_request(
+async fn build_request(
     messages: Vec<ChatCompletionRequestMessage>,
     chatbot: AvailableChatbots,
 ) -> Result<CreateChatCompletionRequest, async_openai::error::OpenAIError> {
@@ -351,7 +351,7 @@ fn build_request(
         .n(1)
         .messages(messages)
         .stream(true)
-        .tools(ALL_TOOLS.clone())
+        .tools(all_tools().await) // Get all tools, including the MCP tools.
         .tool_choice(ChatCompletionToolChoiceOption::Auto) // Explicitly set to auto, because the LLM should be free to choose the tool.
         .stream_options(async_openai::types::ChatCompletionStreamOptions {
             include_usage: true,
@@ -1220,7 +1220,7 @@ async fn restart_stream(
             trace!("All messages: {:?}", all_oai_messages);
 
             // Now we construct a new stream and substitute the old one with it.
-            match build_request(all_oai_messages, chatbot) {
+            match build_request(all_oai_messages, chatbot).await {
                 Err(e) => {
                     // If we can't build the request, we'll return a generic error.
                     warn!("Error building request: {:?}", e);
