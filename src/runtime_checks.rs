@@ -189,7 +189,7 @@ pub async fn run_runtime_checks() {
         error!("Failed to call the MCP tool 'hostname': {s}");
         eprintln!("Failed to call the MCP tool 'hostname': {s}");
     } else {
-        println!("Success!");
+        println!("Success, hostname is: {mcp_result:?}");
         flush_stdout_stderr();
     }
 
