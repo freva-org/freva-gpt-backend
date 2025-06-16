@@ -27,6 +27,8 @@ RUN conda install --yes -c conda-forge -n env numpy matplotlib pandas xarray xes
 RUN conda install --yes -c conda-forge -n env netcdf4 cartopy contourpy geopy
 RUN conda install --yes -c conda-forge -n env aiohttp requests
 RUN conda install --yes -c conda-forge -n env scikit-learn pytorch geopandas healpy easygems astropy
+# Install necessary dependencies for CrocoDash
+RUN conda install --yes -c conda-forge -n env "esmpy>=8.6.1,<8.7.0"  
 
 # Also copy over the Cargo.toml file to be able to start the server
 COPY Cargo.toml /app/Cargo.toml
@@ -48,6 +50,23 @@ RUN touch /opt/conda/envs/env/freva/freva.crt
 
 # Move over the source code
 COPY src /app/src
+
+# set up CrocoDash and CESM
+# set up git email and user name
+RUN git config --global user.email "freva@dkrz.de"
+RUN git config --global user.name "clint"
+RUN git clone --recurse-submodules https://github.com/CROCODILE-CESM/CrocoDash.git
+RUN pip install -e CrocoDash/CrocoDash/rm6/ \
+    -e CrocoDash/CrocoDash/visualCaseGen/external/ipyfilechooser/ \
+    -e CrocoDash/CrocoDash/visualCaseGen/external/mom6_bathy/ \
+    -e CrocoDash/CrocoDash/visualCaseGen/ \
+    "myst_parser>=4.0.0,<4.1.0" \
+    -e CrocoDash/
+RUN pytest CrocoDash/tests/test_installation.py
+RUN git clone https://github.com/ESCOMP/CESM.git
+RUN git -C CESM checkout cesm3_0_beta03
+RUN ./CESM/bin/git-fleximod -C /app/CESM/ update
+ENV CIME_MACHINE="ubuntu-latest"
 
 # DEBUG: Crashes the build with info about the python environment that will be used.
 # ENV PYO3_PRINT_CONFIG 1
