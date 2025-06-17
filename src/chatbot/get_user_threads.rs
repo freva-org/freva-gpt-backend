@@ -1,6 +1,6 @@
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use documented::docs_const;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::chatbot::mongodb_storage::{get_database, read_threads};
 
@@ -47,8 +47,15 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
         .get("x-freva-vault-url")
         .and_then(|h| h.to_str().ok());
 
+    let Some(vault_url) = maybe_vault_url else {
+        warn!("The User requested a stream without a vault URL.");
+        return HttpResponse::BadRequest().body(
+            "Vault URL not found. Please provide a non-empty vault URL in the headers, of type String.",
+        );
+    };
+
     // If we don't have a vault URL, we'll automatically fall back to the local (testing) database.
-    let database = match get_database(maybe_vault_url).await {
+    let database = match get_database(vault_url).await {
         Ok(db) => db,
         Err(e) => {
             debug!("Failed to connect to the database: {:?}", e);

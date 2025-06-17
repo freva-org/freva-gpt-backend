@@ -220,32 +220,8 @@ pub async fn read_threads(user_id: &str, database: Database) -> Vec<MongoDBThrea
 
 /// Constructs a MongoDB database connection using the Vault URL.
 /// If no Vault URL is given, the manually constructed database connection (which is mainly for testing purposes) is used.
-pub async fn get_database(vault_url: Option<&str>) -> Result<Database, HttpResponse> {
-    let mongodb_uri = if let Some(vault_url) = vault_url {
-        get_mongodb_uri(vault_url).await?
-    } else {
-        warn!("Using local MongoDB connection!");
-        warn!("Make sure the clients will be using the main authentication method in the future.");
-        // The thread_id means that we are using a manually constructed database connection.
-        // Format: mongodb://<username>:<password>@<host>:<port>
-
-        // Depending on whether it's the testing or production environment, we have different hosts.
-        // Testing uses localhost, but production uses the containers' host.
-
-        #[cfg(target_os = "macos")]
-        let host = "localhost"; // For testing on macOS, we use localhost.
-        #[cfg(not(target_os = "macos"))]
-        let host = "host.docker.internal"; // Docker for Linux uses this to access the host machine.
-
-        let mongodb_uri = format!(
-            "mongodb://{}:{}@{}:8503",
-            MONGODB_USERNAME.as_str(),
-            MONGODB_PASSWORD.as_str(),
-            host,
-        );
-        debug!("Using local MongoDB connection: {}", mongodb_uri);
-        mongodb_uri
-    };
+pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
+    let mongodb_uri = get_mongodb_uri(vault_url).await?;
 
     // We have a URI to connect to, so we can create a MongoDB client.
     let client = match mongodb::Client::with_uri_str(&mongodb_uri).await {
@@ -290,13 +266,4 @@ static MONGODB_DATABASE_NAME: Lazy<String> = Lazy::new(|| {
 static MONGODB_COLLECTION_NAME: Lazy<String> = Lazy::new(|| {
     env::var("MONGODB_COLLECTION_NAME")
         .expect("\nMONGODB_COLLECTION_NAME is not set in the .env file.\n")
-});
-
-static MONGODB_USERNAME: Lazy<String> = Lazy::new(|| {
-    env::var("LOCAL_MONGODB_USER").expect("\nLOCAL_MONGODB_USER is not set in the .env file.\n")
-});
-
-static MONGODB_PASSWORD: Lazy<String> = Lazy::new(|| {
-    env::var("LOCAL_MONGODB_PASSWORD")
-        .expect("\nLOCAL_MONGODB_PASSWORD is not set in the .env file.\n")
 });
