@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use async_openai::types::{ChatCompletionTool, FunctionObject};
 use rust_mcp_sdk::{mcp_client::ClientRuntime, schema::Tool, McpClient};
-use tracing::{error, warn};
+use tracing::{debug, error, trace, warn};
 
 /// Routes the tool call to the appropriate function.
 pub mod route_call;
@@ -36,7 +36,11 @@ pub async fn all_tools() -> Vec<async_openai::types::ChatCompletionTool> {
         .flatten()
         .collect::<Vec<_>>();
 
+    debug!("Found {} MCP tools", mcp_tools.len());
+    trace!("MCP tools: {:?}", mcp_tools);
+
     tools.extend(mcp_tools);
+    trace!("All tools: {:?}", tools);
     tools
 }
 

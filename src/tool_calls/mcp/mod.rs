@@ -9,17 +9,28 @@ use once_cell::sync::Lazy;
 use rust_mcp_sdk::{
     mcp_client::{client_runtime, ClientHandler, ClientRuntime},
     schema::{
-        ClientCapabilities, Implementation, InitializeRequestParams, LATEST_PROTOCOL_VERSION,
+        ClientCapabilities, Implementation, InitializeRequestParams, RpcError,
+        LATEST_PROTOCOL_VERSION,
     },
-    StdioTransport, TransportOptions,
+    McpClient, StdioTransport, TransportOptions,
 };
+use tracing::debug;
 
 use crate::static_serve::VERSION;
 
 /// The MCP library requires a type for the client handling.
 struct MCPClient;
 #[async_trait::async_trait]
-impl ClientHandler for MCPClient {}
+impl ClientHandler for MCPClient {
+    async fn handle_process_error(
+        &self,
+        error_message: String,
+        _runtime: &dyn McpClient,
+    ) -> std::result::Result<(), RpcError> {
+        debug!("MCP Client encountered an error: {}", error_message); // We silence the error handling for now.
+        Ok(())
+    }
+}
 
 /// The global MCP Client that has connections to all supported MCP servers.
 static MCP_TEST_CLIENT: Lazy<Arc<ClientRuntime>> = Lazy::new(|| {

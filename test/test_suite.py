@@ -372,15 +372,20 @@ def test_mcp_server():
     # This is a simple test to make sure that the backend can connect to a local MCP server and use it.
 
     # First, asks it whether it finds the MCP tool. 
-    response1 = generate_full_respone("Hi! I recently managed to add support for MCP servers by translating the MCP protocol. Do you see a toll called 'hostname' in your list of tools? (Please start your answer with 'Yes' or 'No')", chatbot="gpt-4o-mini")
-    # The response is never simple, but it should contain a "Yes" or "No" answer.
-    assert any("yes" in i.lower() for i in response1.assistant_variants) 
+    response1 = generate_full_respone("Hi! I recently added support for MCP tools by translating the MCP protocol. You should have acces to the 'hostname' tool, do you see it?", chatbot="gpt-4o-mini")
+    
+    assert any("hostname" in i.lower() for i in response1.assistant_variants), "The MCP tool 'hostname' was not found in the list of tools. Please check your MCP server configuration."
 
     # Then ask it to use the MCP tool.
-    response2 = generate_full_respone("Please use the MCP tool 'hostname' and tell me what the result is.", chatbot="gpt-4o-mini")
+    response2 = generate_full_respone("Great! Please use it and tell me what the result is.", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
     # The response should contain the current time in the format "YYYY-MM-DD HH:MM:SS"
     print(response2)
-    assert False # DEBUG
+    
+    # Get the actual hostname to compare it with the response.
+    import socket
+    expected_hostname = socket.gethostname()
+    # The response should contain the hostname, so we check if it does.
+    assert any(expected_hostname in i for i in response2.codeoutput_variants), f"The MCP tool did not return the expected hostname. Expected: {expected_hostname}, but got: {response2.codeoutput_variants}"
 
 # --------------------------------
 # -- Mock Authentication Server --
