@@ -383,13 +383,30 @@ def auth():
     # The backend needs to retrieve the MongoDB URI from here, so we return the credentials to the local MongoDB instance.
     username = os.getenv("LOCAL_MONGODB_USER", "testing")
     password = os.getenv("LOCAL_MONGODB_PASSWORD", "testing")
-    # return jsonify({"mongodb.url": "mongodb://localhost:8503"}), 200
+    
     return jsonify({
-        "mongodb.url": f"mongodb://{username}:{password}@localhost:8503",
+        "mongodb.url": f"mongodb://{username}:{password}@localhost:27017",
     }), 200
 
 # Run the mock authentication server
 def run_auth_server():
+
+    # Wait for the mongoDB server to be up. 
+    import time
+    attempts = 0
+    while attempts < 5:
+        try:
+            response = requests.get("http://localhost:27017/")
+            if response.status_code == 200:
+                print("MongoDB is up and running.")
+                break
+        except requests.ConnectionError:
+            print("Waiting for MongoDB to start...")
+            time.sleep(1)
+            attempts += 1
+    else:
+        raise RuntimeError("MongoDB did not start in time.")
+
     app.run(port=5001, debug=True, use_reloader=False)  # Use a different port than the main server
 
 

@@ -16,7 +16,7 @@ services:
       - /container/da/freva-gpt-backend-links/logs:/app/logs
       - /container/da/freva-gpt-backend-links/threads:/app/threads
       - /container/da/freva-gpt-backend-links/target:/app/target
-      - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles # Deprecated, once used for test data before freva support was added. Now used for debugging. 
+      - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles # Deprecated, once used for test data before freva support was added. Now used for debugging.
       - /container/da/freva-gpt-backend-links/python_pickles:/app/python_pickles
     networks:
       freva-gpt:
@@ -37,17 +37,6 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-  mongodb: # Non-persistent MongoDB instance
-    image: mongo:latest
-    container_name: mongodb-instance
-    hostname: mongodb-instance
-    ports:
-      - "8503:27017" # Expose MongoDB on port 8503
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${LOCAL_MONGODB_USER:-testing}
-      MONGO_INITDB_ROOT_PASSWORD: ${LOCAL_MONGODB_PASSWORD:-testing}
-    
-
 
 networks:
   freva-gpt:

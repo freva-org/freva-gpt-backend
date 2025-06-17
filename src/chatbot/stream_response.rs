@@ -160,12 +160,19 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     debug!("Thread ID: {}, Input: {}", thread_id, input);
 
-    // First try to get the vault_url from the headers, if it is not set, we'll use the default database.
+    // First try to get the vault_url from the headers, if it is not set, we'll have to tell the user that we now need it.
     let maybe_vault_url = headers
         .get("x-freva-vault-url")
         .and_then(|h| h.to_str().ok());
 
-    let database = match get_database(maybe_vault_url).await {
+    let Some(vault_url) = maybe_vault_url else {
+        warn!("The User requested a stream without a vault URL.");
+        return HttpResponse::BadRequest().body(
+            "Vault URL not found. Please provide a non-empty vault URL in the headers, of type String.",
+        );
+    };
+
+    let database = match get_database(vault_url).await {
         Ok(db) => db,
         Err(e) => {
             warn!("Failed to connect to the database: {:?}", e);

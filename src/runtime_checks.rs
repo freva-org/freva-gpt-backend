@@ -5,13 +5,8 @@ use tracing::{debug, error, info, trace};
 use crate::{
     auth::{ALLOW_GUESTS, AUTH_KEY},
     chatbot::{
-        self, is_ollama_running,
-        mongodb_storage::get_database,
-        storage_router::{AvailableStorages, STORAGE},
-        stream_response::STREAM_STOP_CONTENT,
-        types::StreamVariant,
+        self, is_ollama_running, stream_response::STREAM_STOP_CONTENT, types::StreamVariant,
     },
-    logging::{silence_logger, undo_silence_logger},
     static_serve,
     tool_calls::route_call::print_and_clear_tool_logs,
 };
@@ -90,29 +85,6 @@ pub async fn run_runtime_checks() {
 
     info!("Authentication string set successfully.");
     println!("Success!");
-
-    // Check whether the mongoDB is set up correctly by retrieving the threads by the testing user.
-    if matches!(STORAGE, AvailableStorages::MongoDB) {
-        print!("Checking whether the MongoDB is set up correctly... ");
-        flush_stdout_stderr();
-        info!("Checking whether the MongoDB is set up correctly.");
-        silence_logger(); // Retrieving the database with a none value will log a warning, so we silence the logger for this check.
-        let database = match get_database(None).await {
-            Ok(database) => database,
-            Err(e) => {
-                error!("Error getting the MongoDB database: {e:?}",);
-                eprintln!("Error getting the MongoDB database: {e:?}");
-                std::process::exit(1);
-            }
-        };
-        undo_silence_logger();
-        let _threads = crate::chatbot::mongodb_storage::read_threads("testing", database).await;
-        // We'll just throw away the result because we can't be sure that the user already created some threads.
-
-        info!("MongoDB seems to be set up correctly.");
-        println!("Success!");
-        flush_stdout_stderr();
-    }
 
     // Run the basic checks for the code interpreter.
     // Note that those checks need to be runtime, not compiletime, as the code interpreter calles the binary itself.
