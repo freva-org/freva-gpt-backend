@@ -60,12 +60,23 @@ pub async fn route_call(
                 warn!("The chatbot tried to call a function with the name '{func_name}' but it failed: {}", e);
 
                 // If the function name is not recognized, we'll return an error message.
-                let supported_tools = SUPPORTED_TOOLS.join(", ");
-                warn!(
-                    "The chatbot tried to call a function with the name '{func_name}' . Supported tools are: {supported_tools}, as well as all tools from the MCP servers."
-                );
-                let answer = vec![StreamVariant::CodeOutput(format!("The function '{func_name}' is not recognized. Supported tools are: {supported_tools}, as well as all tools from the MCP servers."), id)];
-                sender.send(answer).await
+                if !SUPPORTED_TOOLS.contains(&func_name.as_str()) {
+                    info!("Expecting failure of the MCP call is due to the function not being recognized. This is expected behavior for unsupported tools.");
+                    let supported_tools = SUPPORTED_TOOLS.join(", ");
+                    warn!(
+                        "The chatbot tried to call a function with the name '{func_name}' . Supported tools are: {supported_tools}, as well as all tools from the MCP servers."
+                    );
+                    let answer = vec![StreamVariant::CodeOutput(format!("The function '{func_name}' is not recognized. Supported tools are: {supported_tools}, as well as all tools from the MCP servers."), id)];
+                    sender.send(answer).await
+                } else {
+                    // Even if the function name is recognized, many other things can go wrong.
+                    warn!("The chatbot tried to call a function with the name '{func_name}' but it failed: {}", e);
+                    let answer = vec![StreamVariant::CodeOutput(
+                        format!("The function '{func_name}' failed: {}", e),
+                        id,
+                    )];
+                    sender.send(answer).await
+                }
             }
         }
     };
