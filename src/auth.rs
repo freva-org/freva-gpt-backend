@@ -23,24 +23,25 @@ pub async fn authorize_or_fail_fn(
             .body("No auth key found in the environment; Authorization failed."));
     };
 
-    // The new authentication system requires the client to (usually over nginx) send a vault url in the headers.
-    // Against this URL, the token will be checked.
-    let vault_url = headers
-        .get("x-freva-vault-url")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_owned());
+    // Fixing the auth code, I realized that there doesn't need to be a vault URL for auth, that is only for the database connection.
+    // // The new authentication system requires the client to (usually over nginx) send a vault url in the headers.
+    // // Against this URL, the token will be checked.
+    // let vault_url = headers
+    //     .get("x-freva-vault-url")
+    //     .and_then(|v| v.to_str().ok())
+    //     .map(|s| s.to_owned());
 
-    let vault_url = if let Some(url) = vault_url {
-        // Success case
-        debug!("Vault URL found in headers: {}", url);
-        url
-    } else {
-        // Because we expect all requests to go through nginx or to be done manually, we expect the vault URL to be present.
-        warn!("No vault URL found in headers, expecting incorrect or malicous usage.");
-        return Err(HttpResponse::BadRequest()
-            .body("Authentication not successful; please use the nginx proxy."));
-        // Deliberately vague
-    };
+    // let vault_url = if let Some(url) = vault_url {
+    //     // Success case
+    //     debug!("Vault URL found in headers: {}", url);
+    //     url
+    // } else {
+    //     // Because we expect all requests to go through nginx or to be done manually, we expect the vault URL to be present.
+    //     warn!("No vault URL found in headers, expecting incorrect or malicous usage.");
+    //     return Err(HttpResponse::BadRequest()
+    //         .body("Authentication not successful; please use the nginx proxy."));
+    //     // Deliberately vague
+    // };
 
     // Read from the variable `qstring`
     match (
@@ -72,7 +73,25 @@ pub async fn authorize_or_fail_fn(
                 ));
             };
 
-            let token_check = get_username_from_token(token, &vault_url).await;
+            // I missed a single line two months ago: the username check is not done against the vault,
+            // But rather a seperate endpoint, which is specified in the "x-freva-rest-url" header.
+
+            let rest_url = headers
+                .get("x-freva-rest-url")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_owned());
+
+            // We can only do the token check if the rest URL is present.
+            let token_check = if let Some(rest_url) = rest_url {
+                // If the rest URL is present, we'll check the token against it.
+                debug!("Rest URL found in headers: {}", rest_url);
+                get_username_from_token(token, &rest_url).await
+            } else {
+                // If the rest URL is not present, we'll return a 400.
+                warn!("No rest URL found in headers, cannot check token.");
+                return Err(HttpResponse::BadRequest()
+                    .body("Authentication not successful; please use the nginx proxy."));
+            };
 
             // Depending on whether the token was valid or not, check the query string token.
             match token_check {
@@ -126,9 +145,9 @@ pub async fn authorize_or_fail_fn(
 }
 
 /// Recives a token, checks it against the URL provided in the header and returns the username.
-async fn get_username_from_token(token: &str, vault_url: &str) -> Result<String, HttpResponse> {
+async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, HttpResponse> {
     debug!("Checking token: {}", token);
-    debug!("Using vault URL: {}", vault_url);
+    debug!("Using rest URL: {}", rest_url);
 
     // // Also, for development, if the AUTH_URL is set to NO_AUTH, we'll skip the check. This is so I don't have to
     // // set up a server to check the token against.
@@ -140,7 +159,7 @@ async fn get_username_from_token(token: &str, vault_url: &str) -> Result<String,
     // If the URL is set, we'll send a GET request to it with the token in the header.
     let client = reqwest::Client::new();
     let response = client
-        .get(vault_url.to_string() + "/auth/v2/userinfo") // The endpoint is at "/auth/v2/userinfo"
+        .get(rest_url.to_string() + "/auth/v2/userinfo") // The endpoint is at "/auth/v2/userinfo"
         .header("Authorization", format!("Bearer {token}"));
     let response = response.send().await;
 
