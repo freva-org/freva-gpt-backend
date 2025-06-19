@@ -157,9 +157,24 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
     // }
 
     // If the URL is set, we'll send a GET request to it with the token in the header.
+
+    // The entire url ending is "/api/freva-nextgen/auth/v2/userinfo",
+    // But it sometimes doesn't send the api and nextgen part, so we need to add it ourselves.
+    let path = if rest_url.ends_with("/api/freva-nextgen/auth/v2/userinfo") {
+        "".to_string() // The URL already contains the path.
+    } else if rest_url.ends_with("/api/freva-nextgen/") {
+        "auth/v2/userinfo".to_string()
+    } else if rest_url.ends_with("/api/freva-nextgen") {
+        "/auth/v2/userinfo".to_string()
+    } else {
+        "/api/freva-nextgen/auth/v2/userinfo".to_string() // The URL does not contain the path, so we add it.
+    };
+
+    debug!("Using path: {}", path);
+
     let client = reqwest::Client::new();
     let response = client
-        .get(rest_url.to_string() + "/auth/v2/userinfo") // The endpoint is at "/auth/v2/userinfo"
+        .get(rest_url.to_string() + &path)
         .header("Authorization", format!("Bearer {token}"));
     let response = response.send().await;
 
@@ -256,7 +271,10 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
     let mongodb_url = match serde_json::from_str::<serde_json::Value>(&result) {
         Ok(json) => {
             // If the JSON is valid, we'll return the MongoDB URL.
-            if let Some(url) = json["mongodb.url"].as_str() {
+            if let Some(url) = json["mongodb.url"]
+                .as_str()
+                .or_else(|| json["mongo.url"].as_str())
+            {
                 url.to_string()
             } else {
                 // If the MongoDB URL is not found, we'll return a 500.
