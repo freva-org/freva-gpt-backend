@@ -67,6 +67,12 @@ RUN git clone https://github.com/ESCOMP/CESM.git
 RUN git -C CESM checkout cesm3_0_beta03
 RUN ./CESM/bin/git-fleximod -C /app/CESM/ update
 ENV CIME_MACHINE="ubuntu-latest"
+# download Bathymetry dataset (GEBCO 2024)
+RUN dnf install unzip -y
+RUN curl https://www.bodc.ac.uk/data/open_download/gebco/gebco_2024/zip/ -o /app/gebco_2024.zip
+RUN mkdir -p /app/CrocoDash/inputs/gebco
+RUN unzip /app/gebco_2024.zip -d /app/CrocoDash/inputs/gebco
+RUN rm /app/gebco_2024.zip
 
 # DEBUG: Crashes the build with info about the python environment that will be used.
 # ENV PYO3_PRINT_CONFIG 1
