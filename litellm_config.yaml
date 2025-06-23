@@ -1,0 +1,26 @@
+model_list:
+  - model_name: gpt-4o ### RECEIVED MODEL NAME ###
+    litellm_params: # all params accepted by litellm.completion() - https://docs.litellm.ai/docs/completion/input
+      model: openai/gpt-4o ### MODEL NAME sent to `litellm.completion()` ###
+      api_key: "os.environ/OPENAI_API_KEY" 
+      # temperature: 0.2
+  - model_name: gpt-4o-mini ### RECEIVED MODEL NAME ###
+    litellm_params: # all params accepted by litellm.completion() - https://docs.litellm.ai/docs/completion/input
+      model: openai/gpt-4o-mini ### MODEL NAME sent to `litellm.completion()` ###
+      api_key: "os.environ/OPENAI_API_KEY" 
+  - model_name: "mistral"             
+    litellm_params:
+      model: "ollama/mistral"
+      # keep_alive: "8m" # Optional: Overrides default keep_alive, use -1 for Forever
+    model_info:
+      supports_function_calling: true
+  - model_name: "llama3.1"             
+    litellm_params:
+      model: "ollama/llama3.1"
+    model_info:
+      supports_function_calling: true
+  - model_name: "deepseek-r1"             
+    litellm_params:
+      model: "ollama/deepseek-r1"
+    model_info:
+      supports_function_calling: true

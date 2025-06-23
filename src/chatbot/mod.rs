@@ -58,7 +58,8 @@ pub static ACTIVE_CONVERSATIONS: Lazy<Arc<Mutex<Vec<ActiveConversation>>>> =
 /// Because we shouldn't have to construct a new OpenAI client for every stream we start, we'll use this static variable to hold the client.
 /// The Lazy is transparent, it can be accessed as-is.
 static OPENAI_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
-    let config = async_openai::config::OpenAIConfig::new();
+    let config = async_openai::config::OpenAIConfig::new()
+        .with_api_base(OLLAMA_ADDRESS.to_string()); // Use the same address as the Ollama client, because of Litellm.
     async_openai::Client::with_config(config)
 });
 
