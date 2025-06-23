@@ -140,7 +140,7 @@ pub async fn start_code_interpeter(
                     "The code interpreter crashed with the following output: {:?}",
                     output
                 );
-                return vec![StreamVariant::CodeOutput("An unexpected error occurred while running the code interpreter. Please try again.".to_string(), id)];
+                return vec![StreamVariant::CodeOutput(format!("An unexpected error occurred while running the code interpreter. Please try again. The error was: {:?}", output).to_string(), id)];
             }
             // Else, it was successful, and we'll return the output.
             let stdout = String::from_utf8_lossy(&output.stdout);
