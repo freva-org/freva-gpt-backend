@@ -17,6 +17,13 @@ services:
       - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/target:/app/target
       - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/python_pickles:/app/python_pickles
       - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles # Deprecated, once used for test data before freva support was added. Now used for debugging.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
   ollama:
     image: ollama/ollama
     hostname: ollama-instance
