@@ -27,10 +27,12 @@ const BIN_PATH: &str = "./target/release/freva-gpt2-backend";
 /// Takes in the arguments that were passed to the tool call as well as the id of the tool call (for the output).
 /// Returns the output of the code interpreter as a Vector of StreamVariants.
 /// Requires the thread_id to be set when used by the frontend. It is used to get the freva_config_path.
+/// Also requires the user_id to be set, so that the rw_dir is correctly pointed to.
 pub async fn start_code_interpeter(
     arguments: Option<String>,
     id: String,
     thread_id_and_database: Option<(String, Database)>,
+    user_id: String,
 ) -> Vec<StreamVariant> {
     trace!(
         "Running the code interpreter with the following arguments: {:?}",
@@ -38,22 +40,22 @@ pub async fn start_code_interpeter(
     );
 
     // We also need to get the freva_config_path from the thread_id.
-    let freva_config_path = match thread_id_and_database.clone() {
+    let (freva_config_path, thread_id) = match thread_id_and_database.clone() {
         None => {
             info!("Thread_id not set, assuming in testing mode. Not setting freva_config_path.");
-            String::new()
+            (String::new(), "testing".to_string())
         }
         Some((thread_id, database)) => match conversation_state(&thread_id, database.clone()).await
         {
             None => {
                 warn!("No conversation state found while trying to run the code interpreter. Not setting freva_config_path, this WILL break any calls to the code interpreter that require it.");
-                String::new()
+                (String::new(), thread_id)
             }
             Some(ConversationState::Ended | ConversationState::Stopping) => {
                 warn!("Trying to run the code interpreter with a conversation that has already ended. Not executing the code interpreter.");
                 return vec![StreamVariant::CodeOutput("The conversation has already ended. Please start a new conversation to use the code interpreter.".to_string(), id)];
             }
-            Some(ConversationState::Streaming(freva_config_path)) => freva_config_path,
+            Some(ConversationState::Streaming(freva_config_path)) => (freva_config_path, thread_id),
         },
     };
 
@@ -101,7 +103,7 @@ pub async fn start_code_interpeter(
     };
 
     let sanitized_code = sanitize_code(imports + &code.code);
-    let post_processed_code = post_process(sanitized_code);
+    let post_processed_code = post_process(sanitized_code, user_id, thread_id);
     code.code = post_processed_code;
 
     trace!(
@@ -321,7 +323,8 @@ fn sanitize_imports(prev_imports: Vec<String>, code: &str) -> Vec<String> {
 
 /// Post-processes the code before running it.
 /// Adds freva, numpy, matplotlib and xarray imports if they are not already present.
-fn post_process(code: String) -> String {
+/// Also replaces the user_id and thread_id placeholders with the actual values.
+fn post_process(code: String, user_id: String, thread_id: String) -> String {
     let mut code = code;
 
     // (What should be detected to add it) and (what should be added)
@@ -343,6 +346,14 @@ fn post_process(code: String) -> String {
             code = (*add).to_string() + &code;
         }
     }
+
+    // Now we have to replace the user_id and thread_id placeholders with the actual values.
+    // They are {user_id} and {thread_id} respectively.
+    let replacements = [("{user_id}", user_id), ("{thread_id}", thread_id)];
+    for (placeholder, value) in &replacements {
+        code = code.replace(placeholder, value);
+    }
+    trace!("Post-processed code: {}", code);
 
     code
 }

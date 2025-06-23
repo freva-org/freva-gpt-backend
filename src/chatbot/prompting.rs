@@ -49,15 +49,9 @@ pub static STARTING_PROMPT_CCRM: Lazy<ChatCompletionRequestSystemMessage> =
     });
 
 /// Function that holds the example conversations as a type that the async_openai library can use.
-/// Takes in the user_id and thread_id as arguments for templating.
-fn example_conversations_ccrm(user_id: &str, thread_id: &str) -> Vec<ChatCompletionRequestMessage> {
-    let mut content = EXAMPLE_CONVERSATIONS_STR.clone();
-    // Replace the user_id and thread_id in the content.
-    let replacements = [("[user_id]", user_id), ("[thread_id]", thread_id)];
-    for (placeholder, value) in &replacements {
-        content = content.replace(placeholder, value);
-    }
-    trace!("Templated example conversations: {}", content);
+/// Doesn't template anymore, so the user_id and thread_id are not used.
+fn example_conversations_ccrm() -> Vec<ChatCompletionRequestMessage> {
+    let content = EXAMPLE_CONVERSATIONS_STR.clone();
 
     let stream_variants = crate::chatbot::thread_storage::extract_variants_from_string(&content);
     trace!("Returning number of lines: {}", stream_variants.len());
@@ -76,12 +70,11 @@ static SUMMARY_SYSTEM_PROMPT_CCRM: Lazy<ChatCompletionRequestSystemMessage> = La
 
 /// All messages that should be added at the start of a new conversation.
 /// Consists of a starting prompt and a few example conversations.
-/// Requires the user_id and thread_id to be passed in, as they are used in the example conversations.
-fn entire_prompt_ccrm(user_id: &str, thread_id: &str) -> Vec<ChatCompletionRequestMessage> {
+fn entire_prompt_ccrm() -> Vec<ChatCompletionRequestMessage> {
     let mut messages = vec![ChatCompletionRequestMessage::System(
         STARTING_PROMPT_CCRM.clone(),
     )];
-    messages.extend(example_conversations_ccrm(user_id, thread_id));
+    messages.extend(example_conversations_ccrm());
     messages.push(ChatCompletionRequestMessage::System(
         SUMMARY_SYSTEM_PROMPT_CCRM.clone(),
     ));
@@ -107,7 +100,7 @@ pub fn get_entire_prompt_json(user_id: &str, thread_id: &str) -> Result<String, 
     // This function is a placeholder for now, but will in a few hours be used to
     // Properly template the content of the starting prompt.
     // For now, it just returns the JSON string of the starting prompt.
-    let ep_crrm = entire_prompt_ccrm(user_id, thread_id);
+    let ep_crrm = entire_prompt_ccrm();
 
     let mut result =
         serde_json::to_string(&ep_crrm).expect("Error converting starting prompt to JSON.");
@@ -126,7 +119,7 @@ pub fn get_entire_prompt_json(user_id: &str, thread_id: &str) -> Result<String, 
 pub fn get_entire_prompt(user_id: &str, thread_id: &str) -> Vec<ChatCompletionRequestMessage> {
     recursively_create_dir_at_rw_dir(user_id, thread_id);
     // Note that this function allows for the user_id and thread_id to be non-alphanumeric, as it is not used in the JSON parsing.
-    let result = entire_prompt_ccrm(user_id, thread_id);
+    let result = entire_prompt_ccrm();
 
     trace!("Returning templated starting prompt: {:?}", result);
     result

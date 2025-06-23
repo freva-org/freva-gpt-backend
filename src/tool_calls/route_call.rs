@@ -21,6 +21,7 @@ pub async fn route_call(
     arguments: Option<String>,
     id: String,
     thread_id: String,
+    user_id: String,
     sender: mpsc::Sender<Vec<StreamVariant>>,
     database: Database,
 ) {
@@ -37,7 +38,7 @@ pub async fn route_call(
         let routing_pit = std::time::SystemTime::now(); // The point in time when the routing function is reached.
 
         let result = sender
-            .send(start_code_interpeter(arguments, id, Some((thread_id, database))).await)
+            .send(start_code_interpeter(arguments, id, Some((thread_id, database)), user_id).await)
             .await;
 
         let return_pit = std::time::SystemTime::now(); // The point in time when the code interpreter returns.

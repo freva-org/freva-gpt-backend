@@ -365,7 +365,26 @@ def test_get_user_threads():
         
 
 
+def test_use_rw_dir():
+    ''' Does the LLM understand how it can use the rw directory? ''' # Since Version 1.9.0
+    # The rw directory is a directory that the LLM can use to store and load files for the user.
+    # This is a test to see if the LLM can use it correctly.
+    # It should also infer that if the user wants to save a file, it should use the rw directory.
+    response = generate_full_respone("This is a test. Please generate a plot of a sine wave from -2π to 2π and save it as a PNG file.", chatbot="gpt-4o-mini")
+    print(response)
+    # Afer this, it should have generated a file in the rw directory.
+    # Specifically, at "rw_dir/testing/{thread_id}/????.png"
+    # So we check whether that directory exists and contains a file.
+    thread_id = response.thread_id
+    rw_dir = f"rw_dir/testing/{thread_id}"
+    print(f"Debug: rw_dir: {rw_dir}") # Debugging
+    assert os.path.exists(rw_dir), f"RW directory {rw_dir} does not exist!"
 
+    # Make sure there is at least one file in the directory
+    files = os.listdir(rw_dir)
+    print(f"Debug: Files in rw_dir: {files}") # Debugging
+    assert len(files) > 0, f"RW directory {rw_dir} is empty!"
+    
 
 # --------------------------------
 # -- Mock Authentication Server --
