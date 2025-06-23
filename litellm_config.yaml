@@ -2,25 +2,37 @@ model_list:
   - model_name: "gpt-4o" ### RECEIVED MODEL NAME ###
     litellm_params: # all params accepted by litellm.completion() - https://docs.litellm.ai/docs/completion/input
       model: "openai/gpt-4o" ### MODEL NAME sent to `litellm.completion()` ###
-      api_key: "os.environ/OPENAI_API_KEY" 
+      api_key: "os.environ/OPENAI_API_KEY"
       # temperature: 0.2
   - model_name: "gpt-4o-mini" ### RECEIVED MODEL NAME ###
     litellm_params: # all params accepted by litellm.completion() - https://docs.litellm.ai/docs/completion/input
       model: "openai/gpt-4o-mini" ### MODEL NAME sent to `litellm.completion()` ###
-      api_key: "os.environ/OPENAI_API_KEY" 
-  - model_name: "mistral"             
+      api_key: "os.environ/OPENAI_API_KEY"
+  - model_name: "mistral"
     litellm_params:
       model: "ollama/mistral"
+      api_base: "http://ollama:11434"
       # keep_alive: "8m" # Optional: Overrides default keep_alive, use -1 for Forever
     model_info:
       supports_function_calling: true
-  - model_name: "llama3.1"             
+  - model_name: "llama3.1"
     litellm_params:
       model: "ollama/llama3.1"
+      api_base: "http://ollama:11434"
     model_info:
       supports_function_calling: true
-  - model_name: "deepseek-r1"             
+  - model_name: "deepseek-r1"
     litellm_params:
       model: "ollama/deepseek-r1"
+      api_base: "http://ollama:11434"
     model_info:
       supports_function_calling: true
+  # - model_name: "qwen2.5:3b"
+  #   litellm_params:
+  #     model: "ollama/qwen2.5:3b"
+  #     api_base: "http://host.docker.internal:11434" # For development only!
+  #   model_info:
+  #     supports_function_calling: true
+
+litellm_settings:
+  drop_params: true # Not all models support the same parameters. LiteLLM can automatically drop unsupported parameters.

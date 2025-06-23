@@ -20,7 +20,7 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     auth::is_guest,
     chatbot::{
-        available_chatbots::{model_ends_on_no_choice, OpenAIModels, DEFAULTCHATBOT},
+        available_chatbots::{model_ends_on_no_choice, DEFAULTCHATBOT},
         handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
             new_conversation_id, save_and_remove_conversation,
@@ -28,9 +28,9 @@ use crate::{
         heartbeat::heartbeat_content,
         mongodb_storage::get_database,
         prompting::{get_entire_prompt, get_entire_prompt_json},
-        select_client,
         storage_router::read_thread,
         types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
+        LITE_LLM_CLIENT,
     },
     logging::{silence_logger, undo_silence_logger},
     tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS},
@@ -234,12 +234,12 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let chatbot = match qstring.get("chatbot") {
         None | Some("") => {
             debug!("Using default chatbot as user didn't supply one.");
-            DEFAULTCHATBOT
+            DEFAULTCHATBOT.clone()
         }
-        Some(chatbot) => match String::try_into(chatbot.to_owned()) {
+        Some(chatbot) => match String::try_into((*chatbot).to_owned()) {
             Ok(chatbot) => chatbot,
-            Err(e) => {
-                warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", e);
+            Err(()) => {
+                warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", chatbot);
                 return HttpResponse::BadRequest().body("Chatbot not found. Consult the /availablechatbots endpoint for available chatbots.");
             }
         },
@@ -319,7 +319,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         user_id.clone(),
     );
 
-    let request: CreateChatCompletionRequest = match build_request(messages, chatbot) {
+    let request: CreateChatCompletionRequest = match build_request(messages, chatbot.clone()) {
         Ok(request) => request,
         Err(e) => {
             // If we can't build the request, we'll return a generic error.
@@ -354,7 +354,7 @@ fn build_request(
 
     let mut default_args = CreateChatCompletionRequestArgs::default(); // If the partial_request would be set to default here, the lifetime would be too short.
     let mut partial_request = default_args
-        .model(String::from(chatbot))
+        .model(String::from(chatbot.clone()))
         .n(1)
         .messages(messages)
         .stream(true)
@@ -365,7 +365,10 @@ fn build_request(
         });
 
     match chatbot {
-        AvailableChatbots::OpenAI(OpenAIModels::o1_mini | OpenAIModels::o3_mini) => {
+        // AvailableChatbots::OpenAI(OpenAIModels::o1_mini | OpenAIModels::o3_mini) => {
+        AvailableChatbots(modelname)
+            if modelname.clone().starts_with("o1-mini") || modelname.starts_with("o3-mini") =>
+        {
             partial_request = partial_request.max_completion_tokens(16000u32); // The max tokens parameter is called differently for the reasoning models.
         }
         _ => {
@@ -403,12 +406,7 @@ async fn create_and_stream(
     user_id: String,
     database: Database,
 ) -> actix_web::HttpResponse {
-    let open_ai_stream = match select_client(chatbot)
-        .await
-        .chat()
-        .create_stream(request)
-        .await
-    {
+    let open_ai_stream = match LITE_LLM_CLIENT.chat().create_stream(request).await {
         Ok(stream) => stream.fuse(), // Fuse the stream so calling next() will return None after the stream ends instead of blocking.
         Err(e) => {
             // If we can't create the stream, we'll return a generic error.
@@ -443,10 +441,11 @@ async fn create_and_stream(
             mut llama_tool_call_content,
             mut reciever,
         )| {
-            // It is required to clone the freva_config_path, because it is moved into the closure. Same with the user_id. And the database.
+            // It is required to clone the freva_config_path, because it is moved into the closure. Same with the user_id. And the database. And now the chatbot.
             let freva_config_path_clone = freva_config_path.clone();
             let user_id = user_id.clone();
             let database = database.clone();
+            let chatbot = chatbot.clone();
             async move {
                 // Even higher priority than stopping the stream is sending the thread_id hint.
                 if should_hint_thread_id {
@@ -1042,7 +1041,7 @@ async fn oai_stream_to_variants(
                 }
             } else {
                 // Some models (specifically some of the qwen family, have the tendency to not return any choices to mark the end of the stream.)
-                if model_ends_on_no_choice(chatbot) {
+                if model_ends_on_no_choice(chatbot.clone()) {
                     debug!("Qwen-like model ended stream without choice, simulating stop event.");
                     // Differentiatie between a tool call and a standard stop by the tool arguments and tool name.
                     let finish_reason = if !tool_arguments.is_empty() && tool_name.is_some() {
@@ -1081,35 +1080,37 @@ async fn oai_stream_to_variants(
         None => {
             // The llama chatbot sometimes forgets to write </tool_call> at the end of the tool call.
             // If it's not an openAI chatbot, check whether we can get some tool call from the running tool.
-            if matches!(chatbot, AvailableChatbots::Ollama(_)) {
-                // Try to get the tool call from the running tool.
-                let tool_call = try_extract_tool_call(
-                    &llama_tool_call_content
-                        .take()
-                        .map(|c| c.take())
-                        .unwrap_or_default(),
-                );
-                match tool_call {
-                    None => {
-                        info!("Stream ended abruptly and without error. Ollama just does this, returning streamend.");
-                        vec![StreamVariant::StreamEnd("Ollama Stream ended".to_string())]
-                    }
-                    Some((name, arguments)) => {
-                        // We know it's the code interpreter and can send it as a delta.
-                        trace!("Tool call: {:?} with arguments: {:?}", name, arguments);
-                        vec![
-                            StreamVariant::Code(arguments, generate_id()),
-                            StreamVariant::StreamEnd("Ollama Stream ended".to_string()), // We still need to end the stream, because the tool call is done.
-                        ]
-                    }
+            // if matches!(chatbot, AvailableChatbots::Ollama(_)) {
+            // Try to get the tool call from the running tool.
+            let tool_call = try_extract_tool_call(
+                &llama_tool_call_content
+                    .take()
+                    .map(|c| c.take())
+                    .unwrap_or_default(),
+            );
+            match tool_call {
+                None => {
+                    info!("Stream ended abruptly and without error.");
+                    vec![StreamVariant::StreamEnd(
+                        "Stream ended abruptly.".to_string(),
+                    )]
                 }
-            } else {
-                // Else, it's just an abrupt end of the stream.
-                warn!("Stream ended abruptly and without error. This should not happen; returning StreamEnd.");
-                vec![StreamVariant::StreamEnd(
-                    "Stream ended abruptly".to_string(),
-                )]
+                Some((name, arguments)) => {
+                    // We know it's the code interpreter and can send it as a delta.
+                    trace!("Tool call: {:?} with arguments: {:?}", name, arguments);
+                    vec![
+                        StreamVariant::Code(arguments, generate_id()),
+                        StreamVariant::StreamEnd("Stream ended".to_string()), // We still need to end the stream, because the tool call is done.
+                    ]
+                }
             }
+            // } else {
+            //     // Else, it's just an abrupt end of the stream.
+            //     warn!("Stream ended abruptly and without error. This should not happen; returning StreamEnd.");
+            //     vec![StreamVariant::StreamEnd(
+            //         "Stream ended abruptly".to_string(),
+            //     )]
+            // }
         }
     }
 }
@@ -1237,12 +1238,7 @@ async fn restart_stream(
                 }
                 Ok(request) => {
                     trace!("Request built successfully: {:?}", request);
-                    match select_client(chatbot)
-                        .await
-                        .chat()
-                        .create_stream(request)
-                        .await
-                    {
+                    match LITE_LLM_CLIENT.chat().create_stream(request).await {
                         Err(e) => {
                             // If we can't create the stream, we'll return a generic error.
                             warn!("Error creating stream: {:?}", e);

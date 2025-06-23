@@ -26,10 +26,10 @@ services:
       - ./litellm_config.yaml:/app/config.yaml # Mount the local litellm_config.yaml file to the container
     command:
       - "--config=/app/config.yaml"
-    # ports:
-    #   - "4000:8502" # Map the container port to the host, change the host port if necessary
+    ports:
+      - "4000:4000" # Map the container port to the host, change the host port if necessary
     env_file:
-     - .env # Load local .env file
+      - .env # Load local .env file
     networks:
       - freva-gpt2-backend
   ollama:
@@ -38,8 +38,8 @@ services:
     hostname: ollama-instance-${INSTANCE_NAME}
     volumes:
       - /container/da/freva-gpt-ollama-LLMs/.ollama:/root/.ollama
-    # ports: 
-      # - "11434:11434" # Map the container port to the host, change the host port if necessary
+    # ports:
+    # - "11434:11434" # Map the container port to the host, change the host port if necessary
     deploy:
       resources:
         reservations:

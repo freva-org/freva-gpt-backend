@@ -37,6 +37,9 @@ WORKDIR /app
 # Copy over the secrets file to have access to the openai account
 COPY .env /app/.env
 
+# The litellm also needs to be copied over to the backend so that the list of chatbots can be extracted
+COPY litellm_config.yaml /app/litellm_config.yaml
+
 # Add another environment variable so the app can have a valid python instance
 ENV PYTHONUSERBASE /opt/conda/envs/env
 ENV PYTHONPATH=/opt/conda/envs/env/lib/python3.12/site-packages

@@ -47,7 +47,7 @@ use std::sync::{Arc, Mutex};
 use async_openai::config::OpenAIConfig;
 use once_cell::sync::Lazy;
 
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error};
 use types::ActiveConversation;
 
 /// Because multiple threads need to work together and need to know about the conversations, this static variable holds information about all active conversation.
@@ -55,78 +55,43 @@ use types::ActiveConversation;
 pub static ACTIVE_CONVERSATIONS: Lazy<Arc<Mutex<Vec<ActiveConversation>>>> =
     Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
 
-/// Because we shouldn't have to construct a new OpenAI client for every stream we start, we'll use this static variable to hold the client.
+/// Because we shouldn't have to construct a new LiteLLM client for every stream we start, we'll use this static variable to hold the client.
 /// The Lazy is transparent, it can be accessed as-is.
-static OPENAI_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
-    let config = async_openai::config::OpenAIConfig::new()
-        .with_api_base(OLLAMA_ADDRESS.to_string()); // Use the same address as the Ollama client, because of Litellm.
+static LITE_LLM_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
+    let config =
+        async_openai::config::OpenAIConfig::new().with_api_base(LITE_LLM_ADDRESS.to_string()); // Use the same address as the Ollama client, because of Litellm.
     async_openai::Client::with_config(config)
 });
 
-/// We also need one for the Ollama client, because the API endpoint is dependent on the client.
-static OLLAMA_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
-    let address = OLLAMA_ADDRESS.clone();
-    let api_base = format!("{address}/v1"); // format doesn't automatically dereference the variable, so we need to do it manually.
-    let config = async_openai::config::OpenAIConfig::new()
-        .with_api_base(api_base)
-        .with_api_key("ollama");
-    async_openai::Client::with_config(config)
-});
-
-/// The Google-based chatbot needs a seperate API key that is set in the .env file.
-static GOOGLE_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
-    let key = std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY is not set in the .env file.");
-    let config = async_openai::config::OpenAIConfig::new().with_api_key(key);
-    async_openai::Client::with_config(config)
-});
-
-/// The address of the Ollama server.
-static OLLAMA_ADDRESS: Lazy<String> = Lazy::new(|| {
-    println!("OLLAMA_ADDRESS: {:?}", std::env::var("OLLAMA_ADDRESS"));
-    debug!("OLLAMA_ADDRESS: {:?}", std::env::var("OLLAMA_ADDRESS"));
-    std::env::var("OLLAMA_ADDRESS").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
+/// The address of the LiteLLM Proxy.
+static LITE_LLM_ADDRESS: Lazy<String> = Lazy::new(|| {
+    println!("LITE_LLM_ADDRESS: {:?}", std::env::var("LITE_LLM_ADDRESS"));
+    debug!("LITE_LLM_ADDRESS: {:?}", std::env::var("LITE_LLM_ADDRESS"));
+    std::env::var("LITE_LLM_ADDRESS").unwrap_or_else(|_| "http://litellm:4000".to_string())
     // Default to localhost
 });
 
-/// We might want to talk to ollama. This is to check whether ollama is up. If it is, it'll return "Ollama is running".
-/// Timeout is 200 milliseconds; it's on localhost:11434, the delay should be minimal.
-pub async fn is_ollama_running() -> bool {
+/// We want to use the LiteLLM Proxy. This is to check whether it is up. If it is, it'll return "I'm alive!".
+/// Timeout is 200 milliseconds; it's on another container on the same machine, the delay should be minimal.
+pub async fn is_lite_llm_running() -> bool {
     if let Ok(client) = reqwest::Client::builder()
         .timeout(std::time::Duration::from_millis(200))
         .build()
     {
-        let response = client.get(OLLAMA_ADDRESS.to_string()).send().await;
+        let response = client
+            .get(LITE_LLM_ADDRESS.to_string() + "/health/liveliness")
+            .send()
+            .await;
         if let Ok(response) = response {
             response.status().is_success()
         } else {
-            error!("Ollama is not running; the request failed: {:?}", response);
+            error!(
+                "LiteLLM Proxy could not be reached; the request failed: {:?}",
+                response
+            );
             false
         }
     } else {
         false
-    }
-}
-
-/// Selects the correct client based on the chatbot that is requested.
-pub async fn select_client(
-    chatbot: available_chatbots::AvailableChatbots,
-) -> &'static async_openai::Client<OpenAIConfig> {
-    match chatbot {
-        available_chatbots::AvailableChatbots::OpenAI(_) => {
-            trace!("Selecting OpenAI client");
-            &OPENAI_CLIENT
-        }
-        available_chatbots::AvailableChatbots::Ollama(_) => {
-            trace!("Selecting Ollama client");
-            if !is_ollama_running().await {
-                warn!("Ollama is not running; ollama couldn't be found! This might fail!");
-            }
-            &OLLAMA_CLIENT
-        }
-        available_chatbots::AvailableChatbots::Google(_) => {
-            trace!("Selecting Google client");
-            warn!("Gemini API is currently not available in the EU region. This will most likely fail!");
-            &GOOGLE_CLIENT
-        }
     }
 }
