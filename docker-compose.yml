@@ -1,35 +1,27 @@
 services:
   freva-gpt2-backend:
-    image: freva-gpt2-backend
+    image: freva-gpt2-backend-${INSTANCE_NAME}
     build:
       context: .
       dockerfile: dockerfiles/chatbot-backend/Dockerfile
       cgroup_manager: cgroupfs
       tags:
-        - freva-gpt2-backend:latest
-    container_name: freva-gpt2-backend-instance
+        - freva-gpt2-backend:${INSTANCE_NAME}
     hostname: freva-gpt2-backend-instance
     ports:
-      - "8502:8502"
+      - "8503:8502"
     volumes:
       - /work:/work:ro
-      - /container/da/freva-gpt-backend-links/logs:/app/logs
-      - /container/da/freva-gpt-backend-links/threads:/app/threads
-      - /container/da/freva-gpt-backend-links/target:/app/target
+      - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/logs:/app/logs
+      - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/threads:/app/threads
+      - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/target:/app/target
+      - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/python_pickles:/app/python_pickles
       - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles # Deprecated, once used for test data before freva support was added. Now used for debugging.
-      - /container/da/freva-gpt-backend-links/python_pickles:/app/python_pickles
-    networks:
-      freva-gpt:
-        ipv4_address: 10.89.0.2
   ollama:
     image: ollama/ollama
-    container_name: ollama-instance
     hostname: ollama-instance
     volumes:
       - /container/da/freva-gpt-ollama-LLMs/.ollama:/root/.ollama
-    networks:
-      freva-gpt:
-        ipv4_address: 10.89.0.3
     deploy:
       resources:
         reservations:
@@ -37,12 +29,3 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-
-networks:
-  freva-gpt:
-    driver: bridge
-    # network_backend: netavark
-    ipam:
-      config:
-        - subnet: 10.89.0.0/16
-        - gateway: 10.89.0.1
