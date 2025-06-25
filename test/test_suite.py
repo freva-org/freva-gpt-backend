@@ -397,7 +397,7 @@ def test_user_vision():
     ''' Can the LLM see the output that it generated? ''' # Since Version 1.10.0
 
     # The LLM should be able to see the image that the code it wrote generated.
-    response = generate_full_respone("You should have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates! Look at the generated image instead.", chatbot="gpt-4o-mini")
+    response = generate_full_respone("You should have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates or write any code except for the plotting of the X! Look at the generated image instead.", chatbot="gpt-4o-mini")
 
     print(response) # Debug
 
@@ -412,8 +412,8 @@ def test_user_vision():
 
     # Lastly make sure it actually generated an answer
     valid_answers = ["up", "down", "left", "right", "center"]
-    assert any(i.lower() in valid_answers for i in response.assistant_variants), "Assistant did not return a valid answer about the location of the X! It should have returned one of: " + ", ".join(valid_answers) + ". Instead, it returned: " + ", ".join(response.assistant_variants)
-
+    # assert any(i.lower() in valid_answers for i in response.assistant_variants), "Assistant did not return a valid answer about the location of the X! It should have returned one of: " + ", ".join(valid_answers) + ". Instead, it returned: " + ", ".join(response.assistant_variants)
+    assert valid_answers in ("".join(response.assistant_variants)).lower()
 
 # --------------------------------
 # -- Mock Authentication Server --

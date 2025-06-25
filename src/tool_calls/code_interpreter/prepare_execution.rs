@@ -70,10 +70,11 @@ pub async fn start_code_interpeter(
     }
 
     // Also retrieve all previous code interpreter inputs to get all libraries that are needed.
-    let previous_code_interpreter_imports = match thread_id_and_database.clone() {
-        None => vec![],
+    let (previous_code_interpreter_imports, previous_images) = match thread_id_and_database.clone()
+    {
+        None => (vec![], vec![]),
         Some((thread_id, database)) => {
-            retrieve_previous_code_interpreter_imports(&thread_id, database).await
+            retrieve_previous_code_interpreter_imports_and_images(&thread_id, database).await
         }
     };
 
@@ -163,6 +164,18 @@ pub async fn start_code_interpeter(
             for line in stdout.lines() {
                 if line.starts_with("Encoded Image: ") {
                     let encoded_image = line.trim_start_matches("Encoded Image: ");
+                    // However, we don't want to return any images that have previously been returned.
+                    // So we need to check the past conversation state for images.
+
+                    if previous_images.contains(&encoded_image.to_string()) {
+                        debug!("Found an image that has already been returned; skipping.");
+                        trace!(
+                            "Skipping image that has already been returned: {}",
+                            encoded_image
+                        );
+                        continue; // Skip this image, it has already been returned.
+                    }
+
                     images.push(StreamVariant::Image(encoded_image.to_string()));
                 } else {
                     stdout_without_images.push_str(line);
@@ -260,12 +273,13 @@ pub fn run_code_interpeter(arguments: String) -> ! {
     std::process::exit(0);
 }
 
-/// Retrieves all previous code interpreter inputs from the conversation state.
+/// Retrieves all previous code interpreter inputs from the conversation state and also all past images.
 /// Returns a string with all the imports, seperated by newlines.
-async fn retrieve_previous_code_interpreter_imports(
+/// The Images are returned as Base64 encoded strings, to be compared with the current images to avoid duplicates.
+async fn retrieve_previous_code_interpreter_imports_and_images(
     thread_id: &str,
     database: Database,
-) -> Vec<String> {
+) -> (Vec<String>, Vec<String>) {
     // The running conversation is in the global variable.
     let mut this_conversation = get_conversation(thread_id).unwrap_or_default();
     // The past conversation is stored on disk.
@@ -275,7 +289,7 @@ async fn retrieve_previous_code_interpreter_imports(
     this_conversation.extend(past_conversation);
 
     let mut imports = Vec::<String>::new();
-    for variant in this_conversation {
+    for variant in this_conversation.clone() {
         if let StreamVariant::Code(code, _) = variant {
             // Split the code into lines and only take the lines that start with "import" or start with "from" AND contain "import".
             // Start the split at the first occurence of "\":\"" to avoid splitting the code itself and to include the first line.
@@ -291,7 +305,18 @@ async fn retrieve_previous_code_interpreter_imports(
             }
         }
     }
-    imports
+
+    // Also extract all images that were returned by the code interpreter.
+    let mut images = Vec::<String>::new();
+    for variant in this_conversation {
+        if let StreamVariant::Image(image) = variant {
+            // The images are already Base64 encoded, so we can just push them to the vector.
+            trace!("Found image: {}", image);
+            images.push(image);
+        }
+    }
+
+    (imports, images)
 }
 
 /// Takes in a list of possible imports and the code that should be run.
