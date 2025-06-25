@@ -16,8 +16,11 @@ auth_string = auth_string + "&freva_config=" + "Cargo.toml" # Dummy value
 
 # Starting with Version 1.10.0, a vault url needs to be supplied in the headers.
 vault_url = "http://127.0.0.1:5001" # TODO: This might not work because of the local/docker devide.
+rest_url = "http://localhost:5001" # This is the URL of the mock authentication server. 
 headers = {
-    "x-freva-vault-url": vault_url
+    "x-freva-vault-url": vault_url,
+    "x-freva-rest-url": rest_url,
+    "x-freva-user-token": "Bearer THE_MOCK_AUTH_WILL_JUST_ALLOW_ANYTHING_SO_THIS_JUST_HAS_TO_BE_HERE",
 }
 
 
@@ -257,6 +260,9 @@ def test_persistant_xarray_storage():
 
 def test_qwen_available():
     ''' Can the backend use non-OpenAI chatbots, such as Qwen? ''' # Since Version 1.7.1
+    # DEBUG
+    # import time
+    # time.sleep(100)
     response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="qwen2.5:3b")
     # The assistant output should now contain "200 Ok"
     assert any("(200 ok)" in i.lower() for i in response.assistant_variants)
@@ -405,6 +411,15 @@ def auth():
     
     return jsonify({
         "mongodb.url": f"mongodb://{username}:{password}@localhost:27017",
+    }), 200
+
+@app.route("/api/freva-nextgen/auth/v2/userinfo", methods=["GET"])
+def userinfo():
+    # This would usually return the user information, but for testing, we just return a dummy response.
+    # The backend needs to retrieve the user ID from here, so we return a dummy user ID.
+    return jsonify({
+        "user_id": "testing",
+        "username": "testing",
     }), 200
 
 # Run the mock authentication server
