@@ -87,21 +87,21 @@ static OLLAMA_ADDRESS: Lazy<String> = Lazy::new(|| {
     // Default to localhost
 });
 
+// The Client is reusable, we shouldn't create a new one for every request.
+static REQWEST_CLIENT: Lazy<reqwest::Client> = Lazy::new(reqwest::Client::new);
+
 /// We might want to talk to ollama. This is to check whether ollama is up. If it is, it'll return "Ollama is running".
 /// Timeout is 200 milliseconds; it's on localhost:11434, the delay should be minimal.
 pub async fn is_ollama_running() -> bool {
-    if let Ok(client) = reqwest::Client::builder()
+    let response = REQWEST_CLIENT
+        .get(OLLAMA_ADDRESS.to_string())
         .timeout(std::time::Duration::from_millis(200))
-        .build()
-    {
-        let response = client.get(OLLAMA_ADDRESS.to_string()).send().await;
-        if let Ok(response) = response {
-            response.status().is_success()
-        } else {
-            error!("Ollama is not running; the request failed: {:?}", response);
-            false
-        }
+        .send()
+        .await;
+    if let Ok(response) = response {
+        response.status().is_success()
     } else {
+        error!("Ollama is not running; the request failed: {:?}", response);
         false
     }
 }

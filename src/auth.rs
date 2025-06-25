@@ -7,11 +7,15 @@ pub static AUTH_KEY: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCe
 pub static ALLOW_GUESTS: once_cell::sync::OnceCell<bool> = once_cell::sync::OnceCell::new();
 
 use actix_web::{http::header::HeaderMap, HttpResponse};
+use once_cell::sync::Lazy;
 use qstring::QString;
+use reqwest::Client;
 /// Very simple macro for the API points to call at the beginning to make sure that a request is authorized.
 /// If it isn't, it automatically returns the correct response.
 /// If a username was found in the token check, it will be returned.
 use tracing::{debug, error, info, trace, warn};
+
+static ALLOW_FALLBACK_OLD_AUTH: bool = false; // Whether or not the old auth system should be used as a fallback.
 
 pub async fn authorize_or_fail_fn(
     qstring: &QString,
@@ -22,26 +26,6 @@ pub async fn authorize_or_fail_fn(
         return Err(HttpResponse::InternalServerError()
             .body("No auth key found in the environment; Authorization failed."));
     };
-
-    // Fixing the auth code, I realized that there doesn't need to be a vault URL for auth, that is only for the database connection.
-    // // The new authentication system requires the client to (usually over nginx) send a vault url in the headers.
-    // // Against this URL, the token will be checked.
-    // let vault_url = headers
-    //     .get("x-freva-vault-url")
-    //     .and_then(|v| v.to_str().ok())
-    //     .map(|s| s.to_owned());
-
-    // let vault_url = if let Some(url) = vault_url {
-    //     // Success case
-    //     debug!("Vault URL found in headers: {}", url);
-    //     url
-    // } else {
-    //     // Because we expect all requests to go through nginx or to be done manually, we expect the vault URL to be present.
-    //     warn!("No vault URL found in headers, expecting incorrect or malicous usage.");
-    //     return Err(HttpResponse::BadRequest()
-    //         .body("Authentication not successful; please use the nginx proxy."));
-    //     // Deliberately vague
-    // };
 
     // Read from the variable `qstring`
     match (
@@ -100,7 +84,16 @@ pub async fn authorize_or_fail_fn(
                     Ok(Some(username))
                 }
                 Err(tokencheck_error) => {
-                    // Now we have the token, we need to check whether it is valid.
+                    // Depending on whether or not we want to allow the old auth system,
+                    // we'll either return the error or check the query string token.
+                    if !ALLOW_FALLBACK_OLD_AUTH {
+                        // If we don't allow the old auth system, we'll return the error.
+                        warn!(
+                            "Authorization header is not valid. Sending error: {:?}",
+                            tokencheck_error
+                        );
+                        return Err(tokencheck_error);
+                    }
                     info!("Token check failed, checking query string auth_key.");
                     if let Some(query_token) = maybe_key {
                         // If the query string token is present, we'll check whether it equals the token.
@@ -125,6 +118,13 @@ pub async fn authorize_or_fail_fn(
             }
         }
         (Some(key), None) => {
+            // Again, maybe fall back. Because the new auth header wasn't provided, this must fail.
+            if !ALLOW_FALLBACK_OLD_AUTH {
+                warn!("No Authorization header found. Sending 401.");
+                return Err(HttpResponse::Unauthorized()
+                    .body("No Authorization header found. Please use the Bearer token format."));
+            }
+
             // If the key is not the same as the one in the environment, we'll return a 401.
             if key != auth_key {
                 warn!("Unauthorized request.");
@@ -144,17 +144,12 @@ pub async fn authorize_or_fail_fn(
     }
 }
 
+static REQWEST_CLIENT: Lazy<Client> = Lazy::new(reqwest::Client::new);
+
 /// Recives a token, checks it against the URL provided in the header and returns the username.
 async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, HttpResponse> {
     debug!("Checking token: {}", token);
     debug!("Using rest URL: {}", rest_url);
-
-    // // Also, for development, if the AUTH_URL is set to NO_AUTH, we'll skip the check. This is so I don't have to
-    // // set up a server to check the token against.
-    // if auth_url == "NO_AUTH" {
-    //     debug!("Skipping token check, AUTH_URL is set to NO_AUTH.");
-    //     return Ok("testing".to_string()); // "testing" is the username for development.
-    // }
 
     // If the URL is set, we'll send a GET request to it with the token in the header.
 
@@ -172,8 +167,7 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
 
     debug!("Using path: {}", path);
 
-    let client = reqwest::Client::new();
-    let response = client
+    let response = REQWEST_CLIENT
         .get(rest_url.to_string() + &path)
         .header("Authorization", format!("Bearer {token}"));
     let response = response.send().await;
@@ -234,8 +228,7 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
 pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
     // The vault URL will be contained in the answer to the request to the vault. (No endpoint or authentication needed.)
     debug!("Getting MongoDB URL from vault: {}", vault_url);
-    let client = reqwest::Client::new();
-    let response = client.get(vault_url).send().await;
+    let response = REQWEST_CLIENT.get(vault_url).send().await;
 
     // Extract the result or fail
     let result = match response {
