@@ -45,9 +45,9 @@ async fn main() -> std::io::Result<()> {
     debug!(
         "Reading host and port from environment variables: {:?}:{:?}",
         std::env::var("HOST"),
-        std::env::var("PORT")
+        std::env::var("BACKEND_PORT")
     );
-    let port = std::env::var("PORT").unwrap_or_else(|_| "8502".to_string());
+    let port = std::env::var("BACKEND_PORT").unwrap_or_else(|_| "8502".to_string());
     let port = port.parse::<u16>().unwrap_or_else(|_| {
         error!("Error parsing port number. Falling back to default port 8502");
         eprintln!("Error parsing port number. Falling back to default port 8502");
