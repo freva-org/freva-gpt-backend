@@ -392,6 +392,29 @@ def test_use_rw_dir():
     assert len(files) > 0, f"RW directory {rw_dir} is empty!"
     
 
+
+def test_user_vision():
+    ''' Can the LLM see the output that it generated? ''' # Since Version 1.10.0
+
+    # The LLM should be able to see the image that the code it wrote generated.
+    response = generate_full_respone("You should have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates! Look at the generated image instead.", chatbot="gpt-4o-mini")
+
+    print(response) # Debug
+
+    # The response should contain an image and the assistant should not be confused about the location of the X.
+    assert response.image_variants, "No image variants found in response!"
+    negatives = ["i don't know", "i can't see", "i can't tell", "i'm not sure", "i don't understand", "unfortunately", "i don't", "i cannot", "i can't"]
+    assert not any(neg in i.lower() for i in response.assistant_variants for neg in negatives), "Assistant was confused about the location of the X! It either refused or couldn't see it."
+
+    # Also make sure that the assistant didn't print out the coordinates. 
+    # For that, test the code output for numbers, that is 0.[0-9]+
+    assert not any("0." in i for i in response.codeoutput_variants), "Assistant printed out the coordinates of the X! It should only describe the location in words, not numbers."
+
+    # Lastly make sure it actually generated an answer
+    valid_answers = ["up", "down", "left", "right", "center"]
+    assert any(i.lower() in valid_answers for i in response.assistant_variants), "Assistant did not return a valid answer about the location of the X! It should have returned one of: " + ", ".join(valid_answers) + ". Instead, it returned: " + ", ".join(response.assistant_variants)
+
+
 # --------------------------------
 # -- Mock Authentication Server --
 # --------------------------------

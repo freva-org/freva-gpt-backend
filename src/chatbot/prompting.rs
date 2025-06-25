@@ -56,7 +56,7 @@ fn example_conversations_ccrm() -> Vec<ChatCompletionRequestMessage> {
     let stream_variants = crate::chatbot::thread_storage::extract_variants_from_string(&content);
     trace!("Returning number of lines: {}", stream_variants.len());
 
-    crate::chatbot::types::help_convert_sv_ccrm(stream_variants)
+    crate::chatbot::types::help_convert_sv_ccrm(stream_variants, false) // The example conversations shouldn't contain images, but if they do, we don't want to send them.
 }
 
 /// Some LLMs, especially Llama seem to require another prompt after the example conversations.

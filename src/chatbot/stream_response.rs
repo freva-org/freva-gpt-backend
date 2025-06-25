@@ -20,7 +20,9 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     auth::is_guest,
     chatbot::{
-        available_chatbots::{model_ends_on_no_choice, OpenAIModels, DEFAULTCHATBOT},
+        available_chatbots::{
+            model_ends_on_no_choice, model_supports_images, OpenAIModels, DEFAULTCHATBOT,
+        },
         handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
             new_conversation_id, save_and_remove_conversation,
@@ -295,7 +297,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         };
 
         // We have a Vec of StreamVariant, but we want a Vec of ChatCompletionRequestMessage.
-        let mut past_messages = help_convert_sv_ccrm(content);
+        let mut past_messages = help_convert_sv_ccrm(content, model_supports_images(chatbot));
         let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
             name: Some("user".to_string()),
             content: async_openai::types::ChatCompletionRequestUserMessageContent::Text(
@@ -1228,7 +1230,8 @@ async fn restart_stream(
             );
 
             // The stream wants a vector of ChatCompletionRequestMessage, so we need to convert the StreamVariants to that.
-            let all_oai_messages = help_convert_sv_ccrm(all_messages);
+            let all_oai_messages =
+                help_convert_sv_ccrm(all_messages, model_supports_images(chatbot));
 
             trace!("All messages: {:?}", all_oai_messages);
 
