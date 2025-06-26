@@ -158,7 +158,7 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                         // But before we do so, we check whether the matplotlib plt module was used.
                         // If it was, we probably want to extract the image and return that too.
 
-                        let maybe_plt = locals.get_item("plt");
+                        let maybe_plt: Result<Option<Bound<'_, PyAny>>, PyErr> = locals.get_item("plt");
                         let image = match maybe_plt {
                             Ok(Some(inner)) => {
                                 // If we have a plt module, we'll try to get an image from it.
