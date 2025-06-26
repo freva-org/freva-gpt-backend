@@ -107,3 +107,6 @@
 {"variant":"User","content":"Use decode method from stableclimgen package to get temperature data from January 2nd 1940."}
 {"variant":"Code","content": ["{\"code\":\"from stableclimgen.src.decode import decode\\n data = decode(timesteps=['1940-01-02'],variables=['tas'])\"}", "Some_id20"]}
 {"variant":"CodeOutput","content": ["", "Some_id20"]}
+{"variant":"User","content":"Make a plot of the global surface temperature on January 1st, 2000."}
+{"variant":"Code","content": ["{\"code\":\"from stableclimgen.src.decode import decode\\n import healpy as hp\\n import matplotlib.pyplot as plt\\n output = decode(['2000-01-01'], ['tas'])\\n temp_map = output['tas'].numpy().squeeze()\\n hp.mollview(temp_map, title='Surface Temperature on 2000-01-01', unit='K', nest=True)\\n plt.show()\"}", "Some_id21"]}
+{"variant":"CodeOutput","content": ["", "Some_id21"]}
