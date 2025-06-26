@@ -157,6 +157,7 @@ async fn check_two_plus_two() {
         Some(r#"{"code": "2+2"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
@@ -175,6 +176,7 @@ async fn check_print() {
         Some(r#"{"code": "print('Hello World!', flush=True)"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
@@ -193,6 +195,7 @@ async fn check_print_noflush() {
         Some(r#"{"code": "print('Hello World!')"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
@@ -212,6 +215,7 @@ async fn check_print_two() {
         Some(r#"{"code": "print('Hello')\nprint('World!')"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
@@ -230,6 +234,7 @@ async fn check_assignments() {
         Some(r#"{"code": "a = 2"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     // The output should be empty, as we're not printing anything.
@@ -279,6 +284,7 @@ async fn check_single_import(library: &str) {
         Some(formatted_import_code),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert!(output.len() == 1);
@@ -294,6 +300,7 @@ pub async fn check_hard_crash() {
         Some(r#"{"code": "exit()"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     // If we reach this point, the code interpreter did not crash.
@@ -305,6 +312,7 @@ pub async fn check_soft_crash() {
         Some(r#"{"code": "1/0"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
@@ -329,6 +337,7 @@ async fn check_syntax_error() {
         Some(r#"{"code": "dsa=na034ß94?ß"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
@@ -348,6 +357,7 @@ async fn check_syntax_error_surround() {
         Some(r#"{"code": "import np\ndsa=na034ß94?ß\nprint('Hello World!')"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
@@ -369,6 +379,7 @@ async fn check_traceback_error_surround() {
         Some(r#"{"code": "a=2\n1/0\nb=3"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
@@ -388,6 +399,7 @@ async fn check_eval_exec() {
         Some(r#"{"code": "a = 2\nb = 3\na+b"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
@@ -402,6 +414,7 @@ async fn check_eval_exec() {
         Some(r#"{"code": "a = 2\nb = 3\na,b"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
@@ -416,6 +429,7 @@ async fn check_eval_exec() {
         Some(r#"{"code": "a = 2\nb = 3\nfloat(a+b)"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
@@ -430,6 +444,7 @@ async fn check_eval_exec() {
         Some(r#"{"code": "a = 2\nb = 3\n(a, b if not a==b else a)"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
@@ -444,6 +459,7 @@ async fn check_eval_exec() {
         Some(r#"{"code": "test=[1,2,3]\nlen(test)"}"#.to_string()),
         "test".to_string(),
         None,
+        "testing".to_string(),
     )
     .await;
     assert_eq!(output.len(), 1);
