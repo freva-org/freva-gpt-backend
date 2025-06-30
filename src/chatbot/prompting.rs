@@ -4,7 +4,7 @@ use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionRequestSys
 use once_cell::sync::Lazy;
 use std::fs;
 use std::io::Read;
-use tracing::{error, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 /// The basic starting prompt as a const of the correct type.
 static STARTING_PROMPT_STR: Lazy<String> = Lazy::new(|| {
@@ -82,38 +82,20 @@ fn entire_prompt_ccrm() -> Vec<ChatCompletionRequestMessage> {
 }
 
 /// Function that returns the entire prompt as a JSON string.
-/// Templates the user_id and thread_id into the prompt.
-/// If either the user_id or thread_id are non-alphanumeric, it will error.
-pub fn get_entire_prompt_json(user_id: &str, thread_id: &str) -> Result<String, ()> {
-    // If either the user_id or thread_id are non-alphanumeric, return an error.
-    // This is because else, the json parsing might be thrown off.
-    if !user_id.chars().all(|c| c.is_alphanumeric()) {
-        error!("user_id is not alphanumeric: {}", user_id);
-        return Err(());
-    }
-    if !thread_id.chars().all(|c| c.is_alphanumeric()) {
-        error!("thread_id is not alphanumeric: {}", thread_id);
-        return Err(());
-    }
-
+pub fn get_entire_prompt_json(user_id: &str, thread_id: &str) -> String {
     recursively_create_dir_at_rw_dir(user_id, thread_id);
     // This function is a placeholder for now, but will in a few hours be used to
     // Properly template the content of the starting prompt.
     // For now, it just returns the JSON string of the starting prompt.
     let ep_crrm = entire_prompt_ccrm();
 
-    let mut result =
+    let result =
         serde_json::to_string(&ep_crrm).expect("Error converting starting prompt to JSON.");
     // Safety: The conversion currently has no paths to error. However, if it does, the first call before the server is started will fail, causing the server to not start.
     // Note that the templating makes it not pure, but if one templating is correct, and everything is alphanumeric, the rest should be too.
 
-    let replacements = [("{user_id}", user_id), ("{thread_id}", thread_id)];
-
-    for (placeholder, value) in &replacements {
-        result = result.replace(placeholder, value);
-    }
-    trace!("Returning templated starting prompt JSON: {}", result);
-    Ok(result)
+    trace!("Returning starting prompt JSON: {}", result);
+    result
 }
 
 pub fn get_entire_prompt(user_id: &str, thread_id: &str) -> Vec<ChatCompletionRequestMessage> {
@@ -140,10 +122,26 @@ fn recursively_create_dir_at_rw_dir(user_id: &str, thread_id: &str) {
     } else {
         let result = std::fs::create_dir_all(path);
         if let Err(e) = result {
-            warn!(
-                "Failed to create rw_dir: {}. Python might have trouble storing data.",
-                e
-            );
+            debug!("Failed to create rw_dir: {e}. Python might have trouble storing data.");
+            // The directory might not be created if the user_id contains non-alphanumeric characters.
+            // We'll try again, this time with a sanitized user_id.
+            let sanitized_user_id = user_id
+                .chars()
+                .filter(|c| c.is_alphanumeric())
+                .collect::<String>();
+            let sanitized_rw_dir = format!("rw_dir/{sanitized_user_id}/{thread_id}");
+            let sanitized_path = std::path::Path::new(&sanitized_rw_dir);
+            if sanitized_path.exists() {
+                trace!("Sanitized rw_dir already exists: {}", sanitized_rw_dir);
+            } else if let Err(e) = std::fs::create_dir_all(sanitized_path) {
+                error!(
+                    "Failed to create sanitized rw_dir: {}. Python might have trouble storing data.",
+                    e
+                );
+            } else {
+                trace!("Sanitized rw_dir created: {}", sanitized_rw_dir);
+            }
+            return;
         }
         trace!("rw_dir created: {}", rw_dir);
     }

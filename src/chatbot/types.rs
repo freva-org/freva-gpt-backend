@@ -535,7 +535,7 @@ mod tests {
     #[test]
     fn test_help_convert_sv_ccrm() {
         let input = vec![
-            StreamVariant::Prompt(get_entire_prompt_json("testing", "testing").expect("Error getting prompt JSON")), // This can panic because it's in a test.
+            StreamVariant::Prompt(get_entire_prompt_json("testing", "testing")),
             StreamVariant::ServerHint("{\"thread_id\": \"wLRFKFPcDgRJdZwSFBF82LWulvAaS5MR\"}".to_string()),            
             StreamVariant::User("plot a cirlce".to_string()),
             StreamVariant::Assistant("To plot a circle, we can use the `matplotlib` library to create a simple visualization. Let's create a plot with a circle centered at the origin (0, 0) with a specified radius. I'll use a radius of 1 for this example.\n\nLet's proceed with the code to generate this plot.".to_string()),

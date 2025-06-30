@@ -31,8 +31,8 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
             match qstring.get("user_id") {
                 Some(user_id) => user_id.to_string(),
                 None => {
-                    // If the user ID is not found, we'll return a 400
-                    return HttpResponse::BadRequest().body(
+                    // If the user ID is not found, we'll return a 422
+                    return HttpResponse::UnprocessableEntity().body(
                         "User ID not found. Please provide a user_id in the query parameters.",
                     );
                 }
@@ -49,7 +49,7 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
 
     let Some(vault_url) = maybe_vault_url else {
         warn!("The User requested a stream without a vault URL.");
-        return HttpResponse::BadRequest().body(
+        return HttpResponse::UnprocessableEntity().body(
             "Vault URL not found. Please provide a non-empty vault URL in the headers, of type String.",
         );
     };
@@ -59,7 +59,7 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
         Ok(db) => db,
         Err(e) => {
             debug!("Failed to connect to the database: {:?}", e);
-            return HttpResponse::InternalServerError().body("Failed to connect to the database.");
+            return HttpResponse::ServiceUnavailable().body("Failed to connect to the database.");
         }
     };
 
