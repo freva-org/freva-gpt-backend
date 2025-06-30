@@ -12,6 +12,7 @@ services:
       - "8503:8502"
     volumes:
       - /work:/work:ro
+      - /container/da/genai_data:/container/da/genai_data
       - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/logs:/app/logs
       - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/threads:/app/threads
       - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/target:/app/target
