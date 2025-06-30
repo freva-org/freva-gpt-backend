@@ -1,6 +1,7 @@
 use async_process::Command;
 
 use itertools::Itertools;
+use mongodb::Database;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
@@ -16,14 +17,22 @@ use crate::{
     },
 };
 
+#[cfg(debug_assertions)]
+const BIN_PATH: &str = "./target/debug/freva-gpt2-backend";
+// But when it is run in release mode, the binary is in a different location.
+#[cfg(not(debug_assertions))]
+const BIN_PATH: &str = "./target/release/freva-gpt2-backend";
+
 /// The main function to execute the code interpreter.
 /// Takes in the arguments that were passed to the tool call as well as the id of the tool call (for the output).
 /// Returns the output of the code interpreter as a Vector of StreamVariants.
 /// Requires the thread_id to be set when used by the frontend. It is used to get the freva_config_path.
+/// Also requires the user_id to be set, so that the rw_dir is correctly pointed to.
 pub async fn start_code_interpeter(
     arguments: Option<String>,
     id: String,
-    thread_id: Option<String>,
+    thread_id_and_database: Option<(String, Database)>,
+    user_id: String,
 ) -> Vec<StreamVariant> {
     trace!(
         "Running the code interpreter with the following arguments: {:?}",
@@ -31,21 +40,22 @@ pub async fn start_code_interpeter(
     );
 
     // We also need to get the freva_config_path from the thread_id.
-    let freva_config_path = match thread_id.clone() {
+    let (freva_config_path, thread_id) = match thread_id_and_database.clone() {
         None => {
             info!("Thread_id not set, assuming in testing mode. Not setting freva_config_path.");
-            "".to_string()
+            (String::new(), "testing".to_string())
         }
-        Some(thread_id) => match conversation_state(&thread_id).await {
+        Some((thread_id, database)) => match conversation_state(&thread_id, database.clone()).await
+        {
             None => {
                 warn!("No conversation state found while trying to run the code interpreter. Not setting freva_config_path, this WILL break any calls to the code interpreter that require it.");
-                "".to_string()
+                (String::new(), thread_id)
             }
-            Some(ConversationState::Ended) | Some(ConversationState::Stopping) => {
+            Some(ConversationState::Ended | ConversationState::Stopping) => {
                 warn!("Trying to run the code interpreter with a conversation that has already ended. Not executing the code interpreter.");
                 return vec![StreamVariant::CodeOutput("The conversation has already ended. Please start a new conversation to use the code interpreter.".to_string(), id)];
             }
-            Some(ConversationState::Streaming(freva_config_path)) => freva_config_path,
+            Some(ConversationState::Streaming(freva_config_path)) => (freva_config_path, thread_id),
         },
     };
 
@@ -60,17 +70,18 @@ pub async fn start_code_interpeter(
     }
 
     // Also retrieve all previous code interpreter inputs to get all libraries that are needed.
-    let previous_code_interpreter_imports = match thread_id.clone() {
-        None => vec![],
-        Some(thread_id) => retrieve_previous_code_interpreter_imports(&thread_id).await,
+    let (previous_code_interpreter_imports, previous_images) = match thread_id_and_database.clone()
+    {
+        None => (vec![], vec![]),
+        Some((thread_id, database)) => {
+            retrieve_previous_code_interpreter_imports_and_images(&thread_id, database).await
+        }
     };
 
     // Now, we have to convert the arguments from JSON to a struct.
 
     // First check whether the arguments are actually present, maybe the LLM forgot to include them.
-    let code = if let Some(content) = arguments {
-        content
-    } else {
+    let Some(code) = arguments else {
         warn!("No code was found while trying to run the code_interpreter.");
         return vec![StreamVariant::CodeOutput(
             "No code was found while trying to run the code_interpreter. Please try again."
@@ -93,7 +104,7 @@ pub async fn start_code_interpeter(
     };
 
     let sanitized_code = sanitize_code(imports + &code.code);
-    let post_processed_code = post_process(sanitized_code);
+    let post_processed_code = post_process(sanitized_code, user_id, thread_id);
     code.code = post_processed_code;
 
     trace!(
@@ -110,18 +121,16 @@ pub async fn start_code_interpeter(
     // Secondly, the python module likes to crash hard sometimes, so if the code interpreter crashes, it won't take the whole chatbot down with it.
     // The code we use will be the same as in the execute_code function.
 
-    
-    #[cfg(debug_assertions)]
-    static BIN_PATH: &str = "./target/debug/freva-gpt2-backend";
-    // But when it is run in release mode, the binary is in a different location.
-    #[cfg(not(debug_assertions))]
-    static BIN_PATH: &str = "./target/release/freva-gpt2-backend";
-
     let output = Command::new(BIN_PATH)
         .arg("--code-interpreter")
         .arg(code.code.clone())
         .env("EVALUATION_SYSTEM_CONFIG_FILE", freva_config_path)
-        .env("THREAD_ID", thread_id.unwrap_or_default())
+        .env(
+            "THREAD_ID",
+            thread_id_and_database
+                .map(|t_a_d| t_a_d.0)
+                .unwrap_or_default(),
+        ) // Extracts the thread_id from the tuple, or uses an empty string if it is None.
         .output()
         .await; // It's a future now, so we have to await it.
 
@@ -155,6 +164,18 @@ pub async fn start_code_interpeter(
             for line in stdout.lines() {
                 if line.starts_with("Encoded Image: ") {
                     let encoded_image = line.trim_start_matches("Encoded Image: ");
+                    // However, we don't want to return any images that have previously been returned.
+                    // So we need to check the past conversation state for images.
+
+                    if previous_images.contains(&encoded_image.to_string()) {
+                        debug!("Found an image that has already been returned; skipping.");
+                        trace!(
+                            "Skipping image that has already been returned: {}",
+                            encoded_image
+                        );
+                        continue; // Skip this image, it has already been returned.
+                    }
+
                     images.push(StreamVariant::Image(encoded_image.to_string()));
                 } else {
                     stdout_without_images.push_str(line);
@@ -181,7 +202,7 @@ pub async fn start_code_interpeter(
             // The LLM probably needs both the stdout and stderr, so we'll return both.
             let stdout_stderr = format!("{stdout_short}\n{stderr_short}").trim().to_string(); // Because if the stderr is empty, this would add an unnecessary newline.
 
-            let stdout_stderr = post_process_output(stdout_stderr, code.code.clone());
+            let stdout_stderr = post_process_output(&stdout_stderr, &code.code.clone());
             if stdout_stderr.split_whitespace().next().is_none() {
                 // This will check whether it contains only whitespace.
                 info!("The code interpreter returned an empty output.");
@@ -205,7 +226,7 @@ struct CodeInterpreterArguments {
 }
 
 /// The function that is called when the program is started and the code_interpreter argument is passed.
-pub fn run_code_interpeter(arguments: String) {
+pub fn run_code_interpeter(arguments: String) -> ! {
     // We'll first initialize the logger.
     let logger = setup_logging(); // can't drop the logger, because we need it to be alive for the whole program.
     debug!(
@@ -217,10 +238,11 @@ pub fn run_code_interpeter(arguments: String) {
     // This is needed for the code interpreter to save the pickle file.
 
     // Debug: Overhead debugging
-    if let Ok(overhead_time) = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-    {
-        debug!("The code interpreter has been called. OVERHEAD={}", overhead_time.as_nanos());
+    if let Ok(overhead_time) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        debug!(
+            "The code interpreter has been called. OVERHEAD={}",
+            overhead_time.as_nanos()
+        );
     }
 
     let mut thread_id = match std::env::var("THREAD_ID") {
@@ -230,7 +252,7 @@ pub fn run_code_interpeter(arguments: String) {
         }
         Ok(thread_id) => Some(thread_id),
     };
-    if thread_id == Some("".to_string()) {
+    if thread_id == Some(String::new()) {
         thread_id = None;
     }
 
@@ -244,26 +266,30 @@ pub fn run_code_interpeter(arguments: String) {
     print!("{}", output.trim()); // No trailing newline.
 
     if let Some(logger) = logger {
-        logger.shutdown()
+        logger.shutdown();
     } // We have to shut down the logger manually
 
     // Because this is a seperate process, we have to exit it manually.
     std::process::exit(0);
 }
 
-/// Retrieves all previous code interpreter inputs from the conversation state.
+/// Retrieves all previous code interpreter inputs from the conversation state and also all past images.
 /// Returns a string with all the imports, seperated by newlines.
-async fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> Vec<String> {
+/// The Images are returned as Base64 encoded strings, to be compared with the current images to avoid duplicates.
+async fn retrieve_previous_code_interpreter_imports_and_images(
+    thread_id: &str,
+    database: Database,
+) -> (Vec<String>, Vec<String>) {
     // The running conversation is in the global variable.
     let mut this_conversation = get_conversation(thread_id).unwrap_or_default();
     // The past conversation is stored on disk.
     silence_logger();
-    let past_conversation = read_thread(thread_id).await.unwrap_or_default(); // We don't want to log an error if the file doesn't exist.
+    let past_conversation = read_thread(thread_id, database).await.unwrap_or_default(); // We don't want to log an error if the file doesn't exist.
     undo_silence_logger();
     this_conversation.extend(past_conversation);
 
     let mut imports = Vec::<String>::new();
-    for variant in this_conversation {
+    for variant in this_conversation.clone() {
         if let StreamVariant::Code(code, _) = variant {
             // Split the code into lines and only take the lines that start with "import" or start with "from" AND contain "import".
             // Start the split at the first occurence of "\":\"" to avoid splitting the code itself and to include the first line.
@@ -279,7 +305,18 @@ async fn retrieve_previous_code_interpreter_imports(thread_id: &str) -> Vec<Stri
             }
         }
     }
-    imports
+
+    // Also extract all images that were returned by the code interpreter.
+    let mut images = Vec::<String>::new();
+    for variant in this_conversation {
+        if let StreamVariant::Image(image) = variant {
+            // The images are already Base64 encoded, so we can just push them to the vector.
+            trace!("Found image: {}", image);
+            images.push(image);
+        }
+    }
+
+    (imports, images)
 }
 
 /// Takes in a list of possible imports and the code that should be run.
@@ -295,7 +332,7 @@ fn sanitize_imports(prev_imports: Vec<String>, code: &str) -> Vec<String> {
     }
 
     // Now we'll check the code itself.
-    let code_lines = code.split("\n");
+    let code_lines = code.split('\n');
     for line in code_lines {
         if line.starts_with("import") || (line.starts_with("from") && line.contains("import")) {
             imports.push(line.to_string());
@@ -311,7 +348,8 @@ fn sanitize_imports(prev_imports: Vec<String>, code: &str) -> Vec<String> {
 
 /// Post-processes the code before running it.
 /// Adds freva, numpy, matplotlib and xarray imports if they are not already present.
-fn post_process(code: String) -> String {
+/// Also replaces the user_id and thread_id placeholders with the actual values.
+fn post_process(code: String, user_id: String, thread_id: String) -> String {
     let mut code = code;
 
     // (What should be detected to add it) and (what should be added)
@@ -326,21 +364,29 @@ fn post_process(code: String) -> String {
         ("cfeature", "import cartopy.feature as cfeature\n"),
     ];
 
-    for (detect, add) in libraries.iter() {
+    for (detect, add) in &libraries {
         // If the code contains the detect string, but not the add string, we'll add the add string.
         if code.contains(detect) && !code.contains(add) {
             debug!("Adding the following import to the code: {}", add);
-            code = add.to_string() + &code;
+            code = (*add).to_string() + &code;
         }
     }
+
+    // Now we have to replace the user_id and thread_id placeholders with the actual values.
+    // They are {user_id} and {thread_id} respectively.
+    let replacements = [("{user_id}", user_id), ("{thread_id}", thread_id)];
+    for (placeholder, value) in &replacements {
+        code = code.replace(placeholder, value);
+    }
+    trace!("Post-processed code: {}", code);
 
     code
 }
 
 /// Post-processes the output before returning it.
 /// Gives hints for SyntaxErrors and Tracebacks.
-fn post_process_output(output: String, code: String) -> String {
-    let mut output = output;
+fn post_process_output(output: &str, code: &str) -> String {
+    let mut output = output.to_string();
 
     // The line we are looking for is formatted like this: "SyntaxError: invalid syntax # or other error #  (<string>, line 1)"
     // If we find it, we want to insert the line that caused the error.
@@ -363,7 +409,7 @@ fn post_process_output(output: String, code: String) -> String {
                 .split("line ")
                 .nth(1)
                 .unwrap_or_default()
-                .split(")")
+                .split(')')
                 .next()
                 .unwrap_or_default();
 
@@ -390,7 +436,7 @@ fn post_process_output(output: String, code: String) -> String {
             // 3: > (line that caused the error) <
             // 4: (next line)
 
-            add_hint_to_output(line_number, &code, &mut output);
+            add_hint_to_output(line_number, code, &mut output);
         }
     }
 
@@ -424,7 +470,7 @@ fn post_process_output(output: String, code: String) -> String {
                 .split("line ") // ["File \"<string>\", ", " (this_line), in <module>"]
                 .nth(1) // " (this_line), in <module>"
                 .unwrap_or_default()
-                .split(",") // [" (this_line)", " in <module>"]
+                .split(',') // [" (this_line)", " in <module>"]
                 .next() // " (this_line)"
                 .unwrap_or_default()
                 .trim(); // "(this_line)"
@@ -449,7 +495,7 @@ fn post_process_output(output: String, code: String) -> String {
             // 3: > (line that caused the error) <
             // 4: (next line)
 
-            add_hint_to_output(line_number, &code, &mut output);
+            add_hint_to_output(line_number, code, &mut output);
         }
     }
     output

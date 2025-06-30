@@ -112,7 +112,6 @@ pub enum OpenAIModels {
     gpt_4_1_mini,
     #[allow(non_camel_case_types)]
     gpt_4_1_nano,
-
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -154,13 +153,30 @@ pub enum GoogleModels {
 
 /// Some models, most of the qwen family, use a response with no choice in the choice field to denote that the stream should be ended, if used through the async-openai API.
 /// If a model does this, it should return true, otherwise false.
-pub fn model_ends_on_no_choice(model: AvailableChatbots) -> bool {
+pub const fn model_ends_on_no_choice(model: AvailableChatbots) -> bool {
     match model {
-        AvailableChatbots::Ollama(OllamaModels::qwen2_5_3B)
-        | AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B)
-        | AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B_tool)
-        | AvailableChatbots::Ollama(OllamaModels::qwen2_5_32B) => true,
-        // | AvailableChatbots::Ollama(OllamaModels::qwq) => true, // Test this! 
+        AvailableChatbots::Ollama(
+            OllamaModels::qwen2_5_3B
+            | OllamaModels::qwen2_5_7B
+            | OllamaModels::qwen2_5_7B_tool
+            | OllamaModels::qwen2_5_32B,
+        ) => true,
+        // | AvailableChatbots::Ollama(OllamaModels::qwq) => true, // Test this!
         _ => false,
+    }
+}
+
+/// Some models are capable of recieving Images and encoding them for them to understand.
+/// They can be given the gernerated image as a base64 string in the prompt.
+pub const fn model_supports_images(model: AvailableChatbots) -> bool {
+    match model {
+        AvailableChatbots::OpenAI(
+            OpenAIModels::gpt_4o
+            | OpenAIModels::gpt_4o_mini
+            | OpenAIModels::gpt_4_1
+            | OpenAIModels::gpt_4_1_mini
+            | OpenAIModels::gpt_4_1_nano,
+        ) => true,
+        _ => false, // Update this when more models support images.
     }
 }

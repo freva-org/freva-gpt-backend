@@ -3,7 +3,7 @@ use documented::docs_const;
 use qstring::QString;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::chatbot::types::StreamVariant;
+use crate::chatbot::{mongodb_storage::get_database, types::StreamVariant};
 
 use super::storage_router::read_thread;
 
@@ -31,7 +31,12 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
     let headers = req.headers();
 
     // First try to authorize the user.
-    let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
+    let _maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
+
+    // First try to get the Vault URL from the headers.
+    let maybe_vault_url = headers
+        .get("x-freva-vault-url")
+        .and_then(|h| h.to_str().ok());
 
     // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {
@@ -44,8 +49,30 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
         Some(thread_id) => thread_id,
     };
 
+    // If we have a specific vault URL, we use it to initialize the database.
+    let database = if let Some(vault_url) = maybe_vault_url {
+        // Initialize the database with the vault URL.
+        debug!("Using vault URL: {}", vault_url);
+        get_database(vault_url).await
+    } else {
+        // We now need the vault URL, so this fails.
+        warn!("No vault URL provided, cannot connect to the database for threads.");
+        return HttpResponse::BadRequest()
+            .body("Vault URL not found. Please provide a non-empty vault URL in the headers, of type String.");
+    };
+
+    let database = match database {
+        Ok(db) => db,
+        Err(e) => {
+            // If we cannot initialize the database connection, we'll return a 500
+            error!("Error initializing database connection: {:?}", e);
+            return HttpResponse::InternalServerError()
+                .body("Error initializing database connection.");
+        }
+    };
+
     // Instead of retrieving from OpenAI, we need to retrieve from disk since that is where all streamed data is stored.
-    let result = match read_thread(thread_id).await {
+    let result = match read_thread(thread_id, database).await {
         Ok(content) => content,
         Err(e) => {
             // Further handle the error, as we know what possible IO errors can occur.

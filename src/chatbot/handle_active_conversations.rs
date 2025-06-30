@@ -1,3 +1,4 @@
+use mongodb::Database;
 use rand::Rng;
 use tracing::{debug, error, trace, warn};
 
@@ -60,7 +61,7 @@ pub fn add_to_conversation(
             // If we can lock the mutex, we can check if the value is already in use.
             if let Some(conversation) = guard.iter_mut().find(|x| x.id == thread_id) {
                 // If we find the conversation, we'll add the variant to it.
-                conversation.conversation.append(&mut variant.clone());
+                conversation.conversation.extend(variant);
                 conversation.last_activity = std::time::Instant::now(); // ALso update the last activity.
             } else {
                 // If we don't find the conversation, we'll create a new one.
@@ -80,7 +81,7 @@ pub fn add_to_conversation(
 }
 
 /// Returns the state of the conversation, if possible
-pub async fn conversation_state(thread_id: &str) -> Option<ConversationState> {
+pub async fn conversation_state(thread_id: &str, database: Database) -> Option<ConversationState> {
     trace!("Checking the state of conversation with id: {}", thread_id);
 
     let mut to_save = None;
@@ -114,7 +115,7 @@ pub async fn conversation_state(thread_id: &str) -> Option<ConversationState> {
     // In order to not save the conversations while the mutex is locked, we'll save it here.
     if let Some(conversations) = to_save {
         for conversation in conversations {
-            save_conversation(conversation).await;
+            save_conversation(conversation, database.clone()).await;
         }
     }
 
@@ -140,7 +141,7 @@ pub fn end_conversation(thread_id: &str) {
 }
 
 /// Removes the conversation with the given ID, clearing it from the active conversations and writing it to disk.
-pub async fn save_and_remove_conversation(thread_id: &str) {
+pub async fn save_and_remove_conversation(thread_id: &str, database: Database) {
     trace!("Removing conversation with id: {}", thread_id);
 
     // We extract the conversation from the global variable to minimize the time we lock the mutex.
@@ -159,19 +160,25 @@ pub async fn save_and_remove_conversation(thread_id: &str) {
     };
 
     if let Some(conversation) = conversation {
-        save_conversation(conversation).await;
+        save_conversation(conversation, database).await;
     }
 }
 
 /// Helper function to save a conversation to disk.
-async fn save_conversation(conversation: ActiveConversation) {
+async fn save_conversation(conversation: ActiveConversation, database: Database) {
     debug!("Writing conversation to disk.");
 
     // Before we'll write it to disk, we'll fold all the consecutive Assistant messages into one.
 
     let new_conversation = concat_variants(conversation.conversation);
 
-    crate::chatbot::storage_router::append_thread(&conversation.id, &conversation.user_id ,new_conversation).await;
+    crate::chatbot::storage_router::append_thread(
+        &conversation.id,
+        &conversation.user_id,
+        new_conversation,
+        database,
+    )
+    .await;
 }
 
 /// The assistant and code messages are streamed, so the variants that come from OpenAI contain only one or a few tokens of the message.
@@ -270,7 +277,7 @@ fn cleanup_conversations(guard: &mut Vec<ActiveConversation>) -> Vec<ActiveConve
             // This will be fixed once the heartbeat is working, but this is a temporary fix.
             if x.conversation
                 .last()
-                .map_or(false, |x| matches!(x, StreamVariant::ServerHint(_)))
+                .is_some_and(|x| matches!(x, StreamVariant::ServerHint(_)))
             {
                 trace!("Conversation used the code_interpreter, not removing.");
                 return true;

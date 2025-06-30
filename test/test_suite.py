@@ -3,20 +3,33 @@ import requests
 import json
 import pytest
 from dataclasses import dataclass, field
+from dotenv import load_dotenv
+import os
 
 base_url = "http://localhost:8502/api/chatbot"
 
-auth_key = "qA94VhroHMHFN55inWgfAAkt1WEmzQ4J" # Only for testing
+load_dotenv()
+auth_key = os.getenv("AUTH_KEY")
 auth_string = "&auth_key=" + auth_key + "&user_id=testing" # Only for testing
 # In Version 1.6.1, the freva_config also needs to be set to a specific path. We won't be using this for now.
 auth_string = auth_string + "&freva_config=" + "Cargo.toml" # Dummy value
+
+# Starting with Version 1.10.0, a vault url needs to be supplied in the headers.
+vault_url = "http://127.0.0.1:5001" # TODO: This might not work because of the local/docker devide.
+rest_url = "http://localhost:5001" # This is the URL of the mock authentication server. 
+headers = {
+    "x-freva-vault-url": vault_url,
+    "x-freva-rest-url": rest_url,
+    "x-freva-user-token": "Bearer THE_MOCK_AUTH_WILL_JUST_ALLOW_ANYTHING_SO_THIS_JUST_HAS_TO_BE_HERE",
+}
+
 
 # ======================================
 # ---- Helper Functions and Classes ----
 # ======================================
 
 def get_request(url, stream=False):
-    return requests.get(base_url + url + auth_string, stream=stream)
+    return requests.get(base_url + url + auth_string, stream=stream, headers=headers)
 
 def get_avail_chatbots():
     response = get_request("/availablechatbots?")
@@ -247,6 +260,9 @@ def test_persistant_xarray_storage():
 
 def test_qwen_available():
     ''' Can the backend use non-OpenAI chatbots, such as Qwen? ''' # Since Version 1.7.1
+    # DEBUG
+    # import time
+    # time.sleep(100)
     response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="qwen2.5:3b")
     # The assistant output should now contain "200 Ok"
     assert any("(200 ok)" in i.lower() for i in response.assistant_variants)
@@ -353,3 +369,130 @@ def test_get_user_threads():
             assert all("variant" in j for j in inner_content)
             assert all("content" in j for j in inner_content)
         
+
+
+def test_use_rw_dir():
+    ''' Does the LLM understand how it can use the rw directory? ''' # Since Version 1.9.0
+    # The rw directory is a directory that the LLM can use to store and load files for the user.
+    # This is a test to see if the LLM can use it correctly.
+    # It should also infer that if the user wants to save a file, it should use the rw directory.
+    response = generate_full_respone("This is a test. Please generate a plot of a sine wave from -2π to 2π and save it as a PNG file.", chatbot="gpt-4o-mini")
+    print(response)
+    # Afer this, it should have generated a file in the rw directory.
+    # Specifically, at "rw_dir/testing/{thread_id}/????.png"
+    # So we check whether that directory exists and contains a file.
+    thread_id = response.thread_id
+    rw_dir = f"rw_dir/testing/{thread_id}"
+    print(f"Debug: rw_dir: {rw_dir}") # Debugging
+    assert os.path.exists(rw_dir), f"RW directory {rw_dir} does not exist!"
+
+    # Make sure there is at least one file in the directory
+    files = os.listdir(rw_dir)
+    print(f"Debug: Files in rw_dir: {files}") # Debugging
+    assert len(files) > 0, f"RW directory {rw_dir} is empty!"
+    
+
+
+def test_user_vision():
+    ''' Can the LLM see the output that it generated? ''' # Since Version 1.10.0
+
+    # The LLM should be able to see the image that the code it wrote generated.
+    response = generate_full_respone("You should have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates or write any code except for the plotting of the X! Look at the generated image instead.", chatbot="gpt-4o-mini")
+
+    print(response) # Debug
+
+    # The response should contain an image and the assistant should not be confused about the location of the X.
+    assert response.image_variants, "No image variants found in response!"
+    negatives = ["i don't know", "i can't see", "i can't tell", "i'm not sure", "i don't understand", "unfortunately", "i don't", "i cannot", "i can't"]
+    assert not any(neg in i.lower() for i in response.assistant_variants for neg in negatives), "Assistant was confused about the location of the X! It either refused or couldn't see it."
+
+    # Also make sure that the assistant didn't print out the coordinates. 
+    # For that, test the code output for numbers, that is 0.[0-9]+
+    assert not any("0." in i for i in response.codeoutput_variants), "Assistant printed out the coordinates of the X! It should only describe the location in words, not numbers."
+
+    # Lastly make sure it actually generated an answer
+    valid_answers = ["up", "down", "left", "right", "center"]
+    # assert any(i.lower() in valid_answers for i in response.assistant_variants), "Assistant did not return a valid answer about the location of the X! It should have returned one of: " + ", ".join(valid_answers) + ". Instead, it returned: " + ", ".join(response.assistant_variants)
+    assert valid_answers in ("".join(response.assistant_variants)).lower()
+
+# --------------------------------
+# -- Mock Authentication Server --
+# --------------------------------
+
+# In the update 1.10.0, the frevaGPT backend was updated to use a proper authentication server.
+# While in production, this is populated by nginx, in testing, we will use a mock authentication server.
+
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+@app.route("/", methods=["GET"])
+def auth():
+    # This would usually be a proper authentication check, but for testing, we just return a dummy response.
+    # The backend needs to retrieve the MongoDB URI from here, so we return the credentials to the local MongoDB instance.
+    username = os.getenv("LOCAL_MONGODB_USER", "testing")
+    password = os.getenv("LOCAL_MONGODB_PASSWORD", "testing")
+    
+    return jsonify({
+        "mongodb.url": f"mongodb://{username}:{password}@localhost:27017",
+    }), 200
+
+@app.route("/api/freva-nextgen/auth/v2/userinfo", methods=["GET"])
+def userinfo():
+    # This would usually return the user information, but for testing, we just return a dummy response.
+    # The backend needs to retrieve the user ID from here, so we return a dummy user ID.
+    return jsonify({
+        "user_id": "testing",
+        "username": "testing",
+    }), 200
+
+# Run the mock authentication server
+def run_auth_server():
+
+    # Wait for the mongoDB server to be up. 
+    import time
+    attempts = 0
+    while attempts < 5:
+        try:
+            response = requests.get("http://localhost:27017/")
+            if response.status_code == 200:
+                print("MongoDB is up and running.")
+                break
+        except requests.ConnectionError:
+            print("Waiting for MongoDB to start...")
+            time.sleep(1)
+            attempts += 1
+    else:
+        raise RuntimeError("MongoDB did not start in time.")
+
+    app.run(port=5001, debug=True, use_reloader=False)  # Use a different port than the main server
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_auth_server():
+    import multiprocessing
+    auth_thread = multiprocessing.Process(target=run_auth_server)
+    auth_thread.start()
+
+    # Wait for the server to start
+    import time
+    time.sleep(1)
+    attempts = 0
+    while attempts < 5:
+        try:
+            response = requests.get("http://localhost:5001/")
+            if response.status_code == 200:
+                print("Mock authentication server is up and running.")
+                break
+        except requests.ConnectionError:
+            print("Waiting for mock authentication server to start...")
+            time.sleep(1)
+            attempts += 1
+    else:
+        raise RuntimeError("Mock authentication server did not start in time.")
+
+    # Yield to allow tests to run
+    yield
+
+    # Teardown
+    auth_thread.terminate()
+    auth_thread.join(timeout=1)  # Wait for the thread to finish, if it doesn't, just ignore it.

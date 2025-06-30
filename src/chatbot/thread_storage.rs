@@ -5,7 +5,7 @@
 // Reading and writing is just manipulating files, so we can use the `std::fs` module.
 // Note that the file of a conversation is opened at the start of the stream, so it cannot be read from while it is being written to.
 
-// The File will store the conversation in the JSON lines format, where each line is a JSON object, 
+// The File will store the conversation in the JSON lines format, where each line is a JSON object,
 // specifying the variant, as serialized by serde_json.
 
 use std::{
@@ -138,14 +138,14 @@ pub fn read_thread(thread_id: &str) -> Result<Conversation, Error> {
     trace!("Successfully read from File, content: {}", content);
 
     // We now need to "split" at the first colon, so we can get the variant and the content.
-    let res = extract_variants_from_string(content);
+    let res = extract_variants_from_string(&content);
 
     trace!("Returning number of lines: {}", res.len());
 
     Ok(res)
 }
 
-pub fn extract_variants_from_string(content: String) -> Vec<StreamVariant> {
+pub fn extract_variants_from_string(content: &str) -> Vec<StreamVariant> {
     let lines = content.lines();
     let mut res = Vec::new();
     for line in lines {
@@ -160,7 +160,7 @@ pub fn extract_variants_from_string(content: String) -> Vec<StreamVariant> {
                 // If we can't deserialize the line, we'll assume that it uses the old encoding and try that.
                 info!("Error deserializing line, trying old encoding: {:?}", e);
             }
-        };
+        }
 
         let line = line.trim_matches('\"'); // Remove any quotes that might be there.
         let parts = line.split_once(':');
@@ -205,7 +205,6 @@ pub fn extract_variants_from_string(content: String) -> Vec<StreamVariant> {
             res.push(to_append);
         } else {
             warn!("Error splitting line during parsing, is there no colon? Skipping.");
-            continue;
         }
     }
     res
@@ -217,12 +216,11 @@ fn split_colon_at_end(s: &str) -> Option<(&str, &str)> {
     Some((first, last))
 }
 
-/// When a conversation is saved, it might be corrupted in some way. 
+/// When a conversation is saved, it might be corrupted in some way.
 /// For us, this means that every Code variant needs to be followed by a CodeOutput variant
 /// after some number of ServerHint variants,
 /// and that the very last variant needs to be a StreamEnd variant.
 pub fn cleanup_conversation(content: &mut Conversation) {
-    
     // Insert a CodeOutput variant after every Code variant.
     let mut i = 0; // The index of the current variant.
     let mut active_code_id = None; // The ID of the current code variant.
@@ -240,13 +238,13 @@ pub fn cleanup_conversation(content: &mut Conversation) {
                 continue;
             }
             _ => {
-
-                if let Some(id) = active_code_id.take() { // Also resets the active code ID.
+                if let Some(id) = active_code_id.take() {
+                    // Also resets the active code ID.
                     // If we're in a variant that is not a CodeOutput, but we have an active code ID, we need to insert a CodeOutput variant.
-                    content.insert(i, StreamVariant::CodeOutput("".to_string(), id));
+                    content.insert(i, StreamVariant::CodeOutput(String::new(), id));
                     i += 1;
                     continue;
-                } 
+                }
             }
         }
         i += 1;
@@ -255,7 +253,9 @@ pub fn cleanup_conversation(content: &mut Conversation) {
     // If the last variant is not a StreamEnd variant, we'll need to insert one.
     if let Some(last) = content.last() {
         if !matches!(last, StreamVariant::StreamEnd(_)) {
-            content.push(StreamVariant::StreamEnd("Stream ended in a very unexpected manner".to_string()));
+            content.push(StreamVariant::StreamEnd(
+                "Stream ended in a very unexpected manner".to_string(),
+            ));
         }
     }
 }

@@ -1,9 +1,7 @@
 use core::fmt;
 
 use async_openai::types::{
-    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage,
-    ChatCompletionRequestMessage,
-    ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall,
+    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage, ChatCompletionRequestMessageContentPartImage, ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall, ImageUrl
 };
 use documented::Documented;
 use serde::{Deserialize, Serialize};
@@ -68,7 +66,7 @@ pub struct ActiveConversation {
 /// The Content is in JSON format, with the key being the hint and the value being the content. Currently, only the keys "thread_id" and "warning" are used.
 /// An example for a ServerHint packet would be `{"variant": "ServerHint", "content": "{\"thread_id\":\"1234\"}"}`.
 /// That means that the content needs to be parsed as JSON to get the actual content.
-#[derive(Debug, Serialize, Deserialize, Clone, Documented, PartialEq, strum::VariantNames)]
+#[derive(Debug, Serialize, Deserialize, Clone, Documented, PartialEq, Eq, strum::VariantNames)]
 #[serde(tag = "variant", content = "content")] // Makes it so that the variant names are inside the object and the content is held in the content field.
 pub enum StreamVariant {
     /// The Prompt for the LLM, as JSON; not to be displayed to the user.
@@ -124,6 +122,7 @@ pub enum ConversionError {
     VariantHide(&'static str), // Some variants are only for the backend, so they should not be converted.
     ParseError(&'static str),  // An error occured during parsing the prompt.
     CodeCall(String, String),  // A Code Call was found, which needs to be handled differently.
+    Image(String), // An image was found, which needs to be handled depending on the model.
 }
 
 /// A helper function to convert the `StreamVariant` to a `ChatCompletionRequestMessage`.
@@ -162,15 +161,6 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     prompt
                 };
 
-                // Templating was added to the starting prompt, which is why this cannot work for now. TODO!
-                // // For debugging, check whether the prompt is the same as we are currently using.
-                // if s == crate::chatbot::prompting::STARTING_PROMPT_JSON.to_string() {
-                //     trace!("Prompt is the same as the starting prompt.");
-                // } else {
-                //     warn!("Recieved prompt that is different from the current starting prompt. Did the prompt change?");
-                // };
-
-
                 trace!("Prompt: {:?}", prompt);
 
                 Ok(prompt)},
@@ -194,15 +184,12 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     content: async_openai::types::ChatCompletionRequestToolMessageContent::Text(s),
                 })
             ]),
-            Self::Image(_) => 
-            // Ok(vec![ChatCompletionRequestMessage::System(
-            //     ChatCompletionRequestSystemMessage {
-            //         name: Some("Image".to_string()),
-            //         content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text("An image was successfully generated and is being shown to the user.".to_string()),
-            //     },
-            // )])
+            Self::Image(base64_encoded_image) => 
             
-                    Err(ConversionError::VariantHide("ServerHint variants are only for use on the server side, not for the LLM.")) // TODO: Implement giving the LLM information about the image.
+                // Some models support vision, so we can give them the image.
+
+
+                    Err(ConversionError::Image(base64_encoded_image))
             ,
             Self::CodeError(_) | Self::OpenAIError(_) | Self::ServerError(_) => Err(ConversionError::VariantHide("Error variants should not be passed to the LLM, it doesn't need to know about them.")),
             Self::StreamEnd(_) => Err(ConversionError::VariantHide("StreamEnd variants are only for use on the server side, not for the LLM.")),
@@ -221,14 +208,9 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                         warn!("ServerHint content is empty! Passing to the client nonetheless.");
                         return Err(ConversionError::ParseError("ServerHint content is empty."));
                     }
-                    // We now know that the hint is a non-empty JSON object, we can return it.
-                    // TODO: Is this correct? Should we really tell the LLM about the thread_id?
-                    // Ok(vec![ChatCompletionRequestMessage::System(
-                    //     ChatCompletionRequestSystemMessage {
-                    //         name: Some("ServerHint".to_string()),
-                    //         content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(s),
-                    //     },
-                    // )])
+
+                    // Server Hints are only for the server side, so we don't need to pass them to the LLM.
+                    // While the LLM does get to see the thread_id, it isn't the only thing the Server Hint can contain.
                     Err(ConversionError::VariantHide("ServerHint variants are only for use on the server side, not for the LLM."))
                 } else {
                     warn!("ServerHint content is not an object, ignoring and passing value to client blindly.");
@@ -311,7 +293,7 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
                         "Assistant Message contained an unknown name instead of frevaGPT: {:?}",
                         content.name
                     );
-                };
+                }
 
                 // There should never be tool or function calls here
                 #[allow(deprecated)]
@@ -319,38 +301,33 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
                 if let (Some(_), _) | (_, Some(_)) = (content.tool_calls, content.function_call) {
                     error!("Tried to convert an Assistant Message that contained a tool or function call. This should not happen and is not supported.");
                     Err("Assistant Message contained a tool or function call. This should not happen and is not supported.")
-                } else {
-                    match content.content {
-                        Some(s) => {
-                            match s {
-                                async_openai::types::ChatCompletionRequestAssistantMessageContent::Text(s) => {
-                                    Ok(Self::Assistant(s))
-                                },
-                                async_openai::types::ChatCompletionRequestAssistantMessageContent::Array(vector) => {
-                                    let mut text_vec = vec![];
-                                    for elem in vector {
-                                        // There are two variants, the text and refusal. We handle text as expected, and inform the user about refusal.
-                                        match elem {
-                                            async_openai::types::ChatCompletionRequestAssistantMessageContentPart::Text(s) => {
-                                                text_vec.push(s.text);
-                                            },
-                                            async_openai::types::ChatCompletionRequestAssistantMessageContentPart::Refusal(s) => {
-                                                warn!("Assistant Message contained a refusal: {:?}", s);
-                                                text_vec.push(format!("\n(Assistant refused to generate text: {:?})\n", s));
-                                            }
-                                        }
+                } else if let Some(s) = content.content {
+                    match s {
+                        async_openai::types::ChatCompletionRequestAssistantMessageContent::Text(s) => {
+                            Ok(Self::Assistant(s))
+                        },
+                        async_openai::types::ChatCompletionRequestAssistantMessageContent::Array(vector) => {
+                            let mut text_vec = vec![];
+                            for elem in vector {
+                                // There are two variants, the text and refusal. We handle text as expected, and inform the user about refusal.
+                                match elem {
+                                    async_openai::types::ChatCompletionRequestAssistantMessageContentPart::Text(s) => {
+                                        text_vec.push(s.text);
+                                    },
+                                    async_openai::types::ChatCompletionRequestAssistantMessageContentPart::Refusal(s) => {
+                                        warn!("Assistant Message contained a refusal: {:?}", s);
+                                        text_vec.push(format!("\n(Assistant refused to generate text: {s:?})\n"));
                                     }
-                                    let concat = text_vec.join("\n");
-
-                                    Ok(Self::Assistant(concat))
                                 }
                             }
-                        }
-                        None => {
-                            warn!("Assistant Message contained no content.");
-                            Ok(Self::Assistant(String::new()))
+                            let concat = text_vec.join("\n");
+
+                            Ok(Self::Assistant(concat))
                         }
                     }
+                } else {
+                    warn!("Assistant Message contained no content.");
+                    Ok(Self::Assistant(String::new()))
                 }
             }
             ChatCompletionRequestMessage::Tool(content) => {
@@ -405,7 +382,9 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
                 // I doubt the distinction is useful for us, I'll just treat it as a system message.
                 let text = match chat_completion_request_developer_message.content {
                     async_openai::types::ChatCompletionRequestDeveloperMessageContent::Text(s) => s,
-                    async_openai::types::ChatCompletionRequestDeveloperMessageContent::Array(vector) => {
+                    async_openai::types::ChatCompletionRequestDeveloperMessageContent::Array(
+                        vector,
+                    ) => {
                         let mut text_vec = vec![];
                         for elem in vector {
                             text_vec.push(elem.text);
@@ -414,15 +393,16 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
                     }
                 };
                 warn!("Developer Message received, this shouldn't happen. Communication was build with System messages exclusively. Content: {:?}", text);
-                Ok(Self::Prompt(text)) 
-            },
+                Ok(Self::Prompt(text))
+            }
         }
     }
 }
 
 /// Helper function to convert a Vec<StreamVariant> to a Vec<ChatCompletionRequestMessage>.
 /// This is needed because a Code Variant needs to be incorporated into the Assistant CCRM.
-pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequestMessage> {
+/// The result is also dependant on which model is used, because only some models support images.
+pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>, send_images: bool) -> Vec<ChatCompletionRequestMessage> {
     let mut all_oai_messages = vec![];
     let mut assistant_message_buffer = None;
 
@@ -481,6 +461,41 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
                     );
                 }
             }
+            Err(ConversionError::Image(base64_encoded_image)) => {
+                if send_images {
+                    // If the model supports images, we can send them.
+                    if let Some(buffer) = assistant_message_buffer.clone() {
+                        all_oai_messages.push(ChatCompletionRequestMessage::Assistant(
+                            ChatCompletionRequestAssistantMessage {
+                                ..buffer //TODO: This looks weird?
+                            },
+                        ));
+                        assistant_message_buffer = None; // Clear the buffer before sending the image.
+                    }
+                    // The image needs to be sent as a user message, because that's the protocol for some reason. 
+
+                    let image_message = ChatCompletionRequestMessage::User(
+                        ChatCompletionRequestUserMessage {
+                            name: Some("frevaGPT".to_string()),
+                            content: async_openai::types::ChatCompletionRequestUserMessageContent::Array(
+                                vec![
+
+                                    async_openai::types::ChatCompletionRequestUserMessageContentPart::ImageUrl(ChatCompletionRequestMessageContentPartImage{
+                                        image_url: ImageUrl {
+                                            url: "data:image/png;base64,".to_string() + &base64_encoded_image, // Should always be a PNG. 
+                                            ..Default::default()
+                                        }
+                                    }),
+                                    ]
+                            ),
+                        },
+                    );
+
+                    all_oai_messages.push(image_message);
+                } else {
+                    debug!("Image received, but not sending it to the LLM because the model does not support images.");
+                }
+            }
             Err(ConversionError::ParseError(e)) => {
                 warn!(
                     "Error parsing StreamVariant to ChatCompletionRequestMessage: {:?}",
@@ -490,7 +505,7 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
             Err(ConversionError::VariantHide(e)) => {
                 debug!("Hiding StreamVariant from LLM: {:?}", e);
             }
-        };
+        }
     }
 
     // If the buffer is not empty, we need to push it to the output.
@@ -512,7 +527,7 @@ pub fn unescape_string(s: &str) -> String {
 #[cfg(test)]
 mod tests {
 
-    use crate::chatbot::{prompting::{get_entire_prompt, get_entire_prompt_json}, thread_storage::read_thread};
+    use crate::chatbot::prompting::{get_entire_prompt, get_entire_prompt_json};
 
     // The helper function to convert a StreamVariant to a ChatCompletionRequestMessage
     // has some problems, we'll test it here.
@@ -530,8 +545,11 @@ mod tests {
             StreamVariant::Assistant("The plot above displays a circle centered at the origin (0, 0) with a radius of 1. The axes are set to be equal, ensuring that the circle appears proportional. \n\nIf you want to plot a circle with different parameters or need further visualizations, just let me know!".to_string()),
             StreamVariant::StreamEnd("Generation complete".to_string())
         ];
-        let output = help_convert_sv_ccrm(input);
-        assert_eq!(output.len(), get_entire_prompt("testing", "testing").len() + 4); // The length is dependant on the prompt, so we'll have to make it depend on the prompt's length.
+        let output = help_convert_sv_ccrm(input, false); // We don't want to send images in this test, so we'll set it to false.
+        assert_eq!(
+            output.len(),
+            get_entire_prompt("testing", "testing").len() + 4
+        ); // The length is dependant on the prompt, so we'll have to make it depend on the prompt's length.
         assert_eq!(output[get_entire_prompt("testing", "testing").len() + 1], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
             content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("To plot a circle, we can use the `matplotlib` library to create a simple visualization. Let's create a plot with a circle centered at the origin (0, 0) with a specified radius. I'll use a radius of 1 for this example.\n\nLet's proceed with the code to generate this plot.".to_string())),
             name: Some("frevaGPT".to_string()),
@@ -558,30 +576,37 @@ mod tests {
             input.err()
         );
         let input = input.expect("Error reading test thread file. Did you copy over the `testthread.txt` file to the threads folder?");
-        let output = help_convert_sv_ccrm(input);
+        let output = help_convert_sv_ccrm(input, false);
         assert_eq!(output.len(), 36);
 
         // "Assistant:To create an annual mean temperature global map plot for the year 2023 using the provided dataset, we will follow these steps:\n\n1. Load the temperature data for 2023.\n2. Calculate the annual mean temperature for that year.\n3. Create a global map plot of the mean temperature.\n\nLet's start by loading the temperature data and calculating the annual mean temperature for 2023."
         // "Code: {\r\n        \"code\": \"import xarray as xr\\nimport numpy as np\\nimport matplotlib.pyplot as plt\\n\\n# Load the specified dataset for the year 2023\\ntemperature_data = xr.open_dataset('/work/bm1159/XCES/data4xces/reanalysis/reanalysis/ECMWF/IFS/ERA5/mon/atmos/tas/r1i1p1/tas_Amon_reanalysis_era5_r1i1p1_20240101-20241231.nc')\\n\\n# Calculate the annual mean temperature for the year 2023\\ntemperature_mean_2023 = temperature_data['tas'].mean(dim='time')\\n\\n# Extract latitude and longitude for plotting\\nlon = temperature_data['lon']\\nlat = temperature_data['lat']\\n\\n# Create a global map plot of the mean temperature\\nplt.figure(figsize=(12, 6))\\nplt.contourf(lon, lat, temperature_mean_2023, levels=np.linspace(250, 310, 61), cmap='coolwarm', extend='both')\\nplt.colorbar(label='Mean Temperature (K)')\\nplt.title('Annual Mean Temperature (K) for 2023')\\nplt.xlabel('Longitude')\\nplt.ylabel('Latitude')\\nplt.show()\"\r\n    }:call_OgWOIoYgje39a1akMKmRyXeL"
-        assert_eq!(output[33], ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
-            content: None,
-            name: Some("frevaGPT".to_string()),
-            tool_calls: Some(vec![ChatCompletionMessageToolCall{
-                id: "call_7utCmjpQd9Jhys17aVRCyDFo".to_string(),
-                r#type: ChatCompletionToolType::Function,
-                function: FunctionCall{
-                    name: "code_interpreter".to_string(),
-                    arguments: "{\"code\":\"4 * 3\"}".to_string()
-                }
-            }]),
-            ..Default::default()
-        }));
+        assert_eq!(
+            output[33],
+            ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
+                content: None,
+                name: Some("frevaGPT".to_string()),
+                tool_calls: Some(vec![ChatCompletionMessageToolCall {
+                    id: "call_7utCmjpQd9Jhys17aVRCyDFo".to_string(),
+                    r#type: ChatCompletionToolType::Function,
+                    function: FunctionCall {
+                        name: "code_interpreter".to_string(),
+                        arguments: "{\"code\":\"4 * 3\"}".to_string()
+                    }
+                }]),
+                ..Default::default()
+            })
+        );
 
         // The conversation doesn't do ServerHints anymore, so we'll check assistant without tool calls.
         assert_eq!(
             output[26],
             ChatCompletionRequestMessage::Assistant(ChatCompletionRequestAssistantMessage {
-                content: Some(async_openai::types::ChatCompletionRequestAssistantMessageContent::Text("The exact size of the dataset is approximately 4500.61 MB.".to_string())),
+                content: Some(
+                    async_openai::types::ChatCompletionRequestAssistantMessageContent::Text(
+                        "The exact size of the dataset is approximately 4500.61 MB.".to_string()
+                    )
+                ),
                 name: Some("frevaGPT".to_string()),
                 tool_calls: None,
                 ..Default::default()

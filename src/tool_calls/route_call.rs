@@ -4,6 +4,7 @@ use std::{fs::OpenOptions, io::Read, time::UNIX_EPOCH};
 
 use fs2::FileExt;
 use itertools::Itertools;
+use mongodb::Database;
 use std::io::Write;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -12,13 +13,17 @@ use crate::chatbot::types::StreamVariant;
 
 use super::code_interpreter::prepare_execution::start_code_interpeter;
 
+pub static SUPPORTED_TOOLS: &[&str] = &["code_interpreter"];
+
 /// Routes a tool call to the appropriate function.
 pub async fn route_call(
     func_name: String,
     arguments: Option<String>,
     id: String,
     thread_id: String,
+    user_id: String,
     sender: mpsc::Sender<Vec<StreamVariant>>,
+    database: Database,
 ) {
     // // Placeholder to disable the code interpreter
     // let variant = StreamVariant::CodeOutput("The code interpreter was successfully called, but is currently disabled. Please wait for the next major version for it to be stabilized. ".to_string(), id);
@@ -33,7 +38,7 @@ pub async fn route_call(
         let routing_pit = std::time::SystemTime::now(); // The point in time when the routing function is reached.
 
         let result = sender
-            .send(start_code_interpeter(arguments, id, Some(thread_id)).await)
+            .send(start_code_interpeter(arguments, id, Some((thread_id, database)), user_id).await)
             .await;
 
         let return_pit = std::time::SystemTime::now(); // The point in time when the code interpreter returns.
@@ -43,7 +48,12 @@ pub async fn route_call(
         result
     } else {
         // If the function name is not recognized, we'll return an error message.
-        let answer = vec![StreamVariant::CodeOutput(format!("The function '{func_name}' is not recognized. Currently, only \"code_interpreter\" is supported."), id)];
+        let supported_tools = SUPPORTED_TOOLS.join(", ");
+        warn!(
+            "The chatbot tried to call a function with the name '{}' . Supported tools are: {}",
+            func_name, supported_tools
+        );
+        let answer = vec![StreamVariant::CodeOutput(format!("The function '{func_name}' is not recognized. Supported tools are: {supported_tools}"), id)];
         sender.send(answer).await
     };
 
@@ -52,9 +62,15 @@ pub async fn route_call(
     }
 }
 
+// Note that I want to be able to debug this on my local machine too where docker doesn't work.
+#[cfg(target_os = "macos")]
+const DEBUG_OVERHEAD_FILE_PATH: &str = "./testdata/debug_overhead.log";
+#[cfg(not(target_os = "macos"))]
+const DEBUG_OVERHEAD_FILE_PATH: &str = "/data/inputFiles/debug_overhead.log";
+
 /// Helper function to read and delete the content of the tool logger file.
 /// Returns (for debugging) a vector of all points in time that were reached during the code interpreter.
-pub(crate) fn print_and_clear_tool_logs(
+pub fn print_and_clear_tool_logs(
     routing_pit: std::time::SystemTime,
     return_pit: std::time::SystemTime,
 ) {
@@ -81,7 +97,7 @@ pub(crate) fn print_and_clear_tool_logs(
                     let content_as_string = String::from_utf8_lossy(&content);
 
                     // Add a tab to the beginning of each line to make it more readable and distinguishable.
-                    let to_write = content_as_string.replace("\n", "\n\t");
+                    let to_write = content_as_string.replace('\n', "\n\t");
                     debug!("Content of the tool logger file:\n {}", to_write);
 
                     // Debugging: get all relevant points in time.
@@ -100,11 +116,6 @@ pub(crate) fn print_and_clear_tool_logs(
                     pits.push(return_pit);
 
                     // Debugging: write the overhead times to a file.
-                    // Note that I want to be able to debug this on my local machine too where docker doesn't work.
-                    #[cfg(target_os="macos")]
-                    const FILE_PATH: &str = "./testdata/debug_overhead.log";
-                    #[cfg(not(target_os="macos"))]
-                    const FILE_PATH: &str = "/data/inputFiles/debug_overhead.log";
 
                     // We now have the starting, multiple intermediate, and ending points in time.
                     // Let's log them to the file "debug_overhead.log" (in CSV).
@@ -113,7 +124,7 @@ pub(crate) fn print_and_clear_tool_logs(
                     match OpenOptions::new()
                         .create(true)
                         .append(true)
-                        .open(FILE_PATH) // it's stored in the testdata folder for debugging. 
+                        .open(DEBUG_OVERHEAD_FILE_PATH) // it's stored in the testdata folder for debugging. 
                     {
                         Ok(overhead_file) => {
                             let mut overhead_file = std::io::BufWriter::new(overhead_file);
