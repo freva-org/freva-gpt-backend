@@ -54,9 +54,9 @@ static CODE_INTERPRETER_PARAMETER: Lazy<serde_json::Value> = Lazy::new(|| {
 
 /// One of the things that the code interpreter needs is the path to the freva config file.
 /// This function gets the path and makes sure we have access to it.
-pub fn verify_can_access(freva_config_path: String) -> bool {
+pub fn verify_can_access(freva_config_path: &str) -> bool {
     // We'll try to read the file to see if we can access it.
-    match std::fs::read_to_string(&freva_config_path) {
+    match std::fs::read_to_string(freva_config_path) {
         Ok(content) => {
             debug!("Successfully read the freva config file: {:?}", content);
             true

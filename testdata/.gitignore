@@ -1,4 +1,6 @@
-# Directory for test data: small files that the chatbot can use to give some examples of what it can do.
+# Directory for test data (DEPRECATED): small files that the chatbot can use to give some examples of what it can do.
+# Now only for the timing debugging file and maybe other debugging files in the future. 
+
 # Ignore everything in this directory
 *
 # Except this file

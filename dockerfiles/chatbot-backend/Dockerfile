@@ -48,9 +48,6 @@ ENV LD_LIBRARY_PATH /opt/conda/envs/env/lib/:$PATH
 #Freva requires a file to be located there, tecnically it needs to be a cert file, but this should work for now
 RUN touch /opt/conda/envs/env/freva/freva.crt
 
-# Move over the source code
-COPY src /app/src
-
 # set up CrocoDash and CESM
 # set up git email and user name
 RUN git config --global user.email "freva@dkrz.de"
@@ -70,6 +67,9 @@ ENV CIME_MACHINE="ubuntu-latest"
 
 # DEBUG: Crashes the build with info about the python environment that will be used.
 # ENV PYO3_PRINT_CONFIG 1
+
+# Move over the source code; for quick builds, always put this last.
+COPY src /app/src
 
 # Run the Rust code in very verbose mode, printing trace information
 ENTRYPOINT [ "cargo", "run", "-r", "--", "-vv"]

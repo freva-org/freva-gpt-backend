@@ -11,7 +11,8 @@ use tracing::{debug, trace};
 
 use crate::chatbot::{
     available_chatbots_endpoint::AVAILABLE_CHATBOTS_ENDPOINT_DOCS, get_thread::GET_THREAD_DOCS,
-    stop::STOP_DOCS, stream_response::STREAM_RESPONSE_DOCS, types::StreamVariant,
+    get_user_threads::GET_USER_THREADS_DOCS, stop::STOP_DOCS,
+    stream_response::STREAM_RESPONSE_DOCS, types::StreamVariant,
 };
 
 /// The valid methods for an endpoint.
@@ -171,6 +172,8 @@ const ALL_DOCS: &str = concatcp!(
     GET_THREAD_DOCS,
     "\n\n",
     STREAM_RESPONSE_DOCS,
+    "\n\n",
+    GET_USER_THREADS_DOCS,
     "\n\n",
     STOP_DOCS,
     "\n\n",

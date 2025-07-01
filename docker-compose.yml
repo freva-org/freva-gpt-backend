@@ -1,35 +1,31 @@
 services:
   freva-gpt2-backend:
-    image: freva-gpt2-backend
+    image: freva-gpt2-backend-${INSTANCE_NAME:?Instance name must be set in the .env file to differentiate between instances}
     build:
       context: .
       dockerfile: dockerfiles/chatbot-backend/Dockerfile
-      cgroup_manager: cgroupfs
+      cgroup_manager: cgroupfs # TODO: This is giving some trouble in development, is it really needed?
       tags:
-        - freva-gpt2-backend:latest
-    container_name: freva-gpt2-backend-instance
-    hostname: freva-gpt2-backend-instance
+        - freva-gpt2-backend:${INSTANCE_NAME}
+    hostname: freva-gpt2-backend-instance-${INSTANCE_NAME}
     ports:
-      - "8502:8502"
+      - "${TARGET_PORT:-8502}:${BACKEND_PORT:-8502}" # If either is unset, the default value will be used.
     volumes:
       - /work:/work:ro
-      - /container/da/freva-gpt-backend-links/logs:/app/logs
-      - /container/da/freva-gpt-backend-links/threads:/app/threads
-      - /container/da/freva-gpt-backend-links/target:/app/target
-      - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles
-      - /container/da/freva-gpt-backend-links/python_pickles:/app/python_pickles
+      - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/logs:/app/logs
+      - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/threads:/app/threads
+      - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/target:/app/target
+      - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles # Deprecated, once used for test data before freva support was added. Now used for debugging.
+      - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/python_pickles:/app/python_pickles
     networks:
-      freva-gpt:
-        ipv4_address: 10.89.0.2
-  ollama:
+      - freva-gpt
+  ollama: # Ollama is only for the backend and not accessible from the outside. Port 11434 is not exposed.
     image: ollama/ollama
-    container_name: ollama-instance
-    hostname: ollama-instance
+    hostname: ollama-instance-${INSTANCE_NAME}
     volumes:
       - /container/da/freva-gpt-ollama-LLMs/.ollama:/root/.ollama
     networks:
-      freva-gpt:
-        ipv4_address: 10.89.0.3
+      - freva-gpt
     deploy:
       resources:
         reservations:
@@ -38,12 +34,9 @@ services:
               count: all
               capabilities: [gpu]
 
-
 networks:
   freva-gpt:
     driver: bridge
-    # network_backend: netavark
-    ipam:
-      config:
-        - subnet: 10.89.0.0/16
-        - gateway: 10.89.0.1
+# The subnet is not set to avoid conflicts with other potentially running networks on the same machine.
+# Note: Named networks by default aren't shared between different docker-compose projects, even if they have the same name, as long as they are in separate directories.
+

@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::io::Write;
 
 use base64::Engine;
@@ -28,9 +29,9 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
         // We need a PyDict to store the local and global variables for the call.
         let locals = match try_read_locals(py, thread_id.clone()) {
             Some(locals) => locals,
-            None => PyDict::new_bound(py),
+            None => PyDict::new(py),
         };
-        let globals = PyDict::new_bound(py);
+        let globals = PyDict::new(py);
 
         // Debug: Overhead debugging
         if let Ok(overhead_time) =
@@ -60,11 +61,11 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 Some((rest, last)) => {
                     // We'll have to check the last line
                     let last_line = last.trim();
-                    if !should_eval(last_line, py) {
-                        (Some(code), None)
-                    } else {
-                        // Otherwise, we'll split it up.
+                    if should_eval(last_line, py) {
+                        // We'll split it up.
                         (Some(rest.to_string()), Some(last_line.to_string()))
+                    } else {
+                        (Some(code), None)
                     }
                 }
             };
@@ -83,17 +84,28 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 debug!("Executing all but the last line.");
                 trace!("Executing code: {}", rest_lines);
                 // We'll execute the code in the locals.
-                match py.run_bound(&rest_lines, Some(&globals), Some(&locals)) {
-                    Ok(()) => {
-                        info!("Code executed successfully.");
-                        // But we continue with the last line.
+                let rest_lines_cstr = CString::new(rest_lines);
+                match rest_lines_cstr {
+                    Ok(rest_lines_cstr) => {
+                        match py.run(&rest_lines_cstr, Some(&globals), Some(&locals)) {
+                            Ok(()) => {
+                                info!("Code executed successfully.");
+                                // But we continue with the last line.
+                            }
+                            Err(e) => {
+                                // Also store the locals to a pickle file so they aren't lost
+                                if let Some(thread_id) = thread_id {
+                                    save_to_pickle_file(py, &locals, &thread_id);
+                                }
+                                return Err(format_pyerr(&e, py));
+                            }
+                        }
                     }
                     Err(e) => {
-                        // Also store the locals to a pickle file so they aren't lost
-                        if let Some(thread_id) = thread_id {
-                            save_to_pickle_file(py, locals, thread_id);
-                        }
-                        return Err(format_pyerr(&e, py));
+                        // If we couldn't convert the code to a C string, we'll just return an error.
+                        // This should never happen, but we'll just return an error.
+                        warn!("Error converting code to C string: {:?}", e);
+                        return Err(format!("Error converting code to C string: {e}"));
                     }
                 }
             }
@@ -130,7 +142,16 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 trace!("Last line: {}", last_line);
                 // Now the rest of the lines are executed if they exist.
                 // Now we don't execute, but evaluate the last line.
-                match py.eval_bound(&last_line, Some(&globals), Some(&locals)) {
+                let last_line_cstr = match CString::new(last_line) {
+                    Ok(last_line_cstr) => last_line_cstr,
+                    Err(e) => {
+                        // If we couldn't convert the code to a C string, we'll just return an error.
+                        // This should never happen, but we'll just return an error.
+                        warn!("Error converting code to C string: {:?}", e);
+                        return Err(format!("Error converting code to C string: {e}"));
+                    }
+                };
+                match py.eval(&last_line_cstr, Some(&globals), Some(&locals)) {
                     Ok(content) => {
                         // We now have a python value in here.
                         // To return it, we can convert it to a string and return it.
@@ -181,8 +202,9 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
 
         // Before returning the result, we'll have to flush stdout and stderr IN PYTHON.
 
-        let flush = py.run_bound(
-            "import sys;sys.stdout.flush();sys.stderr.flush()",
+        let flush = py.run(
+            &CString::new("import sys;sys.stdout.flush();sys.stderr.flush()")
+                .expect("Constant CString failed conversion"),
             Some(&globals),
             Some(&locals),
         );
@@ -193,7 +215,7 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
         // Additionally, we'll save the locals to a pickle file.
         // But that's only possible if we have a thread_id.
         if let Some(thread_id) = thread_id {
-            save_to_pickle_file(py, locals, thread_id);
+            save_to_pickle_file(py, &locals, &thread_id);
         }
 
         result
@@ -234,7 +256,7 @@ fn should_eval(line: &str, py: Python) -> bool {
 
     // New approach: Python has the ast library, which we can use to parse the line and decide whether it should be evaluated.
 
-    let to_check = format!(
+    let to_check = CString::new(format!(
         r#"import ast
 should_eval = None
 try:
@@ -245,27 +267,25 @@ try:
 except Exception:
     should_eval = False
     "#
-    );
-    let locals = PyDict::new_bound(py);
-    let globals = PyDict::new_bound(py);
+    ))
+    .expect("Constant CString failed conversion");
+    let locals = PyDict::new(py);
+    let globals = PyDict::new(py);
 
-    match py.run_bound(&to_check, Some(&globals), Some(&locals)) {
+    match py.run(&to_check, Some(&globals), Some(&locals)) {
         Ok(()) => {
             let should_eval = locals.get_item("should_eval");
-            match should_eval {
-                Ok(Some(should_eval)) => {
-                    let is_true = should_eval.is_truthy(); // If there was an error in is_truthy, we'll assume false.
-                    debug!("Should the line be evaluated? {:?}", is_true);
-                    matches!(is_true, Ok(true))
-                }
-                _ => {
-                    // If we couldn't get the value, we'll just return false.
-                    warn!(
-                        "Error checking whether the line should be evaluated: {:?}",
-                        should_eval
-                    );
-                    false
-                }
+            if let Ok(Some(should_eval)) = should_eval {
+                let is_true = should_eval.is_truthy(); // If there was an error in is_truthy, we'll assume false.
+                debug!("Should the line be evaluated? {:?}", is_true);
+                matches!(is_true, Ok(true))
+            } else {
+                // If we couldn't get the value, we'll just return false.
+                warn!(
+                    "Error checking whether the line should be evaluated: {:?}",
+                    should_eval
+                );
+                false
             }
         }
         Err(e) => {
@@ -283,27 +303,24 @@ except Exception:
 fn format_pyerr(e: &PyErr, py: Python) -> String {
     // The type is "PyErr", which we will just just use to get the traceback.
     trace!("Error executing code: {:?}", e);
-    match e.traceback_bound(py) {
-        Some(traceback) => {
-            // We'll just return the traceback for now.
-            match traceback.format() {
-                Ok(tb_string) => {
-                    info!("Traceback: {tb_string}");
-                    format!("{e}\n{tb_string}") // Writing the error first means that the error message is at the top, so cutting the message off will still show the error.
-                }
-                Err(inner_e) => {
-                    // If we can't get the traceback, we shouldn't just return the error message, because that's about not being able to get the traceback.
-                    // Instead, we'll fall back to just the Python error message.
-                    warn!("Error getting traceback: {inner_e:?}");
-                    format!("(An error occured; no traceback available)\n{e}")
-                }
+    if let Some(traceback) = e.traceback(py) {
+        // We'll just return the traceback for now.
+        match traceback.format() {
+            Ok(tb_string) => {
+                info!("Traceback: {tb_string}");
+                format!("{e}\n{tb_string}") // Writing the error first means that the error message is at the top, so cutting the message off will still show the error.
+            }
+            Err(inner_e) => {
+                // If we can't get the traceback, we shouldn't just return the error message, because that's about not being able to get the traceback.
+                // Instead, we'll fall back to just the Python error message.
+                warn!("Error getting traceback: {inner_e:?}");
+                format!("(An error occured; no traceback available)\n{e}")
             }
         }
-        None => {
-            // That's weird and should never happen, but we can fall back to just printing e.
-            warn!("No traceback found for error: {e:?}");
-            format!("(An error occured; no traceback available)\n{e}")
-        }
+    } else {
+        // That's weird and should never happen, but we can fall back to just printing e.
+        warn!("No traceback found for error: {e:?}");
+        format!("(An error occured; no traceback available)\n{e}")
     }
 }
 
@@ -361,20 +378,21 @@ fn try_read_locals(py: Python, thread_id: Option<String>) -> Option<Bound<PyDict
     }
 
     // The Python code to read the pickle file to a variable named loaded_vars.
-    let code = format!(
-        r#"import dill
+    let code = CString::new(format!(
+        r"import dill
 
 # Load picklable variables
 with open('{pickleable_path}', 'rb') as f:
     loaded_vars = dill.load(f)
 
 # Now, 'loaded_vars' contains all the variables to be used as locals
-"#
-    );
-    let temp_locals = PyDict::new_bound(py);
+"
+    ))
+    .expect("Constant CString failed conversion");
+    let temp_locals = PyDict::new(py);
 
     // Run the code; if it doesn't work, we'll just return None.
-    py.run_bound(&code, Some(&PyDict::new_bound(py)), Some(&temp_locals))
+    py.run(&code, Some(&PyDict::new(py)), Some(&temp_locals))
         .ok()?;
 
     // Now we have the loaded_vars in the locals.
@@ -394,13 +412,13 @@ with open('{pickleable_path}', 'rb') as f:
 }
 
 /// Helper function to save the locals to a pickle file.
-fn save_to_pickle_file(py: Python, locals: Bound<PyDict>, thread_id: String) {
+fn save_to_pickle_file(py: Python, locals: &Bound<PyDict>, thread_id: &str) {
     trace!("Saving the locals to a pickle file.");
 
     // First we filter the locals to only include the ones that are actually serializable.
     // We'll execute some python code to do that.
-    let code = format!(
-        r#"import dill # like pickle, but can handle >2GB variables
+    let code = CString::new(format!(
+        r"import dill # like pickle, but can handle >2GB variables
 from types import ModuleType
 
 local_items = locals().copy()
@@ -423,12 +441,12 @@ for key, value in local_items.items():
 
 # Save picklable variables
 with open('python_pickles/{thread_id}.pickle', 'wb') as f:
-    dill.dump(pickleable_vars, f)"#
-    );
+    dill.dump(pickleable_vars, f)"
+    )).expect("Constant CString failed conversion");
     let locals = locals.clone();
 
     // We'll run the code.
-    match py.run_bound(&code, Some(&PyDict::new_bound(py)), Some(&locals)) {
+    match py.run(&code, Some(&PyDict::new(py)), Some(&locals)) {
         Ok(()) => {
             // The code executed successfully.
             trace!("Successfully saved the locals to a pickle file.");

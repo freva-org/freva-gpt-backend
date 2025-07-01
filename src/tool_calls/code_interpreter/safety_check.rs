@@ -42,7 +42,9 @@ pub fn sanitize_code(code: String) -> String {
 
     // If either matplotlib or `plt` is found in the code, we'll add the backend selection.
     if code.contains("matplotlib") || code.contains("plt") {
-        code = format!("import matplotlib\nmatplotlib.use('agg')\n{code}");
+        // Also remove the logging of matplotlib entirely.
+        let to_add = "import matplotlib\nmatplotlib.use('agg')\nimport logging\nlogging.getLogger('matplotlib.font_manager').disabled = True\n".to_string();
+        code = format!("{to_add}{code}");
     }
 
     // The default mode for xarray printing is html, which means that the output will contains tons of CSS and HTML.
