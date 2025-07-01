@@ -4,43 +4,7 @@ use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionRequestSys
 use once_cell::sync::Lazy;
 use std::fs;
 use std::io::Read;
-use tracing::trace;
-
-// ...existing code...
-
-/// Lazy variable to hold example conversations read from `examples.jsonl`.
-pub static EXAMPLE_CONVERSATIONS_FROM_FILE: Lazy<Vec<ChatCompletionRequestMessage>> =
-    Lazy::new(|| {
-        let mut file = fs::File::open("src/chatbot/prompt_sources/examples.jsonl")
-            .expect("Unable to open examples.jsonl");
-        let mut content = String::new();
-        file.read_to_string(&mut content)
-            .expect("Unable to read examples.jsonl");
-
-        trace!("Successfully read from File, content: {}", content);
-        let stream_variants = crate::chatbot::thread_storage::extract_variants_from_string(content);
-        trace!("Returning number of lines: {}", stream_variants.len());
-
-        crate::chatbot::types::help_convert_sv_ccrm(stream_variants)
-    });
-
-/// The starting prompt including all messages, converted to JSON.
-pub static STARTING_PROMPT_JSON: Lazy<String> = Lazy::new(|| {
-    let temp: Vec<ChatCompletionRequestMessage> = (*STARTING_PROMPT).clone();
-    // This should never fail, but if it does, it will do so during initialization.
-    serde_json::to_string(&temp).expect("Error converting starting prompt to JSON.")
-});
-
-/// All messages that should be added at the start of a new conversation.
-/// Consists of a starting prompt and a few example conversations.
-pub static STARTING_PROMPT: Lazy<Vec<ChatCompletionRequestMessage>> = Lazy::new(|| {
-    let mut messages = vec![ChatCompletionRequestMessage::System(INITIAL_PROMPT.clone())];
-    messages.extend(EXAMPLE_CONVERSATIONS_FROM_FILE.clone());
-    messages.push(ChatCompletionRequestMessage::System(
-        SUMMARY_SYSTEM_PROMPT.clone(),
-    ));
-    messages
-});
+use tracing::{error, trace, warn};
 
 /// The basic starting prompt as a const of the correct type.
 static STARTING_PROMPT_STR: Lazy<String> = Lazy::new(|| {
@@ -52,9 +16,31 @@ static STARTING_PROMPT_STR: Lazy<String> = Lazy::new(|| {
     content
 });
 
-/// The Starting prompt, as a static variable.
+/// The entire Example conversation file as a String.
+static EXAMPLE_CONVERSATIONS_STR: Lazy<String> = Lazy::new(|| {
+    let mut file = fs::File::open("src/chatbot/prompt_sources/examples.jsonl")
+        .expect("Unable to open examples.jsonl");
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .expect("Unable to read examples.jsonl");
+    trace!("Successfully read from File, content: {}", content);
+    content
+});
+
+/// The summary system prompt, as a static string.
+static SUMMARY_SYSTEM_PROMPT_STR: Lazy<String> = Lazy::new(|| {
+    let mut file = fs::File::open("src/chatbot/prompt_sources/summary_prompt.txt")
+        .expect("Unable to open summary_system_prompt.txt");
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .expect("Unable to read summary_system_prompt.txt");
+    trace!("Successfully read from File, content: {}", content);
+    content
+});
+
+/// The Starting prompt, as a static variable for the async_openai library.
 /// Note that we need to use Lazy because the Type wants a proper String, which isn't const as it requires allocation.
-pub static INITIAL_PROMPT: Lazy<ChatCompletionRequestSystemMessage> =
+pub static STARTING_PROMPT_CCRM: Lazy<ChatCompletionRequestSystemMessage> =
     Lazy::new(|| ChatCompletionRequestSystemMessage {
         name: Some("prompt".to_string()),
         content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(
@@ -62,15 +48,103 @@ pub static INITIAL_PROMPT: Lazy<ChatCompletionRequestSystemMessage> =
         ),
     });
 
+/// Function that holds the example conversations as a type that the async_openai library can use.
+/// Doesn't template anymore, so the user_id and thread_id are not used.
+fn example_conversations_ccrm() -> Vec<ChatCompletionRequestMessage> {
+    let content = EXAMPLE_CONVERSATIONS_STR.clone();
+
+    let stream_variants = crate::chatbot::thread_storage::extract_variants_from_string(&content);
+    trace!("Returning number of lines: {}", stream_variants.len());
+
+    crate::chatbot::types::help_convert_sv_ccrm(stream_variants, false) // The example conversations shouldn't contain images, but if they do, we don't want to send them.
+}
+
 /// Some LLMs, especially Llama seem to require another prompt after the example conversations.
-static SUMMARY_SYSTEM_PROMPT: Lazy<ChatCompletionRequestSystemMessage> = Lazy::new(|| {
-    let mut file = fs::File::open("src/chatbot/prompt_sources/summary_prompt.txt")
-        .expect("Unable to open summary_system_prompt.txt");
-    let mut content = String::new();
-    file.read_to_string(&mut content)
-        .expect("Unable to read summary_system_prompt.txt");
+static SUMMARY_SYSTEM_PROMPT_CCRM: Lazy<ChatCompletionRequestSystemMessage> = Lazy::new(|| {
+    let content = SUMMARY_SYSTEM_PROMPT_STR.clone();
     ChatCompletionRequestSystemMessage {
         name: Some("prompt".to_string()),
         content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(content),
     }
 });
+
+/// All messages that should be added at the start of a new conversation.
+/// Consists of a starting prompt and a few example conversations.
+fn entire_prompt_ccrm() -> Vec<ChatCompletionRequestMessage> {
+    let mut messages = vec![ChatCompletionRequestMessage::System(
+        STARTING_PROMPT_CCRM.clone(),
+    )];
+    messages.extend(example_conversations_ccrm());
+    messages.push(ChatCompletionRequestMessage::System(
+        SUMMARY_SYSTEM_PROMPT_CCRM.clone(),
+    ));
+    messages
+}
+
+/// Function that returns the entire prompt as a JSON string.
+/// Templates the user_id and thread_id into the prompt.
+/// If either the user_id or thread_id are non-alphanumeric, it will error.
+pub fn get_entire_prompt_json(user_id: &str, thread_id: &str) -> Result<String, ()> {
+    // If either the user_id or thread_id are non-alphanumeric, return an error.
+    // This is because else, the json parsing might be thrown off.
+    if !user_id.chars().all(|c| c.is_alphanumeric()) {
+        error!("user_id is not alphanumeric: {}", user_id);
+        return Err(());
+    }
+    if !thread_id.chars().all(|c| c.is_alphanumeric()) {
+        error!("thread_id is not alphanumeric: {}", thread_id);
+        return Err(());
+    }
+
+    recursively_create_dir_at_rw_dir(user_id, thread_id);
+    // This function is a placeholder for now, but will in a few hours be used to
+    // Properly template the content of the starting prompt.
+    // For now, it just returns the JSON string of the starting prompt.
+    let ep_crrm = entire_prompt_ccrm();
+
+    let mut result =
+        serde_json::to_string(&ep_crrm).expect("Error converting starting prompt to JSON.");
+    // Safety: The conversion currently has no paths to error. However, if it does, the first call before the server is started will fail, causing the server to not start.
+    // Note that the templating makes it not pure, but if one templating is correct, and everything is alphanumeric, the rest should be too.
+
+    let replacements = [("{user_id}", user_id), ("{thread_id}", thread_id)];
+
+    for (placeholder, value) in &replacements {
+        result = result.replace(placeholder, value);
+    }
+    trace!("Returning templated starting prompt JSON: {}", result);
+    Ok(result)
+}
+
+pub fn get_entire_prompt(user_id: &str, thread_id: &str) -> Vec<ChatCompletionRequestMessage> {
+    recursively_create_dir_at_rw_dir(user_id, thread_id);
+    // Note that this function allows for the user_id and thread_id to be non-alphanumeric, as it is not used in the JSON parsing.
+    let result = entire_prompt_ccrm();
+
+    trace!("Returning templated starting prompt: {:?}", result);
+    result
+}
+
+/// Every time a prompt is requested, the folder at rw_dir needs to be created because else, some python functions
+/// might not find it. (We cannot expect all the functions to alwas recursively create the folders)
+fn recursively_create_dir_at_rw_dir(user_id: &str, thread_id: &str) {
+    trace!(
+        "Creating rw_dir for user_id: {}, thread_id: {}",
+        user_id,
+        thread_id
+    );
+    let rw_dir = format!("rw_dir/{user_id}/{thread_id}");
+    let path = std::path::Path::new(&rw_dir);
+    if path.exists() {
+        trace!("rw_dir already exists: {}", rw_dir);
+    } else {
+        let result = std::fs::create_dir_all(path);
+        if let Err(e) = result {
+            warn!(
+                "Failed to create rw_dir: {}. Python might have trouble storing data.",
+                e
+            );
+        }
+        trace!("rw_dir created: {}", rw_dir);
+    }
+}

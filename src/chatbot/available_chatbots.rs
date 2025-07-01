@@ -8,6 +8,9 @@ pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
     // AvailableChatbots::OpenAI(OpenAIModels::o1_mini), // In Beta, doesn't do streaming yet.
     AvailableChatbots::OpenAI(OpenAIModels::gpt_3_5_turbo),
     AvailableChatbots::OpenAI(OpenAIModels::o3_mini),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1_mini),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1_nano),
     // AvailableChatbots::Ollama(OllamaModels::llama3_2_3B),
     // AvailableChatbots::Ollama(OllamaModels::llama3_1_70B),
     // AvailableChatbots::Ollama(OllamaModels::llama3_1_8B),
@@ -45,6 +48,9 @@ impl From<AvailableChatbots> for String {
                 OpenAIModels::gpt_4_turbo => "gpt-4-turbo".to_string(),
                 OpenAIModels::gpt_3_5_turbo => "gpt-3.5-turbo".to_string(),
                 OpenAIModels::o3_mini => "o3-mini".to_string(),
+                OpenAIModels::gpt_4_1 => "gpt-4.1".to_string(),
+                OpenAIModels::gpt_4_1_mini => "gpt-4.1-mini".to_string(),
+                OpenAIModels::gpt_4_1_nano => "gpt-4.1-nano".to_string(),
             },
             AvailableChatbots::Ollama(model) => match model {
                 OllamaModels::llama3_2_3B => "llama3.2".to_string(),
@@ -100,6 +106,12 @@ pub enum OpenAIModels {
     gpt_3_5_turbo,
     #[allow(non_camel_case_types)]
     o3_mini,
+    #[allow(non_camel_case_types)]
+    gpt_4_1,
+    #[allow(non_camel_case_types)]
+    gpt_4_1_mini,
+    #[allow(non_camel_case_types)]
+    gpt_4_1_nano,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -134,4 +146,37 @@ pub enum OllamaModels {
 pub enum GoogleModels {
     #[allow(non_camel_case_types)]
     gemini_1_5_flash,
+}
+
+// Characteristics: Some models have different ways to interact with the API (because the API is not properly defined).
+// These are just a few functions to properly record the differences between the models.
+
+/// Some models, most of the qwen family, use a response with no choice in the choice field to denote that the stream should be ended, if used through the async-openai API.
+/// If a model does this, it should return true, otherwise false.
+pub const fn model_ends_on_no_choice(model: AvailableChatbots) -> bool {
+    match model {
+        AvailableChatbots::Ollama(
+            OllamaModels::qwen2_5_3B
+            | OllamaModels::qwen2_5_7B
+            | OllamaModels::qwen2_5_7B_tool
+            | OllamaModels::qwen2_5_32B,
+        ) => true,
+        // | AvailableChatbots::Ollama(OllamaModels::qwq) => true, // Test this!
+        _ => false,
+    }
+}
+
+/// Some models are capable of recieving Images and encoding them for them to understand.
+/// They can be given the gernerated image as a base64 string in the prompt.
+pub const fn model_supports_images(model: AvailableChatbots) -> bool {
+    match model {
+        AvailableChatbots::OpenAI(
+            OpenAIModels::gpt_4o
+            | OpenAIModels::gpt_4o_mini
+            | OpenAIModels::gpt_4_1
+            | OpenAIModels::gpt_4_1_mini
+            | OpenAIModels::gpt_4_1_nano,
+        ) => true,
+        _ => false, // Update this when more models support images.
+    }
 }

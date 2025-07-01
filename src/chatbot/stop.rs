@@ -11,9 +11,10 @@ use super::{types::ConversationState, ACTIVE_CONVERSATIONS};
 /// # Stop
 /// Stops the conversation with the given thread ID as soon as possible.
 ///
-/// Takes in a `thread_id` and an `auth_key`.
+/// Takes in a `thread_id` and the `auth_key`.
 /// The thread_id identifies the conversation to stop.
 /// The auth_key needs to match the one on the backend for the request to be authorized.
+/// As with the other endpoints too, an Authorization header with an OpenID Connect token is also accepted.
 ///
 /// If the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.
 ///
@@ -30,9 +31,10 @@ pub async fn stop(req: HttpRequest) -> impl Responder {
         Error(String),
     }
     let qstring = qstring::QString::from(req.query_string());
+    let headers = req.headers();
 
     // First try to authorize the user.
-    crate::auth::authorize_or_fail!(qstring);
+    let _maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {

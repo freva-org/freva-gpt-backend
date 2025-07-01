@@ -16,8 +16,14 @@ pub mod get_thread;
 /// Internal use: handles the storing and retrieval of the streamed data
 pub mod thread_storage;
 
+/// Internal use: handles the storing and retrieval of the streamed data in a mongoDB database
+pub mod mongodb_storage;
+
 /// Streams the response from the chatbot
 pub mod stream_response;
+
+/// Routes requests to the storage backend (disk or mongoDB)
+pub mod storage_router;
 
 /// Handles the logic for storing and using the global conversation state
 pub mod handle_active_conversations;
@@ -31,6 +37,9 @@ pub mod available_chatbots_endpoint;
 /// Internally used to handle the heartbeat that is happening while the code interpreter is running.
 pub mod heartbeat;
 
+/// Returns the latest few threads for a given authenticated user
+pub mod get_user_threads;
+
 // Defines a few useful static variables that are used throughout the chatbot.
 
 use std::sync::{Arc, Mutex};
@@ -38,7 +47,7 @@ use std::sync::{Arc, Mutex};
 use async_openai::config::OpenAIConfig;
 use once_cell::sync::Lazy;
 
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 use types::ActiveConversation;
 
 /// Because multiple threads need to work together and need to know about the conversations, this static variable holds information about all active conversation.
@@ -74,24 +83,25 @@ static GOOGLE_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| {
 static OLLAMA_ADDRESS: Lazy<String> = Lazy::new(|| {
     println!("OLLAMA_ADDRESS: {:?}", std::env::var("OLLAMA_ADDRESS"));
     debug!("OLLAMA_ADDRESS: {:?}", std::env::var("OLLAMA_ADDRESS"));
-    std::env::var("OLLAMA_ADDRESS").unwrap_or_else(|_| "http://localhost:11434".to_string())
+    std::env::var("OLLAMA_ADDRESS").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string())
     // Default to localhost
 });
+
+// The Client is reusable, we shouldn't create a new one for every request.
+static REQWEST_CLIENT: Lazy<reqwest::Client> = Lazy::new(reqwest::Client::new);
 
 /// We might want to talk to ollama. This is to check whether ollama is up. If it is, it'll return "Ollama is running".
 /// Timeout is 200 milliseconds; it's on localhost:11434, the delay should be minimal.
 pub async fn is_ollama_running() -> bool {
-    if let Ok(client) = reqwest::Client::builder()
+    let response = REQWEST_CLIENT
+        .get(OLLAMA_ADDRESS.to_string())
         .timeout(std::time::Duration::from_millis(200))
-        .build()
-    {
-        let response = client.get(OLLAMA_ADDRESS.to_string()).send().await;
-        if let Ok(response) = response {
-            response.status().is_success()
-        } else {
-            false
-        }
+        .send()
+        .await;
+    if let Ok(response) = response {
+        response.status().is_success()
     } else {
+        error!("Ollama is not running; the request failed: {:?}", response);
         false
     }
 }
@@ -108,7 +118,7 @@ pub async fn select_client(
         available_chatbots::AvailableChatbots::Ollama(_) => {
             trace!("Selecting Ollama client");
             if !is_ollama_running().await {
-                warn!("Ollama is not running, but ollama couldn't be found! This might fail!");
+                warn!("Ollama is not running; ollama couldn't be found! This might fail!");
             }
             &OLLAMA_CLIENT
         }

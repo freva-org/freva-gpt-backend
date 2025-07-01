@@ -46,7 +46,7 @@ pub fn setup_logger(args: &cla_parser::Args) {
 }
 
 /// Custom log message formatter: [timestamp]:[level] (module:line) message
-pub(crate) fn format_log_message(
+pub fn format_log_message(
     write: &mut dyn std::io::Write,
     now: &mut flexi_logger::DeferredNow,
     record: &flexi_logger::Record,
@@ -75,7 +75,7 @@ pub fn silence_logger() {
             let mut logger_guard = match logger.lock() {
                 Ok(guard) => guard,
                 Err(e) => {
-                    eprintln!("Error locking the logger: {:?}", e);
+                    eprintln!("Error locking the logger: {e:?}");
                     std::process::exit(1);
                 }
             };
@@ -95,7 +95,7 @@ pub fn undo_silence_logger() {
             let mut logger_guard = match logger.lock() {
                 Ok(guard) => guard,
                 Err(e) => {
-                    eprintln!("Error locking the logger: {:?}", e);
+                    eprintln!("Error locking the logger: {e:?}");
                     std::process::exit(1);
                 }
             };

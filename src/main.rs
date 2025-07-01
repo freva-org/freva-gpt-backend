@@ -79,7 +79,11 @@ async fn main() -> std::io::Result<()> {
                     "/availablechatbots",
                     web::get()
                         .to(chatbot::available_chatbots_endpoint::available_chatbots_endpoint)
-                ), // AvailableChatbots, get the available chatbots.
+                ) // AvailableChatbots, get the available chatbots.
+                .route(
+                    "/getuserthreads",
+                    web::get().to(chatbot::get_user_threads::get_user_threads)
+                ), // GetUserThreads, get the latest 10 threads of the user.
             web::scope("/ping").route(
                 "",
                 actix_web::web::get().to(static_serve::moved_permanently)
