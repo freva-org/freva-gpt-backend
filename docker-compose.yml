@@ -5,8 +5,6 @@ services:
       context: .
       dockerfile: dockerfiles/chatbot-backend/Dockerfile
       cgroup_manager: cgroupfs # TODO: This is giving some trouble in development, is it really needed?
-      tags:
-        - freva-gpt2-backend:${INSTANCE_NAME}
     hostname: freva-gpt2-backend-instance
     ports:
       - "8503:8502"
