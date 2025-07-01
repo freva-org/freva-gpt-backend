@@ -113,7 +113,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
                         .collect::<Vec<_>>()
                         .join(", ");
 
-                    return HttpResponse::BadRequest().body(
+                    return HttpResponse::UnprocessableEntity().body(
                         "User ID not found. Please provide a non-empty user_id in the query parameters.\nHint: The following query parameters were received: ".to_string() + &query_parameter_keys,
                     );
                 }
@@ -146,13 +146,13 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
                     Ok(input) => input.to_string(),
                     Err(e) => {
                         warn!("Error converting header input to string: {:?}", e);
-                        return HttpResponse::BadRequest().body("Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.");
+                        return HttpResponse::UnprocessableEntity().body("Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.");
                     }
                 }
             } else {
-                // If the input is not found (neither in header nor parameters), we'll return a 400
+                // If the input is not found (neither in header nor parameters), we'll return a 422
                 warn!("The User requested a stream without an input.");
-                return HttpResponse::BadRequest().body(
+                return HttpResponse::UnprocessableEntity().body(
                     "Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.",
                 );
             }
@@ -169,7 +169,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     let Some(vault_url) = maybe_vault_url else {
         warn!("The User requested a stream without a vault URL.");
-        return HttpResponse::BadRequest().body(
+        return HttpResponse::UnprocessableEntity().body(
             "Vault URL not found. Please provide a non-empty vault URL in the headers, of type String.",
         );
     };
@@ -178,7 +178,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         Ok(db) => db,
         Err(e) => {
             warn!("Failed to connect to the database: {:?}", e);
-            return HttpResponse::InternalServerError().body("Failed to connect to the database.");
+            return HttpResponse::ServiceUnavailable().body("Failed to connect to the database.");
         }
     };
 
@@ -242,7 +242,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
             Ok(chatbot) => chatbot,
             Err(e) => {
                 warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", e);
-                return HttpResponse::BadRequest().body("Chatbot not found. Consult the /availablechatbots endpoint for available chatbots.");
+                return HttpResponse::UnprocessableEntity().body("Chatbot not found. Consult the /availablechatbots endpoint for available chatbots.");
             }
         },
     };
@@ -259,14 +259,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
         trace!("Adding base message to stream.");
 
-        let Ok(entire_prompt) = get_entire_prompt_json(&user_id, &thread_id) else {
-            // If we can't get the entire prompt, we'll return the information that we require the user_id and thread_id to be alphanumeric.
-            warn!("Error getting entire prompt, either user_id or thread_id are not alphanumeric.");
-            trace!("User ID: {}, Thread ID: {}", user_id, thread_id);
-            return HttpResponse::InternalServerError().body(
-                "Error creating prompt. Both user_id and thread_id need to be alphanumeric.",
-            );
-        };
+        let entire_prompt = get_entire_prompt_json(&user_id, &thread_id);
 
         let starting_prompt = StreamVariant::Prompt(entire_prompt);
         add_to_conversation(

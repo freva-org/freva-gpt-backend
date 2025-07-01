@@ -10,7 +10,8 @@ base_url = "http://localhost:8502/api/chatbot"
 
 load_dotenv()
 auth_key = os.getenv("AUTH_KEY")
-auth_string = "&auth_key=" + auth_key + "&user_id=testing" # Only for testing
+global_user_id = "testing"
+auth_string = "&auth_key=" + auth_key + "&user_id=" + global_user_id # Only for testing
 # In Version 1.6.1, the freva_config also needs to be set to a specific path. We won't be using this for now.
 auth_string = auth_string + "&freva_config=" + "Cargo.toml" # Dummy value
 
@@ -96,7 +97,7 @@ class StreamResult:
     def has_error_variants(self):
         return any([ "error" in i["variant"].lower() for i in self.json_response])
 
-def generate_full_respone(user_input, chatbot=None, thread_id=None) -> StreamResult:
+def generate_full_respone(user_input, chatbot=None, thread_id=None, user_id=None) -> StreamResult:
     inner_url = "/streamresponse?input=" + user_input
     if chatbot:
         inner_url = inner_url + "&chatbot=" + chatbot
@@ -123,7 +124,7 @@ def generate_full_respone(user_input, chatbot=None, thread_id=None) -> StreamRes
     reconstructed_packets = []
     buffer = ""
     for delta in response:
-        print(delta) # Debugging
+        # print(delta) # Debugging
         data = delta.decode("utf-8")
         buffer += data
         raw_response.append(data)
@@ -160,8 +161,8 @@ def generate_full_respone(user_input, chatbot=None, thread_id=None) -> StreamRes
     print(result.code_variants)
     print("Debug: CodeOutput variants: ")
     print(result.codeoutput_variants)
-    print("Debug: full json_response: ")
-    print(result.json_response)
+    # print("Debug: full json_response: ") # Disabled, too noisy
+    # print(result.json_response)
     assert not result.has_error_variants(), "Error variants found in response!"
     return result
 
@@ -376,8 +377,8 @@ def test_use_rw_dir():
     # The rw directory is a directory that the LLM can use to store and load files for the user.
     # This is a test to see if the LLM can use it correctly.
     # It should also infer that if the user wants to save a file, it should use the rw directory.
-    response = generate_full_respone("This is a test. Please generate a plot of a sine wave from -2π to 2π and save it as a PNG file.", chatbot="gpt-4o-mini")
-    print(response)
+    response = generate_full_respone("This is a test. Please generate a plot of a sine wave from -2π to 2π and save it as a PNG file. Remember to save it in the proper location.", chatbot="gpt-4o-mini")
+    # print(response)
     # Afer this, it should have generated a file in the rw directory.
     # Specifically, at "rw_dir/testing/{thread_id}/????.png"
     # So we check whether that directory exists and contains a file.
@@ -397,9 +398,9 @@ def test_user_vision():
     ''' Can the LLM see the output that it generated? ''' # Since Version 1.10.0
 
     # The LLM should be able to see the image that the code it wrote generated.
-    response = generate_full_respone("You should have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates or write any code except for the plotting of the X! Look at the generated image instead.", chatbot="gpt-4o-mini")
+    response = generate_full_respone("You should have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates, save the image somehwere or write any code except for the plotting of the X! Look at the generated image instead.", chatbot="gpt-4o-mini")
 
-    print(response) # Debug
+    # print(response) # Debug
 
     # The response should contain an image and the assistant should not be confused about the location of the X.
     assert response.image_variants, "No image variants found in response!"
@@ -414,6 +415,27 @@ def test_user_vision():
     valid_answers = ["up", "down", "left", "right", "center"]
     # assert any(i.lower() in valid_answers for i in response.assistant_variants), "Assistant did not return a valid answer about the location of the X! It should have returned one of: " + ", ".join(valid_answers) + ". Instead, it returned: " + ", ".join(response.assistant_variants)
     assert valid_answers in ("".join(response.assistant_variants)).lower()
+
+
+def test_non_alphanumeric_user_id():
+    ''' Can the backend handle non-alphanumeric user IDs? ''' # Since Version 1.10.1
+    # The backend should be able to handle non-alphanumeric user IDs, such as emails. 
+    # This is a regression test for a bug that was introduced in Version 1.10.0, where the backend would fail to create the rw directory if the user ID contained non-alphanumeric characters
+    # and then failed fully.
+
+    try:
+        # First, we need to set the user ID to a non-alphanumeric value.
+        global global_user_id
+        global_user_id = "example@web.de" # This is a valid email address, but contains non-alphanumeric characters.
+        # Now we can run the test
+        response = generate_full_respone("This is simple test. Please just return 'OK' and exit.", chatbot="gpt-4o-mini")
+        # The response should contain "OK"
+        assert any("OK" in i for i in response.assistant_variants), "Assistant did not return 'OK'! Instead, it returned: " + ", ".join(response.assistant_variants)
+    finally:
+        # Reset the user ID to the default value, so that the other tests can run without issues.
+        global_user_id = "testing"
+        
+
 
 # --------------------------------
 # -- Mock Authentication Server --
@@ -441,7 +463,7 @@ def userinfo():
     # This would usually return the user information, but for testing, we just return a dummy response.
     # The backend needs to retrieve the user ID from here, so we return a dummy user ID.
     return jsonify({
-        "user_id": "testing",
+        "user_id": global_user_id,
         "username": "testing",
     }), 200
 
