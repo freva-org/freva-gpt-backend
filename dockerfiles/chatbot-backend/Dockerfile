@@ -1,5 +1,5 @@
 # Pull from fedora because alpine and ubuntu both have issues with the python environment or podman
-FROM fedora:latest
+FROM docker.io/fedora:latest
 
 # Install necessary dependencies for miniconda
 RUN dnf install -y curl bzip2
