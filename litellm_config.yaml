@@ -27,10 +27,16 @@ model_list:
       api_base: "http://ollama:11434"
     model_info:
       supports_function_calling: true
+  # - model_name: "qwen3:4b"
+  #   litellm_params:
+  #     model: "openai/qwen3:4b"
+  #     api_base: "http://host.docker.internal:11434/v1" # For development only!
+  #   model_info:
+  #     supports_function_calling: true
   # - model_name: "qwen2.5:3b"
   #   litellm_params:
-  #     model: "ollama/qwen2.5:3b"
-  #     api_base: "http://host.docker.internal:11434" # For development only!
+  #     model: "openai/qwen2.5:3b"
+  #     api_base: "http://host.docker.internal:11434/v1" # For development only!
   #   model_info:
   #     supports_function_calling: true
 

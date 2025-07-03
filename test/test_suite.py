@@ -257,14 +257,21 @@ def test_persistant_xarray_storage():
 
 def test_qwen_available():
     ''' Can the backend use non-OpenAI chatbots, such as Qwen? ''' # Since Version 1.7.1
-    response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="qwen2.5:3b")
+    response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="qwen3:4b")
     # The assistant output should now contain "200 Ok"
     assert any("(200 ok)" in i.lower() for i in response.assistant_variants)
 
 
 def test_qwen_code_interpreter():
     ''' Can the backend get a code response from Qwen? ''' # Since Version 1.7.1
-    response = generate_full_respone("Please use the code_interpreter tool to run `print(2938429834 * 234987234)`. Make sure to adhere to the JSON format!", chatbot="qwen2.5:3b")
+    response = generate_full_respone("Please use the code_interpreter tool to run `print(2938429834 * 234987234)`.", chatbot="qwen3:4b")
+    # The code output should now contain the result of the multiplication
+    assert any("690493498994739156" in i for i in response.codeoutput_variants)
+
+def test_qwen_code_interpreter_nothink():
+    ''' Can the backend get a code response from a non-reasoning Qwen model? ''' # Since Version 1.10.2
+    # The Protocol is slightly different, so we need to test it separately.
+    response = generate_full_respone("Please use the code_interpreter tool to run `print(2938429834 * 234987234)`.", chatbot="qwen2.5:3b")
     # The code output should now contain the result of the multiplication
     assert any("690493498994739156" in i for i in response.codeoutput_variants)
 
