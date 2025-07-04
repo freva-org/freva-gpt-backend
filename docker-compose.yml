@@ -7,7 +7,7 @@ services:
       cgroup_manager: cgroupfs # TODO: This is giving some trouble in development, is it really needed?
     hostname: freva-gpt2-backend-instance-${INSTANCE_NAME}
     ports:
-      - "8503:8502"
+      - "${TARGET_PORT:-8502}:${BACKEND_PORT:-8502}" # If either is unset, the default value will be used.
     volumes:
       - /work:/work:ro
       - /container/da/genai_data:/container/da/genai_data
