@@ -41,9 +41,9 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
     // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {
         None | Some("") => {
-            // If the thread ID is not found, we'll return a 400
+            // If the thread ID is not found, we'll return a 422
             warn!("The User requested a thread without a thread ID.");
-            return HttpResponse::BadRequest()
+            return HttpResponse::UnprocessableEntity()
                 .body("Thread ID not found. Please provide a thread_id in the query parameters.");
         }
         Some(thread_id) => thread_id,
@@ -57,7 +57,7 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
     } else {
         // We now need the vault URL, so this fails.
         warn!("No vault URL provided, cannot connect to the database for threads.");
-        return HttpResponse::BadRequest()
+        return HttpResponse::UnprocessableEntity()
             .body("Vault URL not found. Please provide a non-empty vault URL in the headers, of type String.");
     };
 
@@ -66,8 +66,7 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
         Err(e) => {
             // If we cannot initialize the database connection, we'll return a 500
             error!("Error initializing database connection: {:?}", e);
-            return HttpResponse::InternalServerError()
-                .body("Error initializing database connection.");
+            return e;
         }
     };
 

@@ -43,7 +43,7 @@ pub async fn authorize_or_fail_fn(
                 Ok(header_val) => header_val.to_string(),
                 Err(e) => {
                     warn!("Authorization header is not a valid UTF-8 string: {}", e);
-                    return Err(HttpResponse::BadRequest()
+                    return Err(HttpResponse::UnprocessableEntity()
                         .body("Authorization header is not a valid UTF-8 string."));
                 }
             };
@@ -52,7 +52,7 @@ pub async fn authorize_or_fail_fn(
             // The Authentication header is a Bearer token, so we need to extract the token from it.
             let Some(token) = auth_string.strip_prefix("Bearer ") else {
                 warn!("Authorization header is not a Bearer token.");
-                return Err(HttpResponse::BadRequest().body(
+                return Err(HttpResponse::UnprocessableEntity().body(
                     "Authorization header is not a Bearer token. Please use the Bearer token format.",
                 ));
             };
@@ -74,7 +74,7 @@ pub async fn authorize_or_fail_fn(
                 // If the rest URL is not present, we'll return a 400.
                 warn!("No rest URL found in headers, cannot check token.");
                 return Err(HttpResponse::BadRequest()
-                    .body("Authentication not successful; please use the nginx proxy."));
+                    .body("Authentication not successful; please use the nginx proxy. (rest)"));
             };
 
             // Depending on whether the token was valid or not, check the query string token.
@@ -187,14 +187,15 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
             } else {
                 // If the response is not successful, we'll return a 401.
                 warn!("Token check failed, status code: {}", res.status());
-                return Err(HttpResponse::Unauthorized().body("Token check failed."));
+                return Err(HttpResponse::Unauthorized()
+                    .body("Token check failed, the token is likely not valid (anymore)."));
             }
         }
         Err(e) => {
-            // If there was an error sending the request, we'll return a 500.
+            // If there was an error sending the request, we'll return a 503.
             error!("Error sending token check request: {}", e);
             return Err(
-                HttpResponse::InternalServerError().body("Error sending token check request.")
+                HttpResponse::ServiceUnavailable().body("Error sending token check request."), // This is technically about the vault, but 503 fits better than 401 here.
             );
         }
     };
@@ -206,18 +207,25 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
             if let Some(username) = json["username"].as_str() {
                 username.to_string()
             } else {
-                // If the username is not found, we'll return a 500.
-                error!("Username not found in token check response.");
-                return Err(HttpResponse::InternalServerError()
-                    .body("Username not found in token check response."));
+                // If the username is not found, this is either because the token is invalid or the response is malformed.
+                // If the token is invalid, the response will contain a "detail" field with an error message.
+                if let Some(detail) = json["detail"].as_str() {
+                    error!("Token check failed, detail: {}", detail);
+                    return Err(HttpResponse::Unauthorized()
+                        .body(format!("Token check failed: {}", detail)));
+                } else {
+                    // The response was malformed, that's a 502.
+                    error!("Token check response is malformed, no username found.");
+                    return Err(HttpResponse::BadGateway()
+                        .body("Token check response is malformed, no username found."));
+                }
             }
         }
         Err(e) => {
-            // If the JSON is not valid, we'll return a 500.
+            // If the JSON is not valid, we'll return a 502.
             error!("Error parsing token check response: {}", e);
-            return Err(
-                HttpResponse::InternalServerError().body("Error parsing token check response.")
-            );
+            return Err(HttpResponse::BadGateway()
+                .body("Token check response is malformed, not valid JSON."));
         }
     };
     debug!("Token check successful, username: {}", username);
@@ -241,22 +249,22 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
                     Ok(text) => text.trim().to_owned(),
                     Err(e) => {
                         error!("Error reading response text: {}", e);
-                        return Err(HttpResponse::InternalServerError()
+                        return Err(HttpResponse::BadGateway()
                             .body("Error reading response text from vault."));
                     }
                 };
                 debug!("Vault response: {}", content);
                 content
             } else {
-                // If the response is not successful, we'll return a 500.
+                // If the response is not successful, we'll return a 502.
                 warn!("Failed to get MongoDB URL, status code: {}", res.status());
-                return Err(HttpResponse::InternalServerError().body("Failed to get MongoDB URL."));
+                return Err(HttpResponse::BadGateway().body("Failed to get MongoDB URL."));
             }
         }
         Err(e) => {
-            // If there was an error sending the request, we'll return a 500.
+            // If there was an error sending the request, we'll return a 503.
             error!("Error sending request to vault: {}", e);
-            return Err(HttpResponse::InternalServerError().body("Error sending request to vault."));
+            return Err(HttpResponse::ServiceUnavailable().body("Error sending request to vault."));
         }
     };
 
@@ -270,16 +278,17 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
             {
                 url.to_string()
             } else {
-                // If the MongoDB URL is not found, we'll return a 500.
+                // If the MongoDB URL is not found, we'll return a 502.
                 error!("MongoDB URL not found in vault response.");
-                return Err(HttpResponse::InternalServerError()
-                    .body("MongoDB URL not found in vault response."));
+                return Err(
+                    HttpResponse::BadGateway().body("MongoDB URL not found in vault response.")
+                );
             }
         }
         Err(e) => {
-            // If the JSON is not valid, we'll return a 500.
+            // If the JSON is not valid, we'll return a 502.
             error!("Error parsing vault response: {}", e);
-            return Err(HttpResponse::InternalServerError().body("Error parsing vault response."));
+            return Err(HttpResponse::BadGateway().body("Error parsing vault response."));
         }
     };
     debug!("MongoDB URL: {}", mongodb_url);

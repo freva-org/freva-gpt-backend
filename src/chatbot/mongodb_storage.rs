@@ -247,15 +247,13 @@ pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
                             "Failed to connect to MongoDB even after stripping options: {:?}",
                             e
                         );
-                        return Err(HttpResponse::InternalServerError()
+                        return Err(HttpResponse::ServiceUnavailable()
                             .body("Failed to connect to MongoDB after stripping options"));
                     }
                 }
             } else {
                 warn!("No question mark found in MongoDB URI, cannot strip options.");
-                return Err(
-                    HttpResponse::InternalServerError().body("Failed to connect to MongoDB")
-                );
+                return Err(HttpResponse::ServiceUnavailable().body("Failed to connect to MongoDB"));
             }
         }
     };
@@ -269,7 +267,7 @@ pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
         Err(e) => {
             // We treat this as a warning, because it might be that the MongoDB server is not running.
             error!("Failed to make sure the MongoDB is running: {:?}", e);
-            return Err(HttpResponse::InternalServerError()
+            return Err(HttpResponse::ServiceUnavailable()
                 .body("MongoDB is not running or cannot be reached"));
         }
     }

@@ -22,7 +22,7 @@ RUN conda init bash
 RUN echo "conda activate env" >> ~/.bashrc
 
 # Install the python packages into the environment. This is split up to improve caching.
-RUN conda install --yes -c conda-forge -n env freva dill
+RUN conda install --yes -c conda-forge -n env dill
 RUN conda install --yes -c conda-forge -n env numpy matplotlib pandas xarray xesmf scipy
 RUN conda install --yes -c conda-forge -n env netcdf4 cartopy contourpy geopy
 RUN conda install --yes -c conda-forge -n env aiohttp requests
@@ -43,8 +43,7 @@ ENV PYTHONPATH=/opt/conda/envs/env/lib/python3.12/site-packages
 ENV PATH /opt/conda/envs/env/bin/:$PATH
 ENV LD_LIBRARY_PATH /opt/conda/envs/env/lib/:$PATH
 
-#Freva requires a file to be located there, tecnically it needs to be a cert file, but this should work for now
-RUN touch /opt/conda/envs/env/freva/freva.crt
+RUN pip install freva-client
 
 # DEBUG: Crashes the build with info about the python environment that will be used.
 # ENV PYO3_PRINT_CONFIG 1
