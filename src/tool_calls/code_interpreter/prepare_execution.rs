@@ -354,7 +354,7 @@ fn post_process(code: String, user_id: String, thread_id: String) -> String {
 
     // (What should be detected to add it) and (what should be added)
     let libraries = [
-        ("freva.", "import freva\n"),
+        ("freva_client.", "import freva_client\n"),
         ("np.", "import numpy as np\n"),
         ("plt.", "import matplotlib.pyplot as plt\n"),
         ("xr.", "import xarray as xr\n"),

@@ -414,7 +414,7 @@ def test_user_vision():
     # Lastly make sure it actually generated an answer
     valid_answers = ["up", "down", "left", "right", "center"]
     # assert any(i.lower() in valid_answers for i in response.assistant_variants), "Assistant did not return a valid answer about the location of the X! It should have returned one of: " + ", ".join(valid_answers) + ". Instead, it returned: " + ", ".join(response.assistant_variants)
-    assert valid_answers in ("".join(response.assistant_variants)).lower()
+    assert any([v in ("".join(response.assistant_variants)).lower() for v in valid_answers]), "Assistant did not return a valid answer about the location of the X! It should have returned one of: " + ", ".join(valid_answers) + ". Instead, it returned: " + ", ".join(response.assistant_variants)
 
 
 def test_non_alphanumeric_user_id():

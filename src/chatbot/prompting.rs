@@ -4,7 +4,7 @@ use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionRequestSys
 use once_cell::sync::Lazy;
 use std::fs;
 use std::io::Read;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, trace};
 
 /// The basic starting prompt as a const of the correct type.
 static STARTING_PROMPT_STR: Lazy<String> = Lazy::new(|| {

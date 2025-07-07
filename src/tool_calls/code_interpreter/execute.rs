@@ -251,7 +251,7 @@ fn should_eval(line: &str, py: Python) -> bool {
     // Imports, function calls, and variable assignments should be executed.
     // However, outputting multiple variables via a tuple should be evaluated.
     // let negative = line.contains("import") || (line.contains("(") && !line.starts_with("(")) || line.contains("=");
-    // let exceptions = line.contains("plt.show()") || line.contains("item()") || line.contains("freva.facet_search(");
+    // let exceptions = line.contains("plt.show()") || line.contains("item()") || line.contains("freva.databrowser.metadata_search(");
     // !negative || exceptions
 
     // New approach: Python has the ast library, which we can use to parse the line and decide whether it should be evaluated.
