@@ -406,9 +406,27 @@ fn try_read_locals(py: Python, thread_id: Option<String>) -> Option<Bound<PyDict
     let code = CString::new(format!(
         r"import dill
 
+loaded_vars = []
+
 # Load picklable variables
 with open('{pickleable_path}', 'rb') as f:
-    loaded_vars = dill.load(f)
+    # We load all variables from the file.
+    # If there is only 1, it's the locals, if there are more, we assume that they are all locals.
+    while True:
+        try:
+            var = dill.load(f)
+            loaded_vars.append(var)
+        except EOFError:
+            break # We reached the end of the file, so we can stop loading variables.
+
+# Now, if there is not exactly one variable, we assume that they are all locals.
+if len(loaded_vars) == 1:
+    loaded_vars = loaded_vars[0] # We assume that this is the locals.
+else:
+    # If there are multiple variables, we assume that they are all locals.
+    # We will just return them as a dictionary.
+    # It is currently a list of dictionaries, and we want to convert it to a single dictionary.
+    loaded_vars = {{k: v for d in loaded_vars for k, v in d.items()}}
 
 # Now, 'loaded_vars' contains all the variables to be used as locals
 "
@@ -464,9 +482,25 @@ for key, value in local_items.items():
         unpickleable_vars[key] = [e,value]
         pass # we'll just assume that it's something we can't handle like a module
 
+# In order to be consistent to the new standard, we need at least two variables to store, so they aren't confused with the locals.
+if len(pickleable_vars) == 0:
+    pickleable_vars['empty'] = None
+if len(pickleable_vars) == 1:
+    pickleable_vars['empty2'] = None
+
 # Save picklable variables
 with open('python_pickles/{thread_id}.pickle', 'wb') as f:
-    dill.dump(pickleable_vars, f)"
+    # Loop over all the variables and pickle them individually.
+    # This is necessary because dill can't tell which variables are pickleable and which aren't.
+    # If we try to pickle them all at once, it will fail if one of them is not pickleable.
+    for key, value in pickleable_vars.items():
+        # We use dill.dump to save the variables to the file.
+        try:
+            dill.dump({{key: value}}, f)
+        except Exception as e:
+            # If we can't pickle the variable, we'll just skip it.
+            # We'll store the exception in the unpickleable_vars dictionary.
+            unpickleable_vars[key] = [e, value]"
     )).expect("Constant CString failed conversion");
     let locals = locals.clone();
 
