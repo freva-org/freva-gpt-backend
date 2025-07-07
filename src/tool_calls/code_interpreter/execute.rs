@@ -24,6 +24,38 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
         );
     }
 
+    // Before we start the GIL block, we can decide whether or not we should try to extract a plot from matplotlib.
+    // Importing it is not enough to make sure that we need to extract a plot, as consequent calls to the code interpreter always contain
+    // previously imported modules.
+    // Instead, we'll look at whether or not the plt object was modified.
+    let should_extract_plot = {
+        if !code.contains("matplotlib.pyplot") {
+            // This is a clear sign that we don't need to extract a plot.
+            false
+        } else {
+            // The plt module is modified iif any line starts with plt. or plt. is used.
+            // This is a bit of a hack, but it should work for now.
+            code.lines()
+                .any(|line| line.trim().starts_with("plt.") || line.trim().starts_with("plt "))
+        }
+    };
+
+    // Lastly, because the backend manually extracts the plot from the plt module,
+    // we need to make sure that at no point, plt.show() is actually called.
+    // To be sure that if a traceback hits, the LLM doesn't get confused, we'll have to replace it with an info message.
+    let code = code.lines()
+        .map(|line| {
+            if line.trim().starts_with("plt.show()") {
+                // We'll replace plt.show() with an info message.
+                // This is a bit of a hack, but it should work for now.
+                "# plt.show() was called here, due to the backend being non-interactive, it was intercepted at execution.".to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
     trace!("Starting GIL block.");
     let output = Python::with_gil(|py| {
         // We need a PyDict to store the local and global variables for the call.
@@ -43,7 +75,7 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
             );
         }
 
-        let result = {
+        let mut result = {
             // Because we want the last line to be returned, we'll execute all but the last line.
             let (rest_lines, last_line) = match code.trim().rsplit_once('\n') {
                 // We need to decide how to split up the code. If it's just one line, we put it into the last line, since that's ouput is evaluated by us.
@@ -121,22 +153,8 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
             }
 
             if let Some(last_line) = last_line {
-                // Because we evaluate and don't execute, we have to handle it differently.
-                // For example, all LLMs are used to calling plt.show() at the end of their code.
-                // It's in all the examples and if you were in a jupyter notebook, you'd need it.
-                // But we don't really support it, because we don't do interactive plotting.
-                // So instead we just pretend that we do and, if the last line contains a `plt.show()`, we'll convert it to `plt`, which is supported.
-                // This is a bit of a hack, but it should work for now.
-
-                let mut last_line = last_line;
-                if last_line.contains("plt.show()") {
-                    // We'll replace plt.show() with plt.
-                    let new_last_line = last_line.replace("plt.show()", "plt");
-                    trace!("Replaced plt.show() with plt in the last line.");
-                    trace!("New last line: {}", new_last_line);
-                    // We'll replace the last line with the new one.
-                    last_line = new_last_line;
-                }
+                // Previously, plt.show() was expected to always be on the last line.
+                // This has now changed, whether or not a plot should be extracted is detected before the GIL block.
 
                 debug!("Evaluating the last line.");
                 trace!("Last line: {}", last_line);
@@ -155,31 +173,12 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                     Ok(content) => {
                         // We now have a python value in here.
                         // To return it, we can convert it to a string and return it.
-                        // But before we do so, we check whether the matplotlib plt module was used.
-                        // If it was, we probably want to extract the image and return that too.
 
-                        let maybe_plt = locals.get_item("plt");
-                        let image = match maybe_plt {
-                            Ok(Some(inner)) => {
-                                // If we have a plt module, we'll try to get an image from it.
-                                try_get_image(&inner)
-                            }
-                            _ => None,
-                        };
-                        // We now need to encode the image into the string.
-                        if let Some(inner_image) = image {
-                            // We'll encode the image as base64.
-                            let encoded_image =
-                                base64::engine::general_purpose::STANDARD.encode(inner_image);
-                            // We'll return the image as a string.
-                            Ok(format!("{content}\n\nEncoded Image: {encoded_image}"))
+                        // If we got nothing to return (in python, that would be None), we'll just return an empty string.
+                        if content.is_none() {
+                            Ok(String::new()) // else, this would say "None"
                         } else {
-                            // If we got nothing to return (in python, that would be None), we'll just return an empty string.
-                            if content.is_none() {
-                                Ok(String::new()) // else, this would say "None"
-                            } else {
-                                Ok(content.to_string())
-                            }
+                            Ok(content.to_string())
                         }
                     }
                     Err(e) => Err(format_pyerr(&e, py)),
@@ -198,6 +197,32 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 "The code has finished executing. OVERHEAD={}",
                 overhead_time.as_nanos()
             );
+        }
+
+        if should_extract_plot {
+            // Output the plot if it was created.
+            let maybe_plt = locals.get_item("plt");
+            let image = match maybe_plt {
+                Ok(Some(inner)) => {
+                    // If we have a plt module, we'll try to get an image from it.
+                    try_get_image(&inner)
+                }
+                _ => None,
+            };
+            // We now need to encode the image into the string.
+            if let Some(inner_image) = image {
+                // We'll encode the image as base64.
+                let encoded_image = base64::engine::general_purpose::STANDARD.encode(inner_image);
+                // We'll return the image as a string, in the format the other side of the LLM expects.
+                let to_append = format!("\n\nEncoded Image: {encoded_image}");
+                // This needs to be appended to the result, so we can return it.
+                if let Ok(ref mut res) = result {
+                    res.push_str(&to_append);
+                } else {
+                    // If the result is an error, we don't want to append the image to it.
+                    warn!("Error executing code, but we still got an image: {to_append}");
+                }
+            }
         }
 
         // Before returning the result, we'll have to flush stdout and stderr IN PYTHON.
