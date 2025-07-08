@@ -136,6 +136,7 @@ pub async fn run_runtime_checks() {
     check_plot_extraction_second_to_last_line().await;
     check_plot_extraction_false_negative().await;
     check_plot_extraction_false_positive().await;
+    check_plot_extraction_close().await;
     println!("Success!");
     info!(
         "The code interpreter is robust enough and behaves like a Jupyter notebook in all tests."
@@ -549,4 +550,22 @@ async fn check_plot_extraction_false_positive() {
     assert_eq!(output.len(), 1);
     // The output should be empty, as we're not printing anything.
     assert!(matches!(output[0], StreamVariant::CodeOutput(ref inner, _) if inner.is_empty()));
+}
+
+/// Tests whether or not the code interpreter can handle plt.close() calls.
+/// This is important because some LLMs like to end their code with plt.close(),
+/// which would prevent the backend from extracting the plot.
+async fn check_plot_extraction_close() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "import matplotlib.pyplot as plt\nplt.plot([1, 2, 3], [4, 5, 6])\nplt.close()"}"#.to_string()),
+        "test".to_string(),
+        None,
+        "testing".to_string(),
+    )
+    .await;
+    assert_eq!(output.len(), 2);
+    // The plt.close() call should not prevent the plot from being extracted.
+    // The plot should be extracted and returned as a string.
+    assert!(matches!(output[0], StreamVariant::CodeOutput(ref inner, _) if inner.is_empty()));
+    assert!(matches!(output[1], StreamVariant::Image(_)));
 }

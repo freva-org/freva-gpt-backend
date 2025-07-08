@@ -43,13 +43,19 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
     // Lastly, because the backend manually extracts the plot from the plt module,
     // we need to make sure that at no point, plt.show() is actually called.
     // To be sure that if a traceback hits, the LLM doesn't get confused, we'll have to replace it with an info message.
+    // A similar situation is when plt.close() is called, as we cannot extract the plot after that.
     let code = code.lines()
         .map(|line| {
             if line.trim().starts_with("plt.show()") {
                 // We'll replace plt.show() with an info message.
                 // This is a bit of a hack, but it should work for now.
-                "# plt.show() was called here, due to the backend being non-interactive, it was intercepted at execution.".to_string()
-            } else {
+                "# plt.show() was called here, but due to the backend being non-interactive, it was intercepted at execution.".to_string()
+            } else if line.trim().starts_with("plt.close()") {
+                // We'll replace plt.close() with an info message.
+                // This is a bit of a hack, but it should work for now.
+                "# plt.close() was called here, but for the backend to extract the plot, it was intercepted at execution.".to_string()
+            }
+            else {
                 line.to_string()
             }
         })
