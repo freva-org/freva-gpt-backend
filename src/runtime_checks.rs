@@ -131,6 +131,12 @@ pub async fn run_runtime_checks() {
     check_syntax_error_surround().await;
     check_traceback_error_surround().await;
     check_eval_exec().await;
+    check_plot_extraction().await;
+    check_plot_extraction_no_import().await;
+    check_plot_extraction_second_to_last_line().await;
+    check_plot_extraction_false_negative().await;
+    check_plot_extraction_false_positive().await;
+    check_plot_extraction_close().await;
     println!("Success!");
     info!(
         "The code interpreter is robust enough and behaves like a Jupyter notebook in all tests."
@@ -494,4 +500,96 @@ async fn check_eval_exec() {
             "test".to_string()
         )]
     );
+}
+
+/// Tests whether or not a plot is correctly extracted from the code interpreter.
+async fn check_plot_extraction() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "import matplotlib.pyplot as plt\nplt.plot([1, 2, 3], [4, 5, 6])\nplt.show()"}"#.to_string()),
+        "test".to_string(),
+        None,
+        "testing".to_string(),
+    )
+    .await;
+    assert_eq!(output.len(), 2);
+    // The plot should be extracted and returned as a string.
+    // assert!(matches!(output[0], StreamVariant::CodeOutput(_, _)));
+    assert!(matches!(output[0], StreamVariant::CodeOutput(ref inner, _) if inner.is_empty()));
+    assert!(matches!(output[1], StreamVariant::Image(_)));
+}
+
+/// Tests whether or not a plot is correctly extracted from the code interpreter, even if matplotlib is not imported AND plt.show() is not called.
+async fn check_plot_extraction_no_import() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "plt.plot([1, 2, 3], [4, 5, 6])"}"#.to_string()),
+        "test".to_string(),
+        None,
+        "testing".to_string(),
+    )
+    .await;
+    assert_eq!(output.len(), 2);
+    // The plot should be extracted and returned as a string.
+    assert!(matches!(output[0], StreamVariant::CodeOutput(_, _))); // Inner is NOT empty because that is evaluated to a Lines2D object.
+    assert!(matches!(output[1], StreamVariant::Image(_)));
+}
+
+/// Tests whether or not a plot on the second-to-last line is correctly extracted from the code interpreter.
+async fn check_plot_extraction_second_to_last_line() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "import matplotlib.pyplot as plt\nplt.plot([1, 2, 3], [4, 5, 6])\nplt.show()\nprint('Done!')"}"#.to_string()),
+        "test".to_string(),
+        None,
+        "testing".to_string(),
+    )
+    .await;
+    assert_eq!(output.len(), 2);
+    // The plot should be extracted and returned as a string.
+    assert!(matches!(output[0], StreamVariant::CodeOutput(ref inner, _) if inner == "Done!"));
+    assert!(matches!(output[1], StreamVariant::Image(_)));
+}
+
+/// Tests whether or not the code interpreter can handle a true negative plot, where it's commented out.
+async fn check_plot_extraction_false_negative() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "import matplotlib.pyplot as plt\n# plt.plot([1, 2, 3], [4, 5, 6])\n# plt.show()"}"#.to_string()),
+        "test".to_string(),
+        None,
+        "testing".to_string(),
+    )
+    .await;
+    assert_eq!(output.len(), 1);
+    // The output should be empty, as we're not printing anything.
+    assert!(matches!(output[0], StreamVariant::CodeOutput(ref inner, _) if inner.is_empty()));
+}
+
+/// Tests whether or not the code interpreter detects that it shouldn't output the plot if it was only imported and not used.
+async fn check_plot_extraction_false_positive() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "import matplotlib.pyplot as plt"}"#.to_string()),
+        "test".to_string(),
+        None,
+        "testing".to_string(),
+    )
+    .await;
+    assert_eq!(output.len(), 1);
+    // The output should be empty, as we're not printing anything.
+    assert!(matches!(output[0], StreamVariant::CodeOutput(ref inner, _) if inner.is_empty()));
+}
+
+/// Tests whether or not the code interpreter can handle plt.close() calls.
+/// This is important because some LLMs like to end their code with plt.close(),
+/// which would prevent the backend from extracting the plot.
+async fn check_plot_extraction_close() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(r#"{"code": "import matplotlib.pyplot as plt\nplt.plot([1, 2, 3], [4, 5, 6])\nplt.close()"}"#.to_string()),
+        "test".to_string(),
+        None,
+        "testing".to_string(),
+    )
+    .await;
+    assert_eq!(output.len(), 2);
+    // The plt.close() call should not prevent the plot from being extracted.
+    // The plot should be extracted and returned as a string.
+    assert!(matches!(output[0], StreamVariant::CodeOutput(ref inner, _) if inner.is_empty()));
+    assert!(matches!(output[1], StreamVariant::Image(_)));
 }
