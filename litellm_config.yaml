@@ -10,23 +10,51 @@ model_list:
       api_key: "os.environ/OPENAI_API_KEY"
   - model_name: "mistral"
     litellm_params:
-      model: "ollama/mistral"
-      api_base: "http://ollama:11434"
+      model: "openai/mistral"
+      api_base: "http://ollama:11434/v1"
       # keep_alive: "8m" # Optional: Overrides default keep_alive, use -1 for Forever
     model_info:
       supports_function_calling: true
   - model_name: "llama3.1"
     litellm_params:
-      model: "ollama/llama3.1"
-      api_base: "http://ollama:11434"
+      model: "openai/llama3.1"
+      api_base: "http://ollama:11434/v1"
     model_info:
       supports_function_calling: true
-  - model_name: "deepseek-r1"
+      #  - model_name: "deepseek-r1" # Doesn't do tool calls yet :/
+#    litellm_params:
+#      model: "openai/deepseek-r1"
+#      api_base: "http://ollama:11434/v1"
+#    model_info:
+#      supports_function_calling: true
+  - model_name: "mistral"
     litellm_params:
-      model: "ollama/deepseek-r1"
-      api_base: "http://ollama:11434"
+      model: "openai/mistral:latest"
+      api_base: "http://ollama:11434/v1"
     model_info:
       supports_function_calling: true
+  - model_name: "qwen3:30b-a3b"
+    litellm_params:
+      model: "openai/qwen3:30b"
+      api_base: "http://ollama:11434/v1"
+    model_info:
+      supports_function_calling: true
+  - model_name: "qwen3:32b"
+    litellm_params:
+      model: "openai/qwen3:32b"
+      api_base: "http://ollama:11434/v1"
+    model_info:
+      supports_function_calling: true
+  - model_name: "llama4:scout"
+    litellm_params:
+      model: "openai/llama4:scout"
+      api_base: "http://ollama:11434/v1"
+    model_info:
+      supports_function_calling: true
+
+
+
+      # Development models
   # - model_name: "qwen3:4b"
   #   litellm_params:
   #     model: "openai/qwen3:4b"

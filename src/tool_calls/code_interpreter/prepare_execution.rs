@@ -394,7 +394,7 @@ fn post_process_output(output: &str, code: &str) -> String {
     // Loop over all lines. If one starts with "SyntaxError", we'll return it.
     let mut synerr_line = None;
     for line in output.lines() {
-        if line.starts_with("SyntaxError") {
+        if line.starts_with("SyntaxError") || line.starts_with("IndentationError"){
             synerr_line = Some(line);
             break;
         }
