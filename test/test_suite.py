@@ -10,14 +10,18 @@ base_url = "http://localhost:8502/api/chatbot"
 
 load_dotenv()
 auth_key = os.getenv("AUTH_KEY")
-auth_string = "&auth_key=" + auth_key + "&user_id=testing" # Only for testing
+global_user_id = "testing"
+auth_string = "&auth_key=" + auth_key + "&user_id=" + global_user_id # Only for testing
 # In Version 1.6.1, the freva_config also needs to be set to a specific path. We won't be using this for now.
 auth_string = auth_string + "&freva_config=" + "Cargo.toml" # Dummy value
 
 # Starting with Version 1.10.0, a vault url needs to be supplied in the headers.
 vault_url = "http://127.0.0.1:5001" # TODO: This might not work because of the local/docker devide.
+rest_url = "http://localhost:5001" # This is the URL of the mock authentication server. 
 headers = {
-    "x-freva-vault-url": vault_url
+    "x-freva-vault-url": vault_url,
+    "x-freva-rest-url": rest_url,
+    "x-freva-user-token": "Bearer THE_MOCK_AUTH_WILL_JUST_ALLOW_ANYTHING_SO_THIS_JUST_HAS_TO_BE_HERE",
 }
 
 
@@ -93,7 +97,7 @@ class StreamResult:
     def has_error_variants(self):
         return any([ "error" in i["variant"].lower() for i in self.json_response])
 
-def generate_full_respone(user_input, chatbot=None, thread_id=None) -> StreamResult:
+def generate_full_respone(user_input, chatbot=None, thread_id=None, user_id=None) -> StreamResult:
     inner_url = "/streamresponse?input=" + user_input
     if chatbot:
         inner_url = inner_url + "&chatbot=" + chatbot
@@ -120,7 +124,7 @@ def generate_full_respone(user_input, chatbot=None, thread_id=None) -> StreamRes
     reconstructed_packets = []
     buffer = ""
     for delta in response:
-        print(delta) # Debugging
+        # print(delta) # Debugging
         data = delta.decode("utf-8")
         buffer += data
         raw_response.append(data)
@@ -157,8 +161,8 @@ def generate_full_respone(user_input, chatbot=None, thread_id=None) -> StreamRes
     print(result.code_variants)
     print("Debug: CodeOutput variants: ")
     print(result.codeoutput_variants)
-    print("Debug: full json_response: ")
-    print(result.json_response)
+    # print("Debug: full json_response: ") # Disabled, too noisy
+    # print(result.json_response)
     assert not result.has_error_variants(), "Error variants found in response!"
     return result
 
@@ -257,7 +261,10 @@ def test_persistant_xarray_storage():
 
 def test_qwen_available():
     ''' Can the backend use non-OpenAI chatbots, such as Qwen? ''' # Since Version 1.7.1
-    response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="qwen3:4b")
+    # DEBUG
+    # import time
+    # time.sleep(100)
+    response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="qwen2.5:3b")
     # The assistant output should now contain "200 Ok"
     assert any("(200 ok)" in i.lower() for i in response.assistant_variants)
 
@@ -372,6 +379,69 @@ def test_get_user_threads():
         
 
 
+def test_use_rw_dir():
+    ''' Does the LLM understand how it can use the rw directory? ''' # Since Version 1.9.0
+    # The rw directory is a directory that the LLM can use to store and load files for the user.
+    # This is a test to see if the LLM can use it correctly.
+    # It should also infer that if the user wants to save a file, it should use the rw directory.
+    response = generate_full_respone("This is a test. Please generate a plot of a sine wave from -2π to 2π and save it as a PNG file. Remember to save it in the proper location.", chatbot="gpt-4o-mini")
+    # print(response)
+    # Afer this, it should have generated a file in the rw directory.
+    # Specifically, at "rw_dir/testing/{thread_id}/????.png"
+    # So we check whether that directory exists and contains a file.
+    thread_id = response.thread_id
+    rw_dir = f"rw_dir/testing/{thread_id}"
+    print(f"Debug: rw_dir: {rw_dir}") # Debugging
+    assert os.path.exists(rw_dir), f"RW directory {rw_dir} does not exist!"
+
+    # Make sure there is at least one file in the directory
+    files = os.listdir(rw_dir)
+    print(f"Debug: Files in rw_dir: {files}") # Debugging
+    assert len(files) > 0, f"RW directory {rw_dir} is empty!"
+    
+
+
+def test_user_vision():
+    ''' Can the LLM see the output that it generated? ''' # Since Version 1.10.0
+
+    # The LLM should be able to see the image that the code it wrote generated.
+    response = generate_full_respone("You should have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates, save the image somehwere or write any code except for the plotting of the X! Look at the generated image instead.", chatbot="gpt-4o-mini")
+
+    # print(response) # Debug
+
+    # The response should contain an image and the assistant should not be confused about the location of the X.
+    assert response.image_variants, "No image variants found in response!"
+    negatives = ["i don't know", "i can't see", "i can't tell", "i'm not sure", "i don't understand", "unfortunately", "i don't", "i cannot", "i can't"]
+    assert not any(neg in i.lower() for i in response.assistant_variants for neg in negatives), "Assistant was confused about the location of the X! It either refused or couldn't see it."
+
+    # Also make sure that the assistant didn't print out the coordinates. 
+    # For that, test the code output for numbers, that is 0.[0-9]+
+    assert not any("0." in i for i in response.codeoutput_variants), "Assistant printed out the coordinates of the X! It should only describe the location in words, not numbers."
+
+    # Lastly make sure it actually generated an answer
+    valid_answers = ["up", "down", "left", "right", "center"]
+    # assert any(i.lower() in valid_answers for i in response.assistant_variants), "Assistant did not return a valid answer about the location of the X! It should have returned one of: " + ", ".join(valid_answers) + ". Instead, it returned: " + ", ".join(response.assistant_variants)
+    assert any([v in ("".join(response.assistant_variants)).lower() for v in valid_answers]), "Assistant did not return a valid answer about the location of the X! It should have returned one of: " + ", ".join(valid_answers) + ". Instead, it returned: " + ", ".join(response.assistant_variants)
+
+
+def test_non_alphanumeric_user_id():
+    ''' Can the backend handle non-alphanumeric user IDs? ''' # Since Version 1.10.1
+    # The backend should be able to handle non-alphanumeric user IDs, such as emails. 
+    # This is a regression test for a bug that was introduced in Version 1.10.0, where the backend would fail to create the rw directory if the user ID contained non-alphanumeric characters
+    # and then failed fully.
+
+    try:
+        # First, we need to set the user ID to a non-alphanumeric value.
+        global global_user_id
+        global_user_id = "example@web.de" # This is a valid email address, but contains non-alphanumeric characters.
+        # Now we can run the test
+        response = generate_full_respone("This is simple test. Please just return 'OK' and exit.", chatbot="gpt-4o-mini")
+        # The response should contain "OK"
+        assert any("OK" in i for i in response.assistant_variants), "Assistant did not return 'OK'! Instead, it returned: " + ", ".join(response.assistant_variants)
+    finally:
+        # Reset the user ID to the default value, so that the other tests can run without issues.
+        global_user_id = "testing"
+        
 
 
 # --------------------------------
@@ -393,6 +463,15 @@ def auth():
     
     return jsonify({
         "mongodb.url": f"mongodb://{username}:{password}@localhost:27017",
+    }), 200
+
+@app.route("/api/freva-nextgen/auth/v2/userinfo", methods=["GET"])
+def userinfo():
+    # This would usually return the user information, but for testing, we just return a dummy response.
+    # The backend needs to retrieve the user ID from here, so we return a dummy user ID.
+    return jsonify({
+        "user_id": global_user_id,
+        "username": "testing",
     }), 200
 
 # Run the mock authentication server

@@ -1,9 +1,7 @@
 use core::fmt;
 
 use async_openai::types::{
-    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage,
-    ChatCompletionRequestMessage, ChatCompletionRequestUserMessage, ChatCompletionToolType,
-    FunctionCall,
+    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage, ChatCompletionRequestMessageContentPartImage, ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall, ImageUrl
 };
 use documented::Documented;
 use serde::{Deserialize, Serialize};
@@ -124,6 +122,7 @@ pub enum ConversionError {
     VariantHide(&'static str), // Some variants are only for the backend, so they should not be converted.
     ParseError(&'static str),  // An error occured during parsing the prompt.
     CodeCall(String, String),  // A Code Call was found, which needs to be handled differently.
+    Image(String), // An image was found, which needs to be handled depending on the model.
 }
 
 /// A helper function to convert the `StreamVariant` to a `ChatCompletionRequestMessage`.
@@ -185,15 +184,12 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     content: async_openai::types::ChatCompletionRequestToolMessageContent::Text(s),
                 })
             ]),
-            Self::Image(_) => 
-            // Ok(vec![ChatCompletionRequestMessage::System(
-            //     ChatCompletionRequestSystemMessage {
-            //         name: Some("Image".to_string()),
-            //         content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text("An image was successfully generated and is being shown to the user.".to_string()),
-            //     },
-            // )])
+            Self::Image(base64_encoded_image) => 
             
-                    Err(ConversionError::VariantHide("ServerHint variants are only for use on the server side, not for the LLM.")) // TODO: Implement giving the LLM information about the image.
+                // Some models support vision, so we can give them the image.
+
+
+                    Err(ConversionError::Image(base64_encoded_image))
             ,
             Self::CodeError(_) | Self::OpenAIError(_) | Self::ServerError(_) => Err(ConversionError::VariantHide("Error variants should not be passed to the LLM, it doesn't need to know about them.")),
             Self::StreamEnd(_) => Err(ConversionError::VariantHide("StreamEnd variants are only for use on the server side, not for the LLM.")),
@@ -405,7 +401,8 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
 
 /// Helper function to convert a Vec<StreamVariant> to a Vec<ChatCompletionRequestMessage>.
 /// This is needed because a Code Variant needs to be incorporated into the Assistant CCRM.
-pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequestMessage> {
+/// The result is also dependant on which model is used, because only some models support images.
+pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>, send_images: bool) -> Vec<ChatCompletionRequestMessage> {
     let mut all_oai_messages = vec![];
     let mut assistant_message_buffer = None;
 
@@ -464,6 +461,41 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
                     );
                 }
             }
+            Err(ConversionError::Image(base64_encoded_image)) => {
+                if send_images {
+                    // If the model supports images, we can send them.
+                    if let Some(buffer) = assistant_message_buffer.clone() {
+                        all_oai_messages.push(ChatCompletionRequestMessage::Assistant(
+                            ChatCompletionRequestAssistantMessage {
+                                ..buffer //TODO: This looks weird?
+                            },
+                        ));
+                        assistant_message_buffer = None; // Clear the buffer before sending the image.
+                    }
+                    // The image needs to be sent as a user message, because that's the protocol for some reason. 
+
+                    let image_message = ChatCompletionRequestMessage::User(
+                        ChatCompletionRequestUserMessage {
+                            name: Some("frevaGPT".to_string()),
+                            content: async_openai::types::ChatCompletionRequestUserMessageContent::Array(
+                                vec![
+
+                                    async_openai::types::ChatCompletionRequestUserMessageContentPart::ImageUrl(ChatCompletionRequestMessageContentPartImage{
+                                        image_url: ImageUrl {
+                                            url: "data:image/png;base64,".to_string() + &base64_encoded_image, // Should always be a PNG. 
+                                            ..Default::default()
+                                        }
+                                    }),
+                                    ]
+                            ),
+                        },
+                    );
+
+                    all_oai_messages.push(image_message);
+                } else {
+                    debug!("Image received, but not sending it to the LLM because the model does not support images.");
+                }
+            }
             Err(ConversionError::ParseError(e)) => {
                 warn!(
                     "Error parsing StreamVariant to ChatCompletionRequestMessage: {:?}",
@@ -503,7 +535,7 @@ mod tests {
     #[test]
     fn test_help_convert_sv_ccrm() {
         let input = vec![
-            StreamVariant::Prompt(get_entire_prompt_json("testing", "testing").expect("Error getting prompt JSON")), // This can panic because it's in a test.
+            StreamVariant::Prompt(get_entire_prompt_json("testing", "testing")),
             StreamVariant::ServerHint("{\"thread_id\": \"wLRFKFPcDgRJdZwSFBF82LWulvAaS5MR\"}".to_string()),            
             StreamVariant::User("plot a cirlce".to_string()),
             StreamVariant::Assistant("To plot a circle, we can use the `matplotlib` library to create a simple visualization. Let's create a plot with a circle centered at the origin (0, 0) with a specified radius. I'll use a radius of 1 for this example.\n\nLet's proceed with the code to generate this plot.".to_string()),
@@ -513,7 +545,7 @@ mod tests {
             StreamVariant::Assistant("The plot above displays a circle centered at the origin (0, 0) with a radius of 1. The axes are set to be equal, ensuring that the circle appears proportional. \n\nIf you want to plot a circle with different parameters or need further visualizations, just let me know!".to_string()),
             StreamVariant::StreamEnd("Generation complete".to_string())
         ];
-        let output = help_convert_sv_ccrm(input);
+        let output = help_convert_sv_ccrm(input, false); // We don't want to send images in this test, so we'll set it to false.
         assert_eq!(
             output.len(),
             get_entire_prompt("testing", "testing").len() + 4
@@ -544,7 +576,7 @@ mod tests {
             input.err()
         );
         let input = input.expect("Error reading test thread file. Did you copy over the `testthread.txt` file to the threads folder?");
-        let output = help_convert_sv_ccrm(input);
+        let output = help_convert_sv_ccrm(input, false);
         assert_eq!(output.len(), 36);
 
         // "Assistant:To create an annual mean temperature global map plot for the year 2023 using the provided dataset, we will follow these steps:\n\n1. Load the temperature data for 2023.\n2. Calculate the annual mean temperature for that year.\n3. Create a global map plot of the mean temperature.\n\nLet's start by loading the temperature data and calculating the annual mean temperature for 2023."

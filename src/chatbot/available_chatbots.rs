@@ -103,3 +103,17 @@ impl TryInto<AvailableChatbots> for String {
 pub fn model_ends_on_no_choice(model: AvailableChatbots) -> bool {
     matches!(model, AvailableChatbots(model_name) if model_name.starts_with("qwen2_5"))
 }
+
+/// Some models are capable of recieving Images and encoding them for them to understand.
+/// They can be given the gernerated image as a base64 string in the prompt.
+pub fn model_supports_images(model: AvailableChatbots) -> bool {
+    match model {
+        // The new system only identifies the models by their name, so we will just check the name.
+        AvailableChatbots(ref model_name)
+            if model_name.starts_with("gpt-4o") || model_name.starts_with("gpt-4.1") =>
+        {
+            true
+        }
+        _ => false,
+    }
+}

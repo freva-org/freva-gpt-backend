@@ -20,7 +20,7 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     auth::is_guest,
     chatbot::{
-        available_chatbots::{model_ends_on_no_choice, DEFAULTCHATBOT},
+        available_chatbots::{model_ends_on_no_choice, model_supports_images, DEFAULTCHATBOT},
         handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
             new_conversation_id, save_and_remove_conversation,
@@ -111,7 +111,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
                         .collect::<Vec<_>>()
                         .join(", ");
 
-                    return HttpResponse::BadRequest().body(
+                    return HttpResponse::UnprocessableEntity().body(
                         "User ID not found. Please provide a non-empty user_id in the query parameters.\nHint: The following query parameters were received: ".to_string() + &query_parameter_keys,
                     );
                 }
@@ -144,13 +144,13 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
                     Ok(input) => input.to_string(),
                     Err(e) => {
                         warn!("Error converting header input to string: {:?}", e);
-                        return HttpResponse::BadRequest().body("Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.");
+                        return HttpResponse::UnprocessableEntity().body("Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.");
                     }
                 }
             } else {
-                // If the input is not found (neither in header nor parameters), we'll return a 400
+                // If the input is not found (neither in header nor parameters), we'll return a 422
                 warn!("The User requested a stream without an input.");
-                return HttpResponse::BadRequest().body(
+                return HttpResponse::UnprocessableEntity().body(
                     "Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.",
                 );
             }
@@ -167,7 +167,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     let Some(vault_url) = maybe_vault_url else {
         warn!("The User requested a stream without a vault URL.");
-        return HttpResponse::BadRequest().body(
+        return HttpResponse::UnprocessableEntity().body(
             "Vault URL not found. Please provide a non-empty vault URL in the headers, of type String.",
         );
     };
@@ -176,7 +176,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         Ok(db) => db,
         Err(e) => {
             warn!("Failed to connect to the database: {:?}", e);
-            return HttpResponse::InternalServerError().body("Failed to connect to the database.");
+            return HttpResponse::ServiceUnavailable().body("Failed to connect to the database.");
         }
     };
 
@@ -238,9 +238,9 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         }
         Some(chatbot) => match String::try_into((*chatbot).to_owned()) {
             Ok(chatbot) => chatbot,
-            Err(()) => {
-                warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", chatbot);
-                return HttpResponse::BadRequest().body("Chatbot not found. Consult the /availablechatbots endpoint for available chatbots.");
+            Err(e) => {
+                warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", e);
+                return HttpResponse::UnprocessableEntity().body("Chatbot not found. Consult the /availablechatbots endpoint for available chatbots.");
             }
         },
     };
@@ -257,14 +257,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
         trace!("Adding base message to stream.");
 
-        let Ok(entire_prompt) = get_entire_prompt_json(&user_id, &thread_id) else {
-            // If we can't get the entire prompt, we'll return the information that we require the user_id and thread_id to be alphanumeric.
-            warn!("Error getting entire prompt, either user_id or thread_id are not alphanumeric.");
-            trace!("User ID: {}, Thread ID: {}", user_id, thread_id);
-            return HttpResponse::InternalServerError().body(
-                "Error creating prompt. Both user_id and thread_id need to be alphanumeric.",
-            );
-        };
+        let entire_prompt = get_entire_prompt_json(&user_id, &thread_id);
 
         let starting_prompt = StreamVariant::Prompt(entire_prompt);
         add_to_conversation(
@@ -295,7 +288,8 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         };
 
         // We have a Vec of StreamVariant, but we want a Vec of ChatCompletionRequestMessage.
-        let mut past_messages = help_convert_sv_ccrm(content);
+        let mut past_messages =
+            help_convert_sv_ccrm(content, model_supports_images(chatbot.clone()));
         let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
             name: Some("user".to_string()),
             content: async_openai::types::ChatCompletionRequestUserMessageContent::Text(
@@ -686,6 +680,7 @@ async fn create_and_stream(
                             &mut tool_arguments,
                             &mut tool_id,
                             &thread_id,
+                            &user_id,
                             database,
                             &mut open_ai_stream,
                             chatbot,
@@ -767,6 +762,7 @@ async fn oai_stream_to_variants(
     tool_arguments: &mut String,
     tool_id: &mut String,
     thread_id: &String,
+    user_id: &String,
     database: Database,
     open_ai_stream: &mut Fuse<ChatCompletionResponseStream>,
     chatbot: AvailableChatbots,
@@ -915,6 +911,7 @@ async fn oai_stream_to_variants(
                             tool_name,
                             tool_id,
                             thread_id,
+                            user_id,
                             database,
                             open_ai_stream,
                             &response,
@@ -1056,6 +1053,7 @@ async fn oai_stream_to_variants(
                         tool_name,
                         tool_id,
                         thread_id,
+                        user_id,
                         database,
                         open_ai_stream,
                         &response,
@@ -1122,6 +1120,7 @@ async fn handle_stop_event(
     tool_name: &mut Option<String>,
     tool_id: &mut String,
     thread_id: &String,
+    user_id: &String,
     database: Database,
     open_ai_stream: &mut Fuse<ChatCompletionResponseStream>,
     response: &CreateChatCompletionStreamResponse,
@@ -1171,6 +1170,7 @@ async fn handle_stop_event(
                     Some((*tool_arguments).to_string()),
                     (*tool_id).to_string(),
                     thread_id.to_string(),
+                    user_id.to_string(),
                     tx,
                     database,
                 ));
@@ -1223,7 +1223,8 @@ async fn restart_stream(
             );
 
             // The stream wants a vector of ChatCompletionRequestMessage, so we need to convert the StreamVariants to that.
-            let all_oai_messages = help_convert_sv_ccrm(all_messages);
+            let all_oai_messages =
+                help_convert_sv_ccrm(all_messages, model_supports_images(chatbot.clone()));
 
             trace!("All messages: {:?}", all_oai_messages);
 

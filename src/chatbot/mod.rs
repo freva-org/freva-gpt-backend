@@ -71,27 +71,28 @@ static LITE_LLM_ADDRESS: Lazy<String> = Lazy::new(|| {
     // Default to localhost
 });
 
+// The Client is reusable, we shouldn't create a new one for every request.
+static REQWEST_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(200)) // These are simple ping requests to the LiteLLM Proxy, so we don't need a long timeout.
+        .build()
+        .expect("Failed to create reqwest client")
+});
+
 /// We want to use the LiteLLM Proxy. This is to check whether it is up. If it is, it'll return "I'm alive!".
 /// Timeout is 200 milliseconds; it's on another container on the same machine, the delay should be minimal.
 pub async fn is_lite_llm_running() -> bool {
-    if let Ok(client) = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(200))
-        .build()
-    {
-        let response = client
-            .get(LITE_LLM_ADDRESS.to_string() + "/health/liveliness")
-            .send()
-            .await;
-        if let Ok(response) = response {
-            response.status().is_success()
-        } else {
-            error!(
-                "LiteLLM Proxy could not be reached; the request failed: {:?}",
-                response
-            );
-            false
-        }
+    let response = REQWEST_CLIENT
+        .get(LITE_LLM_ADDRESS.to_string() + "/health/liveliness")
+        .send()
+        .await;
+    if let Ok(response) = response {
+        response.status().is_success()
     } else {
+        error!(
+            "LiteLLM Proxy could not be reached; the request failed: {:?}",
+            response
+        );
         false
     }
 }
