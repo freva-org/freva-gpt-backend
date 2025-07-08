@@ -3,16 +3,13 @@ model_list:
     litellm_params: # all params accepted by litellm.completion() - https://docs.litellm.ai/docs/completion/input
       model: "openai/gpt-4o" ### MODEL NAME sent to `litellm.completion()` ###
       api_key: "os.environ/OPENAI_API_KEY"
+    model_info:
+      supports_function_calling: true
       # temperature: 0.2
   - model_name: "gpt-4o-mini" ### RECEIVED MODEL NAME ###
     litellm_params: # all params accepted by litellm.completion() - https://docs.litellm.ai/docs/completion/input
       model: "openai/gpt-4o-mini" ### MODEL NAME sent to `litellm.completion()` ###
       api_key: "os.environ/OPENAI_API_KEY"
-  - model_name: "mistral"
-    litellm_params:
-      model: "openai/mistral"
-      api_base: "http://ollama:11434/v1"
-      # keep_alive: "8m" # Optional: Overrides default keep_alive, use -1 for Forever
     model_info:
       supports_function_calling: true
   - model_name: "llama3.1"
@@ -22,11 +19,11 @@ model_list:
     model_info:
       supports_function_calling: true
       #  - model_name: "deepseek-r1" # Doesn't do tool calls yet :/
-#    litellm_params:
-#      model: "openai/deepseek-r1"
-#      api_base: "http://ollama:11434/v1"
-#    model_info:
-#      supports_function_calling: true
+  #    litellm_params:
+  #      model: "openai/deepseek-r1"
+  #      api_base: "http://ollama:11434/v1"
+  #    model_info:
+  #      supports_function_calling: true
   - model_name: "mistral"
     litellm_params:
       model: "openai/mistral:latest"
@@ -52,21 +49,19 @@ model_list:
     model_info:
       supports_function_calling: true
 
-
-
       # Development models
-  # - model_name: "qwen3:4b"
-  #   litellm_params:
-  #     model: "openai/qwen3:4b"
-  #     api_base: "http://host.docker.internal:11434/v1" # For development only!
-  #   model_info:
-  #     supports_function_calling: true
-  # - model_name: "qwen2.5:3b"
-  #   litellm_params:
-  #     model: "openai/qwen2.5:3b"
-  #     api_base: "http://host.docker.internal:11434/v1" # For development only!
-  #   model_info:
-  #     supports_function_calling: true
+  - model_name: "qwen3:4b"
+    litellm_params:
+      model: "openai/qwen3:4b"
+      api_base: "http://host.docker.internal:11434/v1" # For development only!
+    model_info:
+      supports_function_calling: true
+  - model_name: "qwen2.5:3b"
+    litellm_params:
+      model: "openai/qwen2.5:3b"
+      api_base: "http://host.docker.internal:11434/v1" # For development only!
+    model_info:
+      supports_function_calling: true
 
 litellm_settings:
   drop_params: true # Not all models support the same parameters. LiteLLM can automatically drop unsupported parameters.

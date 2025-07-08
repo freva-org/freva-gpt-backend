@@ -27,7 +27,9 @@ fn get_available_chatbots_from_litellm_file() -> Vec<AvailableChatbots> {
     let mut chatbots = Vec::new();
     for line in file_content.lines() {
         trace!("Processing line: {}", line);
-        if line.contains("model_name:") {
+        // In order to respsect commenting out, we will only look for lines that start with only spaces and maybe a dash.
+        let line = line.trim_matches(|c: char| c == '-' || c.is_whitespace());
+        if line.starts_with("model_name:") {
             // Expect the model name to be in quotes, and those quotes are the only thing on the line.
             if let Some(start) = line.find('"') {
                 if let Some(end) = line.rfind('"') {
