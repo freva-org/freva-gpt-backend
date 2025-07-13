@@ -114,6 +114,12 @@ impl fmt::Display for StreamVariant {
     }
 }
 
+/// Converts a StreamVariant to its canonical Name.
+pub fn variant_name(variant: &StreamVariant) -> String {
+    // In order to have a single source of truth, we'll use the Display::fmt implementation to get the name of the variant.
+    format!("{variant}").split_once(":").unwrap_or(("", "")).0.strip_prefix("\"").unwrap_or_default().to_string()
+}
+
 /// A conversation that is not actively streaming, as a List of `StreamVariants`.
 pub type Conversation = Vec<StreamVariant>;
 

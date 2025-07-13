@@ -23,9 +23,10 @@ use crate::{
         available_chatbots::{
             model_ends_on_no_choice, model_supports_images, OpenAIModels, DEFAULTCHATBOT,
         },
+        filter_variants::filter_variants,
         handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
-            new_conversation_id, save_and_remove_conversation,
+            new_conversation_id, save_and_remove_conversation, switch_to_new_thread_id,
         },
         heartbeat::heartbeat_content,
         mongodb_storage::get_database,
@@ -80,7 +81,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID and input from the request's query parameters.
-    let (thread_id, create_new) = match qstring.get("thread_id") {
+    let (mut thread_id, create_new) = match qstring.get("thread_id") {
         None | Some("") => {
             // If the thread ID is empty, we'll create a new thread.
             debug!("Creating a new thread.");
@@ -252,7 +253,15 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         thread_id, input
     );
 
+    // The user may want to edit an existing thread, so we need to retrieve the potential existing varints from the qstring.
+    let past_variants_from_frontend = qstring.get("chatvariants");
+
     let messages = if create_new {
+        // The thread should not be new if there are past variants from the frontend.
+        if past_variants_from_frontend.is_some() {
+            warn!("The User requested a new thread, but also provided past variants. The expected protocol between frontend and backend is likely mismatched. The past variants will be ignored.");
+        }
+
         // If the thread is new, we'll start with the base messages and the user's input.
         let mut base_message: Vec<ChatCompletionRequestMessage> =
             get_entire_prompt(&user_id, &thread_id);
@@ -261,6 +270,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
         let entire_prompt = get_entire_prompt_json(&user_id, &thread_id);
 
+        // We need to also store the prompt, which we do in JSON to avoid conversion issues here.
         let starting_prompt = StreamVariant::Prompt(entire_prompt);
         add_to_conversation(
             &thread_id,
@@ -286,6 +296,43 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
                 // If we can't read the thread, we'll return a generic error.
                 warn!("Error reading thread: {:?}", e);
                 return HttpResponse::InternalServerError().body("Error reading thread.");
+            }
+        };
+
+        // If there are some past variants from the frontend, we'll filter the content to instead start from a past point in time.
+        let content = match past_variants_from_frontend {
+            None | Some("") => {
+                debug!("No past variants from frontend, using all content.");
+                content
+            }
+            Some(past_variants) => {
+                debug!(
+                    "Filtering content with past variants from frontend: {}",
+                    past_variants
+                );
+                let new_content = match filter_variants(past_variants, content.clone()) {
+                    Ok(new_content) => new_content,
+                    Err(e) => {
+                        error!("Error filtering variants from frontend, the format was likely misunderstood: {:?}", e);
+                        return HttpResponse::UnprocessableEntity()
+                            .body(format!("Error filtering variants: {e}"));
+                    }
+                };
+
+                // If we succeed to find the past variants, we'll also need to send a new ServerHint with the thread_id.
+                // We'll simply have to set the thread_id to a new one.
+                thread_id = switch_to_new_thread_id(&thread_id);
+                debug!("Switched to new thread_id: {}", thread_id);
+
+                // In order for them to be saved to the new conversation, they need to be added to the conversation.
+                add_to_conversation(
+                    &thread_id,
+                    new_content.clone(),
+                    freva_config_path.clone(),
+                    user_id.clone(),
+                );
+
+                new_content
             }
         };
 

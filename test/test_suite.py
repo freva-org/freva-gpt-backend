@@ -97,27 +97,18 @@ class StreamResult:
     def has_error_variants(self):
         return any([ "error" in i["variant"].lower() for i in self.json_response])
 
-def generate_full_respone(user_input, chatbot=None, thread_id=None, user_id=None) -> StreamResult:
+def generate_full_respone(user_input, chatbot=None, thread_id=None, user_id=None, edit_at = None) -> StreamResult:
     inner_url = "/streamresponse?input=" + user_input
     if chatbot:
         inner_url = inner_url + "&chatbot=" + chatbot
     if thread_id:
         inner_url = inner_url + "&thread_id=" + thread_id
+    if edit_at:
+        inner_url = inner_url + "&chatvariants=" + str(edit_at)
         
     # The response is streamed, but we will consume it here and store it
     result = StreamResult(chatbot)
     response = get_request(inner_url, stream=True)
-    
-    # unassembled_response = [] # Because the response may not necessary be chunked correctly. We will assemble it here.
-    # for delta in response:
-    #     if delta.decode("utf-8")[0] == "{":
-    #         unassembled_response.append(delta.decode("utf-8"))
-    #     else:
-    #         unassembled_response[-1] += delta.decode("utf-8")
-    
-    # # It's assembled now
-    # result.raw_response = unassembled_response
-    # result.json_response = [json.loads(i) for i in unassembled_response]
 
     # Because the python request library is highly unreliable when it comes to streaming, we will manually assemble the response packet by packet here. 
     raw_response = []
@@ -435,6 +426,65 @@ def test_non_alphanumeric_user_id():
         # Reset the user ID to the default value, so that the other tests can run without issues.
         global_user_id = "testing"
         
+
+def test_edit_input():
+    ''' Can the backend handle edits to the user input? ''' # Since Version 1.10.3
+    # For the EVE demonstration, we want the capability to edit a past user input.
+    # This is a test for whether the backend can handle that.
+    response1 = generate_full_respone("Hi, I'm Sebastian! Who are you?", chatbot="gpt-4o-mini") # Give it my name, to later test whether it remembers it.
+    # The response content doesn't matter yet.
+    response2 = generate_full_respone("Nice to meet you! I've heard about the DKRZ and am a student of the university of Hamburg. Where is the DKRZ located?", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
+    
+    # Now we can edit the second request to run the test. 
+    # The LLM should have remembered my name, but not the fact that I am a student of the university of Hamburg.
+    response3 = generate_full_respone("Thank you. This is a test for the functionality to edit existing requests. What do you know about me?", chatbot="gpt-4o-mini", thread_id=response1.thread_id, edit_at=["User", "Assistant"])
+    # The response should contain my name, but not the fact that I am a student of the university of Hamburg.
+    assert "sebastian" in "".join(response3.assistant_variants).lower(), "Assistant did not remember my name! Instead, it returned: " + ", ".join(response3.assistant_variants)
+    assert "student" not in "".join(response3.assistant_variants).lower(), "Assistant remembered the fact that I am a student of the university of Hamburg, but it should not have"
+    assert "university of hamburg" not in "".join(response3.assistant_variants).lower(), "Assistant remembered the fact that I am a student of the university of Hamburg, but it should not have"
+
+    # Additionally, the new response needs to have a different thread_id, so we can test that.
+    assert response3.thread_id != response1.thread_id, "The thread_id of the edited response is the same as the original response! It should be different, so that the frontend can handle it correctly."
+
+    # And that new thread_id should also be stored in the database, so we can test that.
+    # We know what it should contain.
+    retrived_thread = get_thread_by_id(response3.thread_id)
+    assert retrived_thread, "The thread with the edited response was not found in the database! It should have been stored, so that the frontend can handle it correctly."
+    print("retrived_thread: ", retrived_thread)
+    
+    # There may be some other variants in the thread still, so we only keep those that are User or Assistant.
+    retrived_thread = [i for i in retrived_thread if i["variant"] in ["User", "Assistant"]]
+    # Now we can check the length of the thread.
+    # There should be 4 variants in total, the first and third should be User, and the second and fourth should be Assistant.
+    # The first variant is the User input, the second variant is the Assistant response, the third variant is the User edit, and the fourth variant is the Assistant response to the edit.
+
+    assert len(retrived_thread) == 4, "The thread with the edited response should have 4 variants, but it has " + str(len(retrived_thread)) + "."
+    # The first and third variants should be User, and the second and fourth variants should be Assistant.
+    assert retrived_thread[0]["variant"] == retrived_thread[2]["variant"] == "User", "The first and third variants of the thread with the edited response should be User, but they are not."
+    assert retrived_thread[1]["variant"] == retrived_thread[3]["variant"] == "Assistant", "The second and fourth variants of the thread with the edited response should be Assistant, but they are not."
+    
+
+def test_edit_input_with_code():
+    ''' If the frontend sends an edit request with code, does the backend handle it correctly? ''' # Since Version 1.10.3
+    # Because the backend has python pickles to store the variables, it should be able to handle edits with code.
+    
+    # We'll do the same setup as in previous tests for persistant; so one request to set a variable, a test request to check the variable, and then an edit request to change the variable.
+    response1 = generate_full_respone("Please assign the value 42 to the variable x in the code_interpreter tool. After that, call the tool with the code \"print(x, flush=True)\", without assigning x again. It's a test for the presistance of data.", chatbot="gpt-4o-mini")
+    # The code output should now contain 42
+    assert any("42" in i for i in response1.codeoutput_variants)
+    assert len(response1.code_variants) == 2, "The code variants should contain two variants, one for the assignment of x and one for the print statement."
+
+    response2 = generate_full_respone("Now print the value of x without assigning it again.", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
+    # The code output should now contain 42
+    assert any("42" in i for i in response2.codeoutput_variants)
+    assert all("x=" not in i for i in response2.code_variants), "The code variants should not contain the assignment of x, as it was already assigned in the first request."
+
+    # Now we can edit the second request to the same input, but in a different thread, to test whether the value of x is still stored.
+    response3 = generate_full_respone("Now print the value of x without assigning it again.", chatbot="gpt-4o-mini", thread_id=response1.thread_id, edit_at=["User", "Code", "CodeOutput", "Code", "CodeOutput"])
+    # The code output should now contain 42 again, as the value of x should still be stored.
+    assert any("42" in i for i in response3.codeoutput_variants), "The code output should contain 42, as the value of x should still be stored, but it does not. Instead, it returned: " + ", ".join(response3.codeoutput_variants) 
+    assert all("x=" not in i for i in response3.code_variants), "The code variants should not contain the assignment of x, as it was already assigned in the first request and should still be stored. Instead, it returned: " + ", ".join(response3.code_variants)
+    
 
 
 # --------------------------------

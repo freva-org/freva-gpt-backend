@@ -40,6 +40,9 @@ pub mod heartbeat;
 /// Returns the latest few threads for a given authenticated user
 pub mod get_user_threads;
 
+/// Handles the logic for continuing a conversation from a previous point in time. Specifically, the logic for finding the right point in time to continue from.
+pub mod filter_variants;
+
 // Defines a few useful static variables that are used throughout the chatbot.
 
 use std::sync::{Arc, Mutex};
