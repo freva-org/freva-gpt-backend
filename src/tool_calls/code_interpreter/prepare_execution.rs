@@ -354,7 +354,7 @@ fn post_process(code: String, user_id: String, thread_id: String) -> String {
 
     // (What should be detected to add it) and (what should be added)
     let libraries = [
-        ("freva.", "import freva\n"),
+        ("freva_client.", "import freva_client\n"),
         ("np.", "import numpy as np\n"),
         ("plt.", "import matplotlib.pyplot as plt\n"),
         ("xr.", "import xarray as xr\n"),
@@ -394,7 +394,7 @@ fn post_process_output(output: &str, code: &str) -> String {
     // Loop over all lines. If one starts with "SyntaxError", we'll return it.
     let mut synerr_line = None;
     for line in output.lines() {
-        if line.starts_with("SyntaxError") {
+        if line.starts_with("SyntaxError") || line.starts_with("IndentationError") {
             synerr_line = Some(line);
             break;
         }
