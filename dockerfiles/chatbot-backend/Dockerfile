@@ -2,7 +2,7 @@
 FROM fedora:latest
 
 # Install necessary dependencies for miniconda
-RUN dnf install -y curl bzip2 awk
+RUN dnf install -y curl bzip2 awk git
 
 # Download and install Miniconda
 RUN curl -Lo /tmp/miniforge.sh https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh && \
