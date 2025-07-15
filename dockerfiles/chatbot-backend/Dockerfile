@@ -16,7 +16,7 @@ ENV PATH="/opt/conda/bin:$PATH"
 RUN dnf install -y rust cargo
 
 # Create virtual environment for app
-RUN conda create --name env python=3.12
+RUN conda create --name env python==3.11.10
 RUN conda init bash
 # Adding the conda activate command to the bashrc file means that all subsequent shells will have the conda environment activated
 RUN echo "conda activate env" >> ~/.bashrc
