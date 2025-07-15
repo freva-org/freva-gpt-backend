@@ -45,9 +45,6 @@ ENV PYTHONPATH=/opt/conda/envs/env/lib/python3.12/site-packages
 ENV PATH /opt/conda/envs/env/bin/:$PATH
 ENV LD_LIBRARY_PATH /opt/conda/envs/env/lib/:$PATH
 
-#Freva requires a file to be located there, tecnically it needs to be a cert file, but this should work for now
-RUN touch /opt/conda/envs/env/freva/freva.crt
-
 # set up CrocoDash and CESM
 # set up git email and user name
 RUN git config --global user.email "freva@dkrz.de"
