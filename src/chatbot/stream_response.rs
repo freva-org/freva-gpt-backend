@@ -21,7 +21,7 @@ use crate::{
     auth::is_guest,
     chatbot::{
         available_chatbots::{
-            model_ends_on_no_choice, model_supports_images, OpenAIModels, DEFAULTCHATBOT,
+            model_ends_on_no_choice, model_is_reasoning, model_supports_images, DEFAULTCHATBOT,
         },
         handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
@@ -359,17 +359,14 @@ fn build_request(
             include_usage: true,
         });
 
-    match chatbot {
-        AvailableChatbots::OpenAI(OpenAIModels::o1_mini | OpenAIModels::o3_mini) => {
-            partial_request = partial_request.max_completion_tokens(16000u32); // The max tokens parameter is called differently for the reasoning models.
-        }
-        _ => {
-            partial_request = partial_request
-                .parallel_tool_calls(false) // No parallel tool calls!
-                .temperature(0.4) // The model shouldn't be too creative, but also not too boring.
-                .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
-                .max_tokens(16000u32);
-        }
+    if model_is_reasoning(chatbot) {
+        partial_request = partial_request.max_completion_tokens(16000u32); // The max tokens parameter is called differently for the reasoning models.
+    } else {
+        partial_request = partial_request
+            .parallel_tool_calls(false) // No parallel tool calls!
+            .temperature(0.4) // The model shouldn't be too creative, but also not too boring.
+            .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
+            .max_tokens(16000u32);
     }
 
     partial_request.build()

@@ -3,14 +3,13 @@ use tracing::debug;
 /// The list of available chatbots that the user can choose from.
 /// The first one is the default chatbot.
 pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_4o),
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini),
-    // AvailableChatbots::OpenAI(OpenAIModels::o1_mini), // In Beta, doesn't do streaming yet.
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_3_5_turbo),
-    AvailableChatbots::OpenAI(OpenAIModels::o3_mini),
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1), // New default model, better than 4o
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1_mini),
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1_nano),
+    AvailableChatbots::OpenAI(OpenAIModels::o3),
+    AvailableChatbots::OpenAI(OpenAIModels::o4_mini),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_4o),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini),
     // AvailableChatbots::Ollama(OllamaModels::llama3_2_3B),
     // AvailableChatbots::Ollama(OllamaModels::llama3_1_70B),
     // AvailableChatbots::Ollama(OllamaModels::llama3_1_8B),
@@ -44,13 +43,12 @@ impl From<AvailableChatbots> for String {
             AvailableChatbots::OpenAI(model) => match model {
                 OpenAIModels::gpt_4o => "gpt-4o".to_string(),
                 OpenAIModels::gpt_4o_mini => "gpt-4o-mini".to_string(),
-                OpenAIModels::o1_mini => "o1-mini".to_string(),
                 OpenAIModels::gpt_4_turbo => "gpt-4-turbo".to_string(),
-                OpenAIModels::gpt_3_5_turbo => "gpt-3.5-turbo".to_string(),
-                OpenAIModels::o3_mini => "o3-mini".to_string(),
                 OpenAIModels::gpt_4_1 => "gpt-4.1".to_string(),
                 OpenAIModels::gpt_4_1_mini => "gpt-4.1-mini".to_string(),
                 OpenAIModels::gpt_4_1_nano => "gpt-4.1-nano".to_string(),
+                OpenAIModels::o4_mini => "o4-mini".to_string(),
+                OpenAIModels::o3 => "o3".to_string(),
             },
             AvailableChatbots::Ollama(model) => match model {
                 OllamaModels::llama3_2_3B => "llama3.2".to_string(),
@@ -99,13 +97,11 @@ pub enum OpenAIModels {
     #[allow(non_camel_case_types)]
     gpt_4o_mini,
     #[allow(non_camel_case_types)]
-    o1_mini,
-    #[allow(non_camel_case_types)]
     gpt_4_turbo,
     #[allow(non_camel_case_types)]
-    gpt_3_5_turbo,
+    o4_mini,
     #[allow(non_camel_case_types)]
-    o3_mini,
+    o3,
     #[allow(non_camel_case_types)]
     gpt_4_1,
     #[allow(non_camel_case_types)]
@@ -175,8 +171,19 @@ pub const fn model_supports_images(model: AvailableChatbots) -> bool {
             | OpenAIModels::gpt_4o_mini
             | OpenAIModels::gpt_4_1
             | OpenAIModels::gpt_4_1_mini
-            | OpenAIModels::gpt_4_1_nano,
+            | OpenAIModels::gpt_4_1_nano
+            | OpenAIModels::gpt_4_turbo
+            | OpenAIModels::o4_mini
+            | OpenAIModels::o3,
         ) => true,
         _ => false, // Update this when more models support images.
     }
+}
+
+/// Some OpenAI Models are reasoning models and the parameters have different names.
+pub const fn model_is_reasoning(model: AvailableChatbots) -> bool {
+    matches!(
+        model,
+        AvailableChatbots::OpenAI(OpenAIModels::o4_mini | OpenAIModels::o3)
+    )
 }
