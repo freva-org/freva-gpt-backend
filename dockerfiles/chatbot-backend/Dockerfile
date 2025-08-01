@@ -27,7 +27,7 @@ RUN conda install --yes -c conda-forge -n env numpy matplotlib pandas xarray xes
 RUN conda install --yes -c conda-forge -n env netcdf4 cartopy contourpy geopy
 RUN conda install --yes -c conda-forge -n env aiohttp requests
 RUN conda install --yes -c conda-forge -n env scikit-learn pytorch geopandas healpy easygems astropy
-RUN conda install --yes -c conda-forge -n env uv 
+RUN conda install --yes -c conda-forge -n env uv mcp
 # Ironically, I use conda to install uv, but only for uvx. I'll try to cut the time it takes to build the image by installing a bunch of the libraries using uv instead of conda.
 
 # Also copy over the Cargo.toml file to be able to start the server
