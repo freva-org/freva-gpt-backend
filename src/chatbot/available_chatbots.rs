@@ -3,6 +3,9 @@ use tracing::debug;
 /// The list of available chatbots that the user can choose from.
 /// The first one is the default chatbot.
 pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_5),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_5_mini),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_5_nano),
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4o),
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini),
     // AvailableChatbots::OpenAI(OpenAIModels::o1_mini), // In Beta, doesn't do streaming yet.
@@ -51,6 +54,9 @@ impl From<AvailableChatbots> for String {
                 OpenAIModels::gpt_4_1 => "gpt-4.1".to_string(),
                 OpenAIModels::gpt_4_1_mini => "gpt-4.1-mini".to_string(),
                 OpenAIModels::gpt_4_1_nano => "gpt-4.1-nano".to_string(),
+                OpenAIModels::gpt_5 => "gpt-5".to_string(),
+                OpenAIModels::gpt_5_mini => "gpt-5-mini".to_string(),
+                OpenAIModels::gpt_5_nano => "gpt-5-nano".to_string(),
             },
             AvailableChatbots::Ollama(model) => match model {
                 OllamaModels::llama3_2_3B => "llama3.2".to_string(),
@@ -112,6 +118,12 @@ pub enum OpenAIModels {
     gpt_4_1_mini,
     #[allow(non_camel_case_types)]
     gpt_4_1_nano,
+    #[allow(non_camel_case_types)]
+    gpt_5,
+    #[allow(non_camel_case_types)]
+    gpt_5_mini,
+    #[allow(non_camel_case_types)]
+    gpt_5_nano,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -175,7 +187,10 @@ pub const fn model_supports_images(model: AvailableChatbots) -> bool {
             | OpenAIModels::gpt_4o_mini
             | OpenAIModels::gpt_4_1
             | OpenAIModels::gpt_4_1_mini
-            | OpenAIModels::gpt_4_1_nano,
+            | OpenAIModels::gpt_4_1_nano
+            | OpenAIModels::gpt_5
+            | OpenAIModels::gpt_5_mini
+            | OpenAIModels::gpt_5_nano,
         ) => true,
         _ => false, // Update this when more models support images.
     }

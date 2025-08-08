@@ -191,12 +191,14 @@ def print_docs():
 
 def test_available_chatbots():
     response = get_avail_chatbots()
+    assert "gpt-5" in response
+    assert "gpt-5-mini" in response
     assert "gpt-4o-mini" in response
     assert "gpt-4o" in response
 
 
 def get_hello_world_thread_id() -> str:
-    response = generate_full_respone("Please use the code_interpreter tool to run the following code exactly and only once: \"print('Hello\\nWorld\\n!', flush=True)\".", chatbot="gpt-4o-mini")
+    response = generate_full_respone("Please use the code_interpreter tool to run the following code exactly and only once: \"print('Hello\\nWorld\\n!', flush=True)\".", chatbot="gpt-5-mini")
     # Just make sure the code output contains "Hello World !"
     assert any("Hello\nWorld\n!" in i for i in response.codeoutput_variants)
     # Now return the thread_id for further testing
@@ -216,7 +218,7 @@ def test_hello_world():
 
 def test_sine_wave(display = False):
     ''' Can the code_interpreter tool handle matplotlib and output an image? ''' # Base functionality test
-    response = generate_full_respone("This is a test regarding your capabilities of using the code_interpreter tool and whether it supports matplotlib. Please use the code_interpreter tool to run the following code: \"import numpy as np\nimport matplotlib.pyplot as plt\nt = np.linspace(-2 * np.pi, 2 * np.pi, 100)\nsine_wave = np.sin(t)\nplt.figure(figsize=(10, 5))\nplt.plot(t, sine_wave, label='Sine Wave')\nplt.title('Sine Wave from -2π to 2π')\nplt.xlabel('Angle (radians)')\nplt.ylabel('Sine value')\nplt.axhline(0, color='black', linewidth=0.5, linestyle='--')\nplt.axvline(0, color='black', linewidth=0.5, linestyle='--')\nplt.grid()\nplt.legend()\nplt.show()\".", chatbot="gpt-4o-mini")
+    response = generate_full_respone("This is a test regarding your capabilities of using the code_interpreter tool and whether it supports matplotlib. Please use the code_interpreter tool to run the following code: \"import numpy as np\nimport matplotlib.pyplot as plt\nt = np.linspace(-2 * np.pi, 2 * np.pi, 100)\nsine_wave = np.sin(t)\nplt.figure(figsize=(10, 5))\nplt.plot(t, sine_wave, label='Sine Wave')\nplt.title('Sine Wave from -2π to 2π')\nplt.xlabel('Angle (radians)')\nplt.ylabel('Sine value')\nplt.axhline(0, color='black', linewidth=0.5, linestyle='--')\nplt.axvline(0, color='black', linewidth=0.5, linestyle='--')\nplt.grid()\nplt.legend()\nplt.show()\".", chatbot="gpt-5-mini")
     # We want to make sure we have generated code, code output and an image. But we want to print the assistant response if it fails.
     print(response.assistant_variants)
     assert response.code_variants
@@ -233,9 +235,9 @@ def test_sine_wave(display = False):
 
 def test_persistent_thread_storage():
     ''' Does the backend remember the content of a thread? ''' # Base functionality test
-    response = generate_full_respone("Please add 2+2 in the code_interpreter tool.", chatbot="gpt-4o-mini")
+    response = generate_full_respone("Please add 2+2 in the code_interpreter tool.", chatbot="gpt-5-mini")
     # Now follow up with another request to the same thread_id, to test whether the storage is persistent
-    response2 = generate_full_respone("Now please multiply the result by 3.", chatbot="gpt-4o-mini", thread_id=response.thread_id)
+    response2 = generate_full_respone("Now please multiply the result by 3.", chatbot="gpt-5-mini", thread_id=response.thread_id)
     # The code output should now contain 12
     assert any("12" in i for i in response2.codeoutput_variants)
 
@@ -243,7 +245,7 @@ def test_persistent_thread_storage():
 def test_persistant_state_storage():
     ''' Can the backend refer to the same variable in different tool calls? ''' # Since Version 1.6.3
     # Here, we want to test whether the value of a variable is stored between tool calls (not requests)
-    response = generate_full_respone("Please assign the value 42 to the variable x in the code_interpreter tool. After that, call the tool with the code \"print(x, flush=True)\", without assigning x again. It's a test for the presistance of data.", chatbot="gpt-4o-mini")
+    response = generate_full_respone("Please assign the value 42 to the variable x in the code_interpreter tool. After that, call the tool with the code \"print(x, flush=True)\", without assigning x again. It's a test for the presistance of data.", chatbot="gpt-5-mini")
     # The code output should now contain 42
     assert any("42" in i for i in response.codeoutput_variants)
     # Also make sure there are actually two code variants
@@ -252,7 +254,7 @@ def test_persistant_state_storage():
 
 def test_persistant_xarray_storage():
     ''' Can the backend refer to the same xarray in different tool calls? ''' # Since Version 1.6.5
-    reponse = generate_full_respone("Please generate a simple xarray dataset in the code_interpreter tool and print out the content. After that, call the tool with the code \"print(ds, flush=True)\", without generating the dataset again. It's a test for the presistance of data, specifically whether xarray Datasets also work.", chatbot="gpt-4o-mini")
+    reponse = generate_full_respone("Please generate a simple xarray dataset in the code_interpreter tool and print out the content. After that, call the tool with the code \"print(ds, flush=True)\", without generating the dataset again. It's a test for the presistance of data, specifically whether xarray Datasets also work.", chatbot="gpt-5-mini")
     # The code output should now contain the content of the xarray dataset
     assert any(("xarray.Dataset" in i or "xarray.DataArray" in i) for i in reponse.codeoutput_variants)
     # Also make sure there are actually two code variants
@@ -277,7 +279,7 @@ def test_qwen_code_interpreter():
 
 def test_heartbeat():
     ''' Can the backend send a heartbeat while a long calculation is running? ''' # Since Version 1.8.1
-    response = generate_full_respone("Please use the code_interpreter tool to run the following code: \"import time\ntime.sleep(7)\".", chatbot="gpt-4o-mini")
+    response = generate_full_respone("Please use the code_interpreter tool to run the following code: \"import time\ntime.sleep(7)\".", chatbot="gpt-5-mini")
     # There should now, in total be at least three ServerHint Variants
     assert len(response.server_hint_variants) >= 3
     # The second Serverhint (first is thread_id) should be JSON containing "memory", "total_memory", "cpu_last_minute", "process_cpu" and "process_memory"
@@ -294,7 +296,7 @@ def test_heartbeat():
 
 def test_syntax_hinting():
     ''' Can the backend provide extended hints on syntax errors? ''' # Since Version 1.8.4
-    response = generate_full_respone("Please use the code_interpreter tool to run the following code: \"print('Hello World'\". This is a test for the improved syntax error reporting. If a hint containing the syntax error is returned, the test is successful.", chatbot="gpt-4o-mini")
+    response = generate_full_respone("Please use the code_interpreter tool to run the following code: \"print('Hello World'\". This is a test for the improved syntax error reporting. If a hint containing the syntax error is returned, the test is successful.", chatbot="gpt-5-mini")
     # We can now check the Code Output for the string "Hint: the error occured on line", as well as "SyntaxError"
     assert any("Hint: the error occured on line" in i for i in response.codeoutput_variants)
     assert any("SyntaxError" in i for i in response.codeoutput_variants)
@@ -303,12 +305,12 @@ def test_regression_variable_storage():
     ''' Does the backend correctly handle the edge case of variable storage? ''' # Since Version 1.8.9
     input = "This is a test on a corner case of the code_interpreter tool: variables don't seem to be stored if the code errors before the last line.\
 To test this. Please run the following code: \"x = 42\nraise Exception('This is a test exception')\nprint('Padding for last-line-logic')\","
-    response = generate_full_respone(input, chatbot="gpt-4o-mini")
+    response = generate_full_respone(input, chatbot="gpt-5-mini")
     # The code output should now contain the exception message
     assert any("This is a test exception" in i for i in response.codeoutput_variants)
 
     # Now make sure the variable x is still stored
-    response2 = generate_full_respone("Now print the value of x without assigning it again.", chatbot="gpt-4o-mini", thread_id=response.thread_id)
+    response2 = generate_full_respone("Now print the value of x without assigning it again.", chatbot="gpt-5-mini", thread_id=response.thread_id)
     # The code output should now contain 42
     assert any("42" in i for i in response2.codeoutput_variants)
 
@@ -334,11 +336,11 @@ def test_third_request():
     
     # response1 = generate_full_respone("Please remember the following information: \"I am a software engineer and I like to play chess\".", chatbot="gpt-4o-mini")
     # This doesn't work well because it technically does work, but is not in the style of what frevaGPT was designed to work with.
-    response1 = generate_full_respone("Hi! I'm Sebastian from the DRKZ. Who are you?", chatbot="gpt-4o-mini")
+    response1 = generate_full_respone("Hi! I'm Sebastian from the DRKZ. Who are you?", chatbot="gpt-5-mini")
     # The assistant should now remember the users name.
-    response2 = generate_full_respone("Nice to meet you! What do you think about chess?", chatbot="gpt-4o-mini", thread_id=response1.thread_id) # Just some filler. I'm not good at small talk.
+    response2 = generate_full_respone("Nice to meet you! What do you think about chess?", chatbot="gpt-5-mini", thread_id=response1.thread_id) # Just some filler. I'm not good at small talk.
     
-    response3 = generate_full_respone("What was my name again?", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
+    response3 = generate_full_respone("What was my name again?", chatbot="gpt-5-mini", thread_id=response1.thread_id)
     
     assert any("Sebastian" in i for i in response3.assistant_variants)
 
@@ -377,7 +379,7 @@ def test_use_rw_dir():
     # The rw directory is a directory that the LLM can use to store and load files for the user.
     # This is a test to see if the LLM can use it correctly.
     # It should also infer that if the user wants to save a file, it should use the rw directory.
-    response = generate_full_respone("This is a test. Please generate a plot of a sine wave from -2π to 2π and save it as a PNG file. Remember to save it in the proper location.", chatbot="gpt-4o-mini")
+    response = generate_full_respone("This is a test. Please generate a plot of a sine wave from -2π to 2π and save it as a PNG file. Remember to save it in the proper location.", chatbot="gpt-5-mini")
     # print(response)
     # Afer this, it should have generated a file in the rw directory.
     # Specifically, at "rw_dir/testing/{thread_id}/????.png"
@@ -398,7 +400,7 @@ def test_user_vision():
     ''' Can the LLM see the output that it generated? ''' # Since Version 1.10.0
 
     # The LLM should be able to see the image that the code it wrote generated.
-    response = generate_full_respone("You should have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates, save the image somehwere or write any code except for the plotting of the X! Look at the generated image instead.", chatbot="gpt-4o-mini")
+    response = generate_full_respone("You should have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates, save the image somehwere or write any code except for the plotting of the X! Look at the generated image instead.", chatbot="gpt-5-mini")
 
     # print(response) # Debug
 
@@ -428,7 +430,7 @@ def test_non_alphanumeric_user_id():
         global global_user_id
         global_user_id = "example@web.de" # This is a valid email address, but contains non-alphanumeric characters.
         # Now we can run the test
-        response = generate_full_respone("This is simple test. Please just return 'OK' and exit.", chatbot="gpt-4o-mini")
+        response = generate_full_respone("This is simple test. Please just return 'OK' and exit.", chatbot="gpt-5-mini")
         # The response should contain "OK"
         assert any("OK" in i for i in response.assistant_variants), "Assistant did not return 'OK'! Instead, it returned: " + ", ".join(response.assistant_variants)
     finally:
