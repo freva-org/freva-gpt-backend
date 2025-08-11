@@ -18,7 +18,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    auth::is_guest,
+    auth::{is_guest, ALLOW_FALLBACK_OLD_AUTH},
     chatbot::{
         available_chatbots::{
             model_ends_on_no_choice, model_is_reasoning, model_supports_images, DEFAULTCHATBOT,
@@ -89,8 +89,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         Some(thread_id) => (thread_id.to_string(), false),
     };
 
-    // New in Version 1.9.1: require the user_id to be set.
-    // Later, proper authentication will take over.
+    // Only allow setting the user_id if the ALLOW_FALLBACK_OLD_AUTH is enabled.
     let user_id = match maybe_username {
         Some(username) => {
             // If the user is authenticated, we'll use their username as the user_id.
@@ -101,23 +100,30 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
             username
         }
         None => {
-            match qstring.get("user_id") {
-                None | Some("") => {
-                    // If the user ID is not found, we'll return a 400
-                    warn!("The User requested a stream without a user_id.");
-                    // For convenience, we'll also return the list of recieved parameters.
-                    let query_parameter_keys = qstring
-                        .to_pairs()
-                        .iter()
-                        .map(|(key, _)| *key)
-                        .collect::<Vec<_>>()
-                        .join(", ");
+            if ALLOW_FALLBACK_OLD_AUTH {
+                match qstring.get("user_id") {
+                    None | Some("") => {
+                        // If the user ID is not found, we'll return a 400
+                        warn!("The User requested a stream without a user_id.");
+                        // For convenience, we'll also return the list of recieved parameters.
+                        let query_parameter_keys = qstring
+                            .to_pairs()
+                            .iter()
+                            .map(|(key, _)| *key)
+                            .collect::<Vec<_>>()
+                            .join(", ");
 
-                    return HttpResponse::UnprocessableEntity().body(
+                        return HttpResponse::UnprocessableEntity().body(
                         "User ID not found. Please provide a non-empty user_id in the query parameters.\nHint: The following query parameters were received: ".to_string() + &query_parameter_keys,
                     );
+                    }
+                    Some(user_id) => user_id.to_string(),
                 }
-                Some(user_id) => user_id.to_string(),
+            } else {
+                // Fallback not allowed, return useful error message.
+                warn!("The User requested a stream without them being authenticated; no user_id found");
+                return HttpResponse::UnprocessableEntity()
+                    .body("Could not determine User_id. Please authenticate and try again.");
             }
         }
     };

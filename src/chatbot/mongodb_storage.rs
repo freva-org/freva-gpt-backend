@@ -219,7 +219,6 @@ pub async fn read_threads(user_id: &str, database: Database) -> Vec<MongoDBThrea
 }
 
 /// Constructs a MongoDB database connection using the Vault URL.
-/// If no Vault URL is given, the manually constructed database connection (which is mainly for testing purposes) is used.
 pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
     let mongodb_uri = get_mongodb_uri(vault_url).await?;
 
@@ -230,7 +229,8 @@ pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
             client
         }
         Err(e) => {
-            warn!("Failed to connect to MongoDB: {:?}; trying again with stripped options. (Freva doesn't adhere to the mongoDB connection string format entirely.)", e);
+            // Using warn! here is far too noisy as each request will trigger it.
+            info!("Failed to connect to MongoDB: {:?}; trying again with stripped options. (Freva doesn't adhere to the mongoDB connection string format entirely.)", e);
             // At the very end are options, that SHOULD be only after a slash, but Freva doesn't adhere to that.
             // So we strip the options and try again.
             if let Some(question_mark_index) = mongodb_uri.rfind('?') {
