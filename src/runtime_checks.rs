@@ -171,6 +171,30 @@ pub async fn run_runtime_checks() {
         flush_stdout_stderr();
     }
 
+    // Because the model for genAI takes some time to load, we'll start the loading here.
+    // To load the mode, we simply have to execute:
+    //     from stableclimgen.src.decode import init_model
+    //     init_model()
+    // in the code interpreter.
+    // I'm not sure whether we can defer it, so we'll just do it live here.
+    print!("Loading the genAI model... ");
+    flush_stdout_stderr();
+    info!("Loading the genAI model...");
+    let _output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(
+            r#"{"code": "from stableclimgen.src.decode import init_model\ninit_model()"}"#
+                .to_string(),
+        ),
+        "test".to_string(),
+        None,
+        "testing".to_string(),
+    )
+    .await;
+    // No asserts necessary, as the model loading is done in the background and we don't care about the output.
+    println!("Success!");
+    info!("The genAI model has been loaded.");
+    flush_stdout_stderr();
+
     // To make sure not to confuse the backend, clear the tool logger.
     // Due to debugging, this now needs two arguments.
     print_and_clear_tool_logs(std::time::SystemTime::now(), std::time::SystemTime::now());

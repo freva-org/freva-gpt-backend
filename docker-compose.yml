@@ -10,14 +10,22 @@ services:
       - "${TARGET_PORT:-8502}:${BACKEND_PORT:-8502}" # If either is unset, the default value will be used.
     volumes:
       - /work:/work:ro
-      - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/logs:/app/logs
-      - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/threads:/app/threads
-      - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/target:/app/target
+      - /container/da/genai_data:/container/da/genai_data
+      - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/logs:/app/logs
+      - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/threads:/app/threads
+      - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/target:/app/target
+      - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/python_pickles:/app/python_pickles
       - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles # Deprecated, once used for test data before freva support was added. Now used for debugging.
-      - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/python_pickles:/app/python_pickles
     networks:
       - freva-gpt
-  ollama: # Ollama is only for the backend and not accessible from the outside. Port 11434 is not exposed.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+  ollama:
     image: ollama/ollama
     hostname: ollama-instance-${INSTANCE_NAME}
     volumes:

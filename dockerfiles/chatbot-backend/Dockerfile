@@ -1,5 +1,5 @@
 # Pull from fedora because alpine and ubuntu both have issues with the python environment or podman
-FROM fedora:latest
+FROM docker.io/fedora:latest
 
 # Install necessary dependencies for miniconda
 RUN dnf install -y curl bzip2 awk git
@@ -26,7 +26,7 @@ RUN conda install --yes -c conda-forge -n env freva-client dill
 RUN conda install --yes -c conda-forge -n env numpy matplotlib pandas xarray xesmf scipy
 RUN conda install --yes -c conda-forge -n env netcdf4 cartopy contourpy geopy
 RUN conda install --yes -c conda-forge -n env aiohttp requests
-RUN conda install --yes -c conda-forge -n env scikit-learn pytorch geopandas healpy easygems astropy
+RUN conda install --yes -c conda-forge -n env scikit-learn geopandas healpy easygems astropy
 RUN conda install --yes -c conda-forge -n env uv mcp
 # Ironically, I use conda to install uv, but only for uvx. I'll try to cut the time it takes to build the image by installing a bunch of the libraries using uv instead of conda.
 
@@ -70,6 +70,10 @@ RUN rm /app/gebco_2024.zip
 
 # DEBUG: Crashes the build with info about the python environment that will be used.
 # ENV PYO3_PRINT_CONFIG 1
+
+# Install stableclimgen
+RUN git clone --single-branch --branch density_diffusion https://github.com/FREVA-CLINT/stableclimgen
+RUN pip install stableclimgen/.
 
 # Move over the source code; for quick builds, always put this last.
 COPY src /app/src
