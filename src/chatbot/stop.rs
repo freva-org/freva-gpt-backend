@@ -39,9 +39,9 @@ pub async fn stop(req: HttpRequest) -> impl Responder {
     // Try to get the thread ID from the request's query parameters.
     let thread_id = match qstring.get("thread_id") {
         None | Some("") => {
-            // If the thread ID is not found, we'll return a 400
+            // If the thread ID is not found, we'll return a 422
             warn!("The User requested a stop without a thread ID.");
-            return HttpResponse::BadRequest()
+            return HttpResponse::UnprocessableEntity()
                 .body("Thread ID not found. Please provide a thread_id in the query parameters.");
         }
         Some(thread_id) => thread_id,
@@ -84,7 +84,7 @@ pub async fn stop(req: HttpRequest) -> impl Responder {
             HttpResponse::Ok().body("Conversation stopped.")
         }
         StopResult::NotFound => HttpResponse::NotFound().body("Conversation not found."),
-        StopResult::NotRunning => HttpResponse::BadRequest().body("Conversation not running."),
+        StopResult::NotRunning => HttpResponse::Conflict().body("Conversation not running."),
         StopResult::Error(e) => {
             warn!("Error stopping conversation: {:?}", e);
             HttpResponse::InternalServerError().body("Error stopping conversation.")

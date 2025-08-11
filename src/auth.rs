@@ -7,11 +7,15 @@ pub static AUTH_KEY: once_cell::sync::OnceCell<String> = once_cell::sync::OnceCe
 pub static ALLOW_GUESTS: once_cell::sync::OnceCell<bool> = once_cell::sync::OnceCell::new();
 
 use actix_web::{http::header::HeaderMap, HttpResponse};
+use once_cell::sync::Lazy;
 use qstring::QString;
+use reqwest::Client;
 /// Very simple macro for the API points to call at the beginning to make sure that a request is authorized.
 /// If it isn't, it automatically returns the correct response.
 /// If a username was found in the token check, it will be returned.
 use tracing::{debug, error, info, trace, warn};
+
+static ALLOW_FALLBACK_OLD_AUTH: bool = false; // Whether or not the old auth system should be used as a fallback.
 
 pub async fn authorize_or_fail_fn(
     qstring: &QString,
@@ -21,25 +25,6 @@ pub async fn authorize_or_fail_fn(
         error!("No key found in the environment. Sending 500.");
         return Err(HttpResponse::InternalServerError()
             .body("No auth key found in the environment; Authorization failed."));
-    };
-
-    // The new authentication system requires the client to (usually over nginx) send a vault url in the headers.
-    // Against this URL, the token will be checked.
-    let vault_url = headers
-        .get("x-freva-vault-url")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_owned());
-
-    let vault_url = if let Some(url) = vault_url {
-        // Success case
-        debug!("Vault URL found in headers: {}", url);
-        url
-    } else {
-        // Because we expect all requests to go through nginx or to be done manually, we expect the vault URL to be present.
-        warn!("No vault URL found in headers, expecting incorrect or malicous usage.");
-        return Err(HttpResponse::BadRequest()
-            .body("Authentication not successful; please use the nginx proxy."));
-        // Deliberately vague
     };
 
     // Read from the variable `qstring`
@@ -58,7 +43,7 @@ pub async fn authorize_or_fail_fn(
                 Ok(header_val) => header_val.to_string(),
                 Err(e) => {
                     warn!("Authorization header is not a valid UTF-8 string: {}", e);
-                    return Err(HttpResponse::BadRequest()
+                    return Err(HttpResponse::UnprocessableEntity()
                         .body("Authorization header is not a valid UTF-8 string."));
                 }
             };
@@ -67,12 +52,30 @@ pub async fn authorize_or_fail_fn(
             // The Authentication header is a Bearer token, so we need to extract the token from it.
             let Some(token) = auth_string.strip_prefix("Bearer ") else {
                 warn!("Authorization header is not a Bearer token.");
-                return Err(HttpResponse::BadRequest().body(
+                return Err(HttpResponse::UnprocessableEntity().body(
                     "Authorization header is not a Bearer token. Please use the Bearer token format.",
                 ));
             };
 
-            let token_check = get_username_from_token(token, &vault_url).await;
+            // I missed a single line two months ago: the username check is not done against the vault,
+            // But rather a seperate endpoint, which is specified in the "x-freva-rest-url" header.
+
+            let rest_url = headers
+                .get("x-freva-rest-url")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_owned());
+
+            // We can only do the token check if the rest URL is present.
+            let token_check = if let Some(rest_url) = rest_url {
+                // If the rest URL is present, we'll check the token against it.
+                debug!("Rest URL found in headers: {}", rest_url);
+                get_username_from_token(token, &rest_url).await
+            } else {
+                // If the rest URL is not present, we'll return a 400.
+                warn!("No rest URL found in headers, cannot check token.");
+                return Err(HttpResponse::BadRequest()
+                    .body("Authentication not successful; please use the nginx proxy. (rest)"));
+            };
 
             // Depending on whether the token was valid or not, check the query string token.
             match token_check {
@@ -81,7 +84,16 @@ pub async fn authorize_or_fail_fn(
                     Ok(Some(username))
                 }
                 Err(tokencheck_error) => {
-                    // Now we have the token, we need to check whether it is valid.
+                    // Depending on whether or not we want to allow the old auth system,
+                    // we'll either return the error or check the query string token.
+                    if !ALLOW_FALLBACK_OLD_AUTH {
+                        // If we don't allow the old auth system, we'll return the error.
+                        warn!(
+                            "Authorization header is not valid. Sending error: {:?}",
+                            tokencheck_error
+                        );
+                        return Err(tokencheck_error);
+                    }
                     info!("Token check failed, checking query string auth_key.");
                     if let Some(query_token) = maybe_key {
                         // If the query string token is present, we'll check whether it equals the token.
@@ -106,6 +118,13 @@ pub async fn authorize_or_fail_fn(
             }
         }
         (Some(key), None) => {
+            // Again, maybe fall back. Because the new auth header wasn't provided, this must fail.
+            if !ALLOW_FALLBACK_OLD_AUTH {
+                warn!("No Authorization header found. Sending 401.");
+                return Err(HttpResponse::Unauthorized()
+                    .body("No Authorization header found. Please use the Bearer token format."));
+            }
+
             // If the key is not the same as the one in the environment, we'll return a 401.
             if key != auth_key {
                 warn!("Unauthorized request.");
@@ -125,22 +144,31 @@ pub async fn authorize_or_fail_fn(
     }
 }
 
-/// Recives a token, checks it against the URL provided in the header and returns the username.
-async fn get_username_from_token(token: &str, vault_url: &str) -> Result<String, HttpResponse> {
-    debug!("Checking token: {}", token);
-    debug!("Using vault URL: {}", vault_url);
+static REQWEST_CLIENT: Lazy<Client> = Lazy::new(reqwest::Client::new);
 
-    // // Also, for development, if the AUTH_URL is set to NO_AUTH, we'll skip the check. This is so I don't have to
-    // // set up a server to check the token against.
-    // if auth_url == "NO_AUTH" {
-    //     debug!("Skipping token check, AUTH_URL is set to NO_AUTH.");
-    //     return Ok("testing".to_string()); // "testing" is the username for development.
-    // }
+/// Recives a token, checks it against the URL provided in the header and returns the username.
+async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, HttpResponse> {
+    debug!("Checking token: {}", token);
+    debug!("Using rest URL: {}", rest_url);
 
     // If the URL is set, we'll send a GET request to it with the token in the header.
-    let client = reqwest::Client::new();
-    let response = client
-        .get(vault_url.to_string() + "/auth/v2/userinfo") // The endpoint is at "/auth/v2/userinfo"
+
+    // The entire url ending is "/api/freva-nextgen/auth/v2/userinfo",
+    // But it sometimes doesn't send the api and nextgen part, so we need to add it ourselves.
+    let path = if rest_url.ends_with("/api/freva-nextgen/auth/v2/userinfo") {
+        "".to_string() // The URL already contains the path.
+    } else if rest_url.ends_with("/api/freva-nextgen/") {
+        "auth/v2/userinfo".to_string()
+    } else if rest_url.ends_with("/api/freva-nextgen") {
+        "/auth/v2/userinfo".to_string()
+    } else {
+        "/api/freva-nextgen/auth/v2/userinfo".to_string() // The URL does not contain the path, so we add it.
+    };
+
+    debug!("Using path: {}", path);
+
+    let response = REQWEST_CLIENT
+        .get(rest_url.to_string() + &path)
         .header("Authorization", format!("Bearer {token}"));
     let response = response.send().await;
 
@@ -159,14 +187,15 @@ async fn get_username_from_token(token: &str, vault_url: &str) -> Result<String,
             } else {
                 // If the response is not successful, we'll return a 401.
                 warn!("Token check failed, status code: {}", res.status());
-                return Err(HttpResponse::Unauthorized().body("Token check failed."));
+                return Err(HttpResponse::Unauthorized()
+                    .body("Token check failed, the token is likely not valid (anymore)."));
             }
         }
         Err(e) => {
-            // If there was an error sending the request, we'll return a 500.
+            // If there was an error sending the request, we'll return a 503.
             error!("Error sending token check request: {}", e);
             return Err(
-                HttpResponse::InternalServerError().body("Error sending token check request.")
+                HttpResponse::ServiceUnavailable().body("Error sending token check request."), // This is technically about the vault, but 503 fits better than 401 here.
             );
         }
     };
@@ -178,18 +207,25 @@ async fn get_username_from_token(token: &str, vault_url: &str) -> Result<String,
             if let Some(username) = json["username"].as_str() {
                 username.to_string()
             } else {
-                // If the username is not found, we'll return a 500.
-                error!("Username not found in token check response.");
-                return Err(HttpResponse::InternalServerError()
-                    .body("Username not found in token check response."));
+                // If the username is not found, this is either because the token is invalid or the response is malformed.
+                // If the token is invalid, the response will contain a "detail" field with an error message.
+                if let Some(detail) = json["detail"].as_str() {
+                    error!("Token check failed, detail: {}", detail);
+                    return Err(HttpResponse::Unauthorized()
+                        .body(format!("Token check failed: {}", detail)));
+                } else {
+                    // The response was malformed, that's a 502.
+                    error!("Token check response is malformed, no username found.");
+                    return Err(HttpResponse::BadGateway()
+                        .body("Token check response is malformed, no username found."));
+                }
             }
         }
         Err(e) => {
-            // If the JSON is not valid, we'll return a 500.
+            // If the JSON is not valid, we'll return a 502.
             error!("Error parsing token check response: {}", e);
-            return Err(
-                HttpResponse::InternalServerError().body("Error parsing token check response.")
-            );
+            return Err(HttpResponse::BadGateway()
+                .body("Token check response is malformed, not valid JSON."));
         }
     };
     debug!("Token check successful, username: {}", username);
@@ -200,8 +236,7 @@ async fn get_username_from_token(token: &str, vault_url: &str) -> Result<String,
 pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
     // The vault URL will be contained in the answer to the request to the vault. (No endpoint or authentication needed.)
     debug!("Getting MongoDB URL from vault: {}", vault_url);
-    let client = reqwest::Client::new();
-    let response = client.get(vault_url).send().await;
+    let response = REQWEST_CLIENT.get(vault_url).send().await;
 
     // Extract the result or fail
     let result = match response {
@@ -214,22 +249,22 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
                     Ok(text) => text.trim().to_owned(),
                     Err(e) => {
                         error!("Error reading response text: {}", e);
-                        return Err(HttpResponse::InternalServerError()
+                        return Err(HttpResponse::BadGateway()
                             .body("Error reading response text from vault."));
                     }
                 };
                 debug!("Vault response: {}", content);
                 content
             } else {
-                // If the response is not successful, we'll return a 500.
+                // If the response is not successful, we'll return a 502.
                 warn!("Failed to get MongoDB URL, status code: {}", res.status());
-                return Err(HttpResponse::InternalServerError().body("Failed to get MongoDB URL."));
+                return Err(HttpResponse::BadGateway().body("Failed to get MongoDB URL."));
             }
         }
         Err(e) => {
-            // If there was an error sending the request, we'll return a 500.
+            // If there was an error sending the request, we'll return a 503.
             error!("Error sending request to vault: {}", e);
-            return Err(HttpResponse::InternalServerError().body("Error sending request to vault."));
+            return Err(HttpResponse::ServiceUnavailable().body("Error sending request to vault."));
         }
     };
 
@@ -237,19 +272,23 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
     let mongodb_url = match serde_json::from_str::<serde_json::Value>(&result) {
         Ok(json) => {
             // If the JSON is valid, we'll return the MongoDB URL.
-            if let Some(url) = json["mongodb.url"].as_str() {
+            if let Some(url) = json["mongodb.url"]
+                .as_str()
+                .or_else(|| json["mongo.url"].as_str())
+            {
                 url.to_string()
             } else {
-                // If the MongoDB URL is not found, we'll return a 500.
+                // If the MongoDB URL is not found, we'll return a 502.
                 error!("MongoDB URL not found in vault response.");
-                return Err(HttpResponse::InternalServerError()
-                    .body("MongoDB URL not found in vault response."));
+                return Err(
+                    HttpResponse::BadGateway().body("MongoDB URL not found in vault response.")
+                );
             }
         }
         Err(e) => {
-            // If the JSON is not valid, we'll return a 500.
+            // If the JSON is not valid, we'll return a 502.
             error!("Error parsing vault response: {}", e);
-            return Err(HttpResponse::InternalServerError().body("Error parsing vault response."));
+            return Err(HttpResponse::BadGateway().body("Error parsing vault response."));
         }
     };
     debug!("MongoDB URL: {}", mongodb_url);

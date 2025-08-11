@@ -230,8 +230,31 @@ pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
             client
         }
         Err(e) => {
-            error!("Failed to connect to MongoDB: {:?}", e);
-            return Err(HttpResponse::InternalServerError().body("Failed to connect to MongoDB"));
+            warn!("Failed to connect to MongoDB: {:?}; trying again with stripped options. (Freva doesn't adhere to the mongoDB connection string format entirely.)", e);
+            // At the very end are options, that SHOULD be only after a slash, but Freva doesn't adhere to that.
+            // So we strip the options and try again.
+            if let Some(question_mark_index) = mongodb_uri.rfind('?') {
+                // Strip the options from the URI.
+                let stripped_uri = &mongodb_uri[..question_mark_index];
+                debug!("Stripped MongoDB URI: {}", stripped_uri);
+                match mongodb::Client::with_uri_str(stripped_uri).await {
+                    Ok(client) => {
+                        debug!("Successfully connected to MongoDB at {}", stripped_uri);
+                        client
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to connect to MongoDB even after stripping options: {:?}",
+                            e
+                        );
+                        return Err(HttpResponse::ServiceUnavailable()
+                            .body("Failed to connect to MongoDB after stripping options"));
+                    }
+                }
+            } else {
+                warn!("No question mark found in MongoDB URI, cannot strip options.");
+                return Err(HttpResponse::ServiceUnavailable().body("Failed to connect to MongoDB"));
+            }
         }
     };
 
@@ -244,7 +267,7 @@ pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
         Err(e) => {
             // We treat this as a warning, because it might be that the MongoDB server is not running.
             error!("Failed to make sure the MongoDB is running: {:?}", e);
-            return Err(HttpResponse::InternalServerError()
+            return Err(HttpResponse::ServiceUnavailable()
                 .body("MongoDB is not running or cannot be reached"));
         }
     }

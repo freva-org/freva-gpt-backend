@@ -165,3 +165,18 @@ pub const fn model_ends_on_no_choice(model: AvailableChatbots) -> bool {
         _ => false,
     }
 }
+
+/// Some models are capable of recieving Images and encoding them for them to understand.
+/// They can be given the gernerated image as a base64 string in the prompt.
+pub const fn model_supports_images(model: AvailableChatbots) -> bool {
+    match model {
+        AvailableChatbots::OpenAI(
+            OpenAIModels::gpt_4o
+            | OpenAIModels::gpt_4o_mini
+            | OpenAIModels::gpt_4_1
+            | OpenAIModels::gpt_4_1_mini
+            | OpenAIModels::gpt_4_1_nano,
+        ) => true,
+        _ => false, // Update this when more models support images.
+    }
+}
