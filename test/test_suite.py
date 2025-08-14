@@ -458,13 +458,13 @@ def auth():
         "mongodb.url": f"mongodb://{username}:{password}@localhost:27017",
     }), 200
 
-@app.route("/api/freva-nextgen/auth/v2/userinfo", methods=["GET"])
-def userinfo():
+@app.route("/api/freva-nextgen/auth/v2/systemuser", methods=["GET"])
+def systemuser():
     # This would usually return the user information, but for testing, we just return a dummy response.
     # The backend needs to retrieve the user ID from here, so we return a dummy user ID.
     return jsonify({
         "user_id": global_user_id,
-        "username": "testing",
+        "pw_name": "testing",
     }), 200
 
 # Run the mock authentication server

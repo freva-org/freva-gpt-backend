@@ -158,16 +158,16 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
 
     // If the URL is set, we'll send a GET request to it with the token in the header.
 
-    // The entire url ending is "/api/freva-nextgen/auth/v2/userinfo",
+    // The entire url ending is "/api/freva-nextgen/auth/v2/systemuser",
     // But it sometimes doesn't send the api and nextgen part, so we need to add it ourselves.
-    let path = if rest_url.ends_with("/api/freva-nextgen/auth/v2/userinfo") {
+    let path = if rest_url.ends_with("/api/freva-nextgen/auth/v2/systemuser") {
         "".to_string() // The URL already contains the path.
     } else if rest_url.ends_with("/api/freva-nextgen/") {
-        "auth/v2/userinfo".to_string()
+        "auth/v2/systemuser".to_string()
     } else if rest_url.ends_with("/api/freva-nextgen") {
-        "/auth/v2/userinfo".to_string()
+        "/auth/v2/systemuser".to_string()
     } else {
-        "/api/freva-nextgen/auth/v2/userinfo".to_string() // The URL does not contain the path, so we add it.
+        "/api/freva-nextgen/auth/v2/systemuser".to_string() // The URL does not contain the path, so we add it.
     };
 
     debug!("Using path: {}", path);
@@ -212,7 +212,7 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
     let username = match serde_json::from_str::<serde_json::Value>(&result) {
         Ok(json) => {
             // If the JSON is valid, we'll return the username.
-            if let Some(username) = json["username"].as_str() {
+            if let Some(username) = json["pw_name"].as_str() {
                 username.to_string()
             } else {
                 // If the username is not found, this is either because the token is invalid or the response is malformed.
