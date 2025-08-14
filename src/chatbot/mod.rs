@@ -64,7 +64,7 @@ static LITE_LLM_CLIENT: Lazy<async_openai::Client<OpenAIConfig>> = Lazy::new(|| 
 });
 
 /// The address of the LiteLLM Proxy.
-static LITE_LLM_ADDRESS: Lazy<String> = Lazy::new(|| {
+pub static LITE_LLM_ADDRESS: Lazy<String> = Lazy::new(|| {
     println!("LITE_LLM_ADDRESS: {:?}", std::env::var("LITE_LLM_ADDRESS"));
     debug!("LITE_LLM_ADDRESS: {:?}", std::env::var("LITE_LLM_ADDRESS"));
     std::env::var("LITE_LLM_ADDRESS").unwrap_or_else(|_| "http://litellm:4000".to_string())

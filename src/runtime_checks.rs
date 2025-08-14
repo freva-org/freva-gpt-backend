@@ -6,6 +6,7 @@ use crate::{
     auth::{ALLOW_GUESTS, AUTH_KEY},
     chatbot::{
         self, is_lite_llm_running, stream_response::STREAM_STOP_CONTENT, types::StreamVariant,
+        LITE_LLM_ADDRESS,
     },
     static_serve,
     tool_calls::route_call::print_and_clear_tool_logs,
@@ -143,8 +144,8 @@ pub async fn run_runtime_checks() {
         info!("LiteLLM is running and available.");
         println!("LiteLLM is running and available.");
     } else {
-        info!("LiteLLM is either not running or not available, some LLMs might not work.");
-        println!("LiteLLM is either not running or not available, some LLMs might not work.");
+        info!("LiteLLM is either not running or not available, some LLMs might not work. Address: {} (Defaults to http://litellm:4000)", *LITE_LLM_ADDRESS);
+        println!("LiteLLM is either not running or not available, some LLMs might not work. Address: {} (Defaults to http://litellm:4000)", *LITE_LLM_ADDRESS);
     }
 
     // To make sure not to confuse the backend, clear the tool logger.
