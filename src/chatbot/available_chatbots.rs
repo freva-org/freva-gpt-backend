@@ -6,6 +6,9 @@ pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1), // New default model, better than 4o
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1_mini),
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1_nano),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_5), // Does not support streaming for non-verified organisations. Also uses a different paradigm for prompting.
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_5_mini),
+    AvailableChatbots::OpenAI(OpenAIModels::gpt_5_nano),
     AvailableChatbots::OpenAI(OpenAIModels::o3),
     AvailableChatbots::OpenAI(OpenAIModels::o4_mini),
     AvailableChatbots::OpenAI(OpenAIModels::gpt_4o),
@@ -48,6 +51,9 @@ impl From<AvailableChatbots> for String {
                 OpenAIModels::gpt_4_1 => "gpt-4.1".to_string(),
                 OpenAIModels::gpt_4_1_mini => "gpt-4.1-mini".to_string(),
                 OpenAIModels::gpt_4_1_nano => "gpt-4.1-nano".to_string(),
+                OpenAIModels::gpt_5 => "gpt-5".to_string(),
+                OpenAIModels::gpt_5_mini => "gpt-5-mini".to_string(),
+                OpenAIModels::gpt_5_nano => "gpt-5-nano".to_string(),
                 OpenAIModels::o4_mini => "o4-mini".to_string(),
                 OpenAIModels::o3 => "o3".to_string(),
             },
@@ -64,7 +70,7 @@ impl From<AvailableChatbots> for String {
                 OllamaModels::deepseek_r1_70b => "deepseek-r1:70b".to_string(), // For testing purposes.
                 OllamaModels::deepseek_r1_32b_tools => "deepseek-r1:32b".to_string(), // The Qwen distill; technically capable of tool calling.
                 OllamaModels::qwq => "qwq".to_string(), // Qwen but reasoning
-                OllamaModels::gpt_oss_20b => "gpt-oss:20b".to_string(), 
+                OllamaModels::gpt_oss_20b => "gpt-oss:20b".to_string(),
             },
             AvailableChatbots::Google(model) => match model {
                 GoogleModels::gemini_1_5_flash => "gemini-1.5-flash".to_string(),
@@ -110,6 +116,12 @@ pub enum OpenAIModels {
     gpt_4_1_mini,
     #[allow(non_camel_case_types)]
     gpt_4_1_nano,
+    #[allow(non_camel_case_types)]
+    gpt_5,
+    #[allow(non_camel_case_types)]
+    gpt_5_mini,
+    #[allow(non_camel_case_types)]
+    gpt_5_nano,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -188,6 +200,22 @@ pub const fn model_supports_images(model: AvailableChatbots) -> bool {
 pub const fn model_is_reasoning(model: AvailableChatbots) -> bool {
     matches!(
         model,
-        AvailableChatbots::OpenAI(OpenAIModels::o4_mini | OpenAIModels::o3)
+        AvailableChatbots::OpenAI(
+            OpenAIModels::o4_mini
+                | OpenAIModels::o3
+                | OpenAIModels::gpt_5
+                | OpenAIModels::gpt_5_mini
+                | OpenAIModels::gpt_5_nano
+        )
+    )
+}
+
+/// The new GPT-5 models expect different prompting, so we'll need to change the prompt based on whether or not a model is GPT-5-like.
+pub const fn model_is_gpt_5(model: AvailableChatbots) -> bool {
+    matches!(
+        model,
+        AvailableChatbots::OpenAI(
+            OpenAIModels::gpt_5 | OpenAIModels::gpt_5_mini | OpenAIModels::gpt_5_nano,
+        )
     )
 }

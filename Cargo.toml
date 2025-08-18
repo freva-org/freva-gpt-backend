@@ -12,8 +12,8 @@ categories = ["science", "science::geo", "web-programming::http-server"]
 
 [dependencies]
 actix-web = "4.11.0"
-# async-openai = { git = "https://github.com/SeseMueller/async-openai", version = "0.27.2" } # Better error handling on streaming, but requires internet connection on each build
-async-openai = { version = "0.29.0" }
+# async-openai = { git = "https://github.com/SeseMueller/async-openai", version = "0.29.1" } # Better error handling on streaming, but requires internet connection on each build
+async-openai = { version = "0.29.1" }
 base64 = "0.22.1"
 clap = { version = "4.5.45", features = ["derive", "cargo"] }
 const_format = "0.2.34"
@@ -52,7 +52,7 @@ redundant_closure_for_method_calls = "allow" # Isn't that important and looks we
 doc_markdown = "allow" # Too noisy 
 too_many_lines = "allow" # I am aware, do not mark the entire file yellow
 too_many_arguments = "allow" # I know, I might refactor it later
-congitive_complexity = "allow" # Not good, a single tracing macro can trigger it
+cognitive_complexity = "allow" # Not good, a single tracing macro can trigger it
 
 # nursery = {level = "warn", priority = -1} # General "undertested" lints, but many false positives
 # pedantic = { level = "warn", priority = -1 } # Only activate these two when preparing for major versions.

@@ -32,6 +32,12 @@ pub async fn run_runtime_checks() {
     // To make sure that this is caught early, we'll just test it here.
     let entire_prompt_json = chatbot::prompting::get_entire_prompt_json("testing", "testing");
     trace!("Starting messages JSON: {:?}", entire_prompt_json);
+    let entire_prompt_json_gpt_5 =
+        chatbot::prompting::get_entire_prompt_json_gpt_5("testing", "testing");
+    trace!(
+        "Starting messages JSON for GPT-5: {:?}",
+        entire_prompt_json_gpt_5
+    );
 
     trace!("Ping Response: {:?}", static_serve::RESPONSE_STRING);
 

@@ -259,14 +259,19 @@ def test_persistant_xarray_storage():
     assert len(reponse.code_variants) == 2
 
 
-def test_qwen_available():
-    ''' Can the backend use non-OpenAI chatbots, such as Qwen? ''' # Since Version 1.7.1
-    # DEBUG
-    # import time
-    # time.sleep(100)
-    response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="qwen2.5:3b")
+def test_models_available():
+    ''' Can the backend use the common models qwen2.5:3b, o4-mini and gpt-5-nano? ''' # Since Version 1.7.1, 1.10.1 and 1.10.2 respectively. 
+    qwen_response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="qwen2.5:3b")
     # The assistant output should now contain "200 Ok"
-    assert any("(200 ok)" in i.lower() for i in response.assistant_variants)
+    assert any("200 ok" in i.lower() for i in qwen_response.assistant_variants)
+
+    o4_mini_response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="o4-mini")
+    # The assistant output should now contain "200 Ok"
+    assert any("200 ok" in i.lower() for i in o4_mini_response.assistant_variants)
+
+    gpt_5_nano_response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="gpt-5-nano")
+    # The assistant output should now contain "200 Ok"
+    assert any("200 ok" in i.lower() for i in gpt_5_nano_response.assistant_variants)
 
 
 def test_qwen_code_interpreter():
@@ -311,20 +316,6 @@ To test this. Please run the following code: \"x = 42\nraise Exception('This is 
     response2 = generate_full_respone("Now print the value of x without assigning it again.", chatbot="gpt-4o-mini", thread_id=response.thread_id)
     # The code output should now contain 42
     assert any("42" in i for i in response2.codeoutput_variants)
-
-### This test is temporarily disabled because o3-mini just doesn't call the tool more than 95% of the time and I don't want to waste resources on it.
-def test_o3_mini_available():
-    pass
-#     ''' Can the backend use the O3-Mini chatbot, including for code_interpreter tool calls? ''' # Since Version 1.8.13
-#     response = generate_full_respone("This is a test request for your basic functionality. Please use the code_interpreter tool to run `print('Hello World')`. Remember to call the tool!", chatbot="o3-mini")
-#     # The Code Output should now contain "Hello World"
-#     # o3-mini is, however, quite confused by tool calling, so often, it declares that it will run the code and then just not do it. 
-#     # So, if there is no code output, we'll just let it try again. 
-#     if len(response.codeoutput_variants) > 0:
-#         assert any("hello world" in i.lower() for i in response.codeoutput_variants)
-#     else:
-#         response2 = generate_full_respone("Thanks, please run the code now.", chatbot="o3-mini", thread_id=response.thread_id)
-#         assert any("hello world" in i.lower() for i in response2.codeoutput_variants) # No third try, if it fails again, it's a fail.
 
 def test_third_request():
     '''Can the backend store information the user gave over multiple requests?''' # Since Version 1.8.14

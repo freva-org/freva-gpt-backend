@@ -21,7 +21,8 @@ use crate::{
     auth::{is_guest, ALLOW_FALLBACK_OLD_AUTH},
     chatbot::{
         available_chatbots::{
-            model_ends_on_no_choice, model_is_reasoning, model_supports_images, DEFAULTCHATBOT,
+            model_ends_on_no_choice, model_is_gpt_5, model_is_reasoning, model_supports_images,
+            DEFAULTCHATBOT,
         },
         handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
@@ -29,7 +30,10 @@ use crate::{
         },
         heartbeat::heartbeat_content,
         mongodb_storage::get_database,
-        prompting::{get_entire_prompt, get_entire_prompt_json},
+        prompting::{
+            get_entire_prompt, get_entire_prompt_gpt_5, get_entire_prompt_json,
+            get_entire_prompt_json_gpt_5,
+        },
         select_client,
         storage_router::read_thread,
         types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
@@ -246,8 +250,8 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         }
         Some(chatbot) => match String::try_into(chatbot.to_owned()) {
             Ok(chatbot) => chatbot,
-            Err(e) => {
-                warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", e);
+            Err(()) => {
+                warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", chatbot);
                 return HttpResponse::UnprocessableEntity().body("Chatbot not found. Consult the /availablechatbots endpoint for available chatbots.");
             }
         },
@@ -260,12 +264,19 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     let messages = if create_new {
         // If the thread is new, we'll start with the base messages and the user's input.
-        let mut base_message: Vec<ChatCompletionRequestMessage> =
-            get_entire_prompt(&user_id, &thread_id);
+        let mut base_message: Vec<ChatCompletionRequestMessage> = if model_is_gpt_5(chatbot) {
+            get_entire_prompt_gpt_5(&user_id, &thread_id)
+        } else {
+            get_entire_prompt(&user_id, &thread_id)
+        };
 
         trace!("Adding base message to stream.");
 
-        let entire_prompt = get_entire_prompt_json(&user_id, &thread_id);
+        let entire_prompt = if model_is_gpt_5(chatbot) {
+            get_entire_prompt_json_gpt_5(&user_id, &thread_id)
+        } else {
+            get_entire_prompt_json(&user_id, &thread_id)
+        };
 
         let starting_prompt = StreamVariant::Prompt(entire_prompt);
         add_to_conversation(
