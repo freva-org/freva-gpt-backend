@@ -98,10 +98,9 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 }
                 Some((rest, last)) => {
                     // We'll have to check the last line
-                    let last_line = last.trim();
-                    if should_eval(last_line, py) {
+                    if should_eval(last, py) {
                         // We'll split it up.
-                        (Some(rest.to_string()), Some(last_line.to_string()))
+                        (Some(rest.to_string()), Some(last.to_string()))
                     } else {
                         (Some(code), None)
                     }
@@ -284,13 +283,12 @@ fn should_eval(line: &str, py: Python) -> bool {
     // let negative = line.contains("import") || (line.contains("(") && !line.starts_with("(")) || line.contains("=");
     // let exceptions = line.contains("plt.show()") || line.contains("item()") || line.contains("freva.databrowser.metadata_search(");
     // !negative || exceptions
-    
+
     // Never, ever try to eval if the last line is indented, that will lead to an indentation
     // error.
     if line.starts_with(' ') || line.starts_with('\t') {
         return false;
     }
-
 
     // New approach: Python has the ast library, which we can use to parse the line and decide whether it should be evaluated.
 
