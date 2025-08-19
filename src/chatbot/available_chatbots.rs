@@ -183,7 +183,10 @@ pub const fn model_ends_on_no_choice(model: AvailableChatbots) -> bool {
 pub const fn model_supports_images(model: AvailableChatbots) -> bool {
     match model {
         AvailableChatbots::OpenAI(
-            OpenAIModels::gpt_4o
+            OpenAIModels::gpt_5
+            | OpenAIModels::gpt_5_mini
+            | OpenAIModels::gpt_5_nano
+            | OpenAIModels::gpt_4o
             | OpenAIModels::gpt_4o_mini
             | OpenAIModels::gpt_4_1
             | OpenAIModels::gpt_4_1_mini

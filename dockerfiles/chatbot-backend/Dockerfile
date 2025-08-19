@@ -106,5 +106,8 @@ ENV LD_LIBRARY_PATH /opt/conda/envs/env/lib/:$PATH
 # Move over the source code; for quick builds, always put this last.
 COPY src /app/src
 
+# Helps for debugging
+COPY test /app/test
+
 # Run the Rust code in very verbose mode, printing trace information
 ENTRYPOINT [ "cargo", "run", "-r", "--", "-vv"]
