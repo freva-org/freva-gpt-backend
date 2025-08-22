@@ -28,6 +28,7 @@ RUN conda install --yes -c conda-forge -n env netcdf4 cartopy contourpy geopy
 RUN conda install --yes -c conda-forge -n env aiohttp requests
 RUN conda install --yes -c conda-forge -n env scikit-learn geopandas healpy easygems astropy
 RUN conda install --yes -c conda-forge -n env uv mcp
+RUN conda install --yes -c conda-forge -n env litellm langchain_community langchain_core langchain_text_splitters pymongo
 # Ironically, I use conda to install uv, but only for uvx. I'll try to cut the time it takes to build the image by installing a bunch of the libraries using uv instead of conda.
 
 # Also copy over the Cargo.toml file to be able to start the server
@@ -45,28 +46,28 @@ ENV PYTHONPATH=/opt/conda/envs/env/lib/python3.11/site-packages
 ENV PATH /opt/conda/envs/env/bin/:$PATH
 ENV LD_LIBRARY_PATH /opt/conda/envs/env/lib/:$PATH
 
-# set up CrocoDash and CESM
-# set up git email and user name
-RUN git config --global user.email "freva@dkrz.de"
-RUN git config --global user.name "clint"
-RUN git clone --recurse-submodules https://github.com/CROCODILE-CESM/CrocoDash.git
-RUN pip install -e CrocoDash/CrocoDash/rm6/ \
-    -e CrocoDash/CrocoDash/visualCaseGen/external/ipyfilechooser/ \
-    -e CrocoDash/CrocoDash/visualCaseGen/external/mom6_bathy/ \
-    -e CrocoDash/CrocoDash/visualCaseGen/ \
-    "myst_parser>=4.0.0,<4.1.0" \
-    -e CrocoDash/
-RUN pytest CrocoDash/tests/test_installation.py
-RUN git clone https://github.com/ESCOMP/CESM.git
-RUN git -C CESM checkout cesm3_0_beta03
-RUN ./CESM/bin/git-fleximod -C /app/CESM/ update
-ENV CIME_MACHINE="ubuntu-latest"
-# download Bathymetry dataset (GEBCO 2024)
-RUN dnf install unzip -y
-RUN curl https://www.bodc.ac.uk/data/open_download/gebco/gebco_2024/zip/ -o /app/gebco_2024.zip
-RUN mkdir -p /app/CrocoDash/inputs/gebco
-RUN unzip /app/gebco_2024.zip -d /app/CrocoDash/inputs/gebco
-RUN rm /app/gebco_2024.zip
+# # set up CrocoDash and CESM
+# # set up git email and user name
+# RUN git config --global user.email "freva@dkrz.de"
+# RUN git config --global user.name "clint"
+# RUN git clone --recurse-submodules https://github.com/CROCODILE-CESM/CrocoDash.git
+# RUN pip install -e CrocoDash/CrocoDash/rm6/ \
+#     -e CrocoDash/CrocoDash/visualCaseGen/external/ipyfilechooser/ \
+#     -e CrocoDash/CrocoDash/visualCaseGen/external/mom6_bathy/ \
+#     -e CrocoDash/CrocoDash/visualCaseGen/ \
+#     "myst_parser>=4.0.0,<4.1.0" \
+#     -e CrocoDash/
+# RUN pytest CrocoDash/tests/test_installation.py
+# RUN git clone https://github.com/ESCOMP/CESM.git
+# RUN git -C CESM checkout cesm3_0_beta03
+# RUN ./CESM/bin/git-fleximod -C /app/CESM/ update
+# ENV CIME_MACHINE="ubuntu-latest"
+# # download Bathymetry dataset (GEBCO 2024)
+# RUN dnf install unzip -y
+# RUN curl https://www.bodc.ac.uk/data/open_download/gebco/gebco_2024/zip/ -o /app/gebco_2024.zip
+# RUN mkdir -p /app/CrocoDash/inputs/gebco
+# RUN unzip /app/gebco_2024.zip -d /app/CrocoDash/inputs/gebco
+# RUN rm /app/gebco_2024.zip
 
 # DEBUG: Crashes the build with info about the python environment that will be used.
 # ENV PYO3_PRINT_CONFIG 1

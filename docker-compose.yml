@@ -9,6 +9,7 @@ services:
     ports:
       - "${TARGET_PORT:-8502}:${BACKEND_PORT:-8502}" # If either is unset, the default value will be used.
     volumes:
+      - ./resources:/app/resources
       - /work:/work:ro
       - /container/da/genai_data:/container/da/genai_data
       - /container/da/storage-b380001/freva-gpt-backend-links-${INSTANCE_NAME}/logs:/app/logs
