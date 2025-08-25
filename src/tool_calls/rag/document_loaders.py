@@ -8,7 +8,7 @@ from langchain_core.documents import Document
 from langchain_community.document_loaders import DirectoryLoader
 from langchain_community.document_loaders import TextLoader, JSONLoader, PyPDFLoader
 
-from rag.helpers import configure_logger
+from src.tool_calls.rag.helpers import configure_logger
 logger = configure_logger()
 
 loader_cls_dict={

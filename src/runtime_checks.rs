@@ -171,6 +171,31 @@ pub async fn run_runtime_checks() {
         flush_stdout_stderr();
     }
 
+    // Also test the new rag system
+    let mut rag_payload = serde_json::Map::new();
+    rag_payload.insert(
+        "question".to_string(),
+        "How can I create artificial climate data?".into(),
+    );
+    rag_payload.insert(
+        "resources_to_retrieve_from".to_string(),
+        "stableclimgen".into(),
+    );
+    rag_payload.insert(
+        "collection".to_string(), // This should be a mongoDB collection, but just to show that, we set it to a strin, like an LLM would.
+        "stableclimgen".into(),
+    );
+    let mcp_result =
+        try_execute_mcp_tool_call("get_context_from_resources".to_string(), Some(rag_payload))
+            .await;
+    if let Err(s) = mcp_result {
+        error!("Failed to call the MCP tool 'get_context_from_resources': {s}");
+        eprintln!("Failed to call the MCP tool 'get_context_from_resources': {s}");
+    } else {
+        println!("Success, context is: {mcp_result:?}");
+        flush_stdout_stderr();
+    }
+
     // Because the model for genAI takes some time to load, we'll start the loading here.
     // To load the mode, we simply have to execute:
     //     from stableclimgen.src.decode import init_model

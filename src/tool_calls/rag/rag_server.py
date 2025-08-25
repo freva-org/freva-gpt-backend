@@ -4,9 +4,9 @@ import ssl
 from mcp.server.fastmcp import FastMCP
 import litellm
 
-from rag.helpers import *
-from rag.document_loaders import CustomDirectoryLoader
-from rag.text_splitters import CustomDocumentSplitter
+from src.tool_calls.rag.helpers import *
+from src.tool_calls.rag.document_loaders import CustomDirectoryLoader
+from src.tool_calls.rag.text_splitters import CustomDocumentSplitter
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "ollama/mxbai-embed-large:latest")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_ADDRESS", "http://localhost:11434")

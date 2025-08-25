@@ -1,5 +1,6 @@
 .env
 .DS_Store
+.vscode
 
 # The directories are now symlinks because the home partition is too small and the work partition is read-only. They point to the container partition now. 
 target

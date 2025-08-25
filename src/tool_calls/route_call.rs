@@ -48,7 +48,31 @@ pub async fn route_call(
         result
     } else {
         // Now that all hard-coded tools are handled, we can check whether the MCP servers have the function.
-        let result = try_execute_mcp_tool_call(func_name.clone(), arguments).await;
+        let result = match arguments {
+            Some(args) => {
+                // If the function has arguments, we need to convert them to JSON.
+                let args_to_json = match serde_json::from_str(&args) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        warn!("Failed to parse the arguments as JSON: {}", e);
+                        if let Err(e) = sender
+                            .send(vec![StreamVariant::CodeOutput(
+                                format!("Failed to parse the arguments as JSON: {e}"),
+                                id,
+                            )])
+                            .await
+                        {
+                            error!("Failed to send error message to chatbot: {}", e);
+                        }
+                        return;
+                    }
+                };
+                try_execute_mcp_tool_call(func_name.clone(), args_to_json).await
+            }
+            None => try_execute_mcp_tool_call(func_name.clone(), None).await,
+        };
+
+        // try_execute_mcp_tool_call(func_name.clone(), args_to_json).await;
 
         match result {
             Ok(answer) => {
@@ -73,7 +97,7 @@ pub async fn route_call(
                     // Even if the function name is recognized, many other things can go wrong.
                     warn!("The chatbot tried to call a function with the name '{func_name}' but it failed: {}", e);
                     let answer = vec![StreamVariant::CodeOutput(
-                        format!("The function '{func_name}' failed: {}", e),
+                        format!("The function '{func_name}' failed: {e}"),
                         id,
                     )];
                     sender.send(answer).await

@@ -4,6 +4,7 @@ use rust_mcp_sdk::{
     schema::{CallToolRequestParams, CallToolResultContentItem},
     McpClient,
 };
+use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 
 use crate::tool_calls::mcp::ALL_MCP_CLIENTS;
@@ -12,27 +13,9 @@ use crate::tool_calls::mcp::ALL_MCP_CLIENTS;
 /// If it fails, it returns an error.
 pub async fn try_execute_mcp_tool_call(
     func_name: String,
-    arguments: Option<String>,
+    arguments: Option<Map<String, Value>>,
 ) -> Result<String, String> {
     // We first need to instantiate all MCP clients to find the one that has the function.
-
-    // If the arguments are empty, we'll keep them as None.
-    let arguments = match arguments {
-        None => None,
-        Some(args) => {
-            // We need to parse the arguments to a JSON object.
-            let parsed = serde_json::from_str(&args);
-            match parsed {
-                Ok(json) => Some(json),
-                Err(e) => {
-                    warn!("Failed to parse arguments for function '{func_name}': {e}");
-                    return Err(format!(
-                        "Failed to parse arguments for function '{func_name}': {e}",
-                    ));
-                }
-            }
-        }
-    };
 
     let mut result = None;
     for client in ALL_MCP_CLIENTS.iter() {
@@ -125,8 +108,7 @@ pub async fn try_execute_mcp_tool_call(
                 func_name
             );
             Err(format!(
-                "No MCP client was able to execute the function '{}'.",
-                func_name
+                "No MCP client was able to execute the function '{func_name}'."
             ))
         }
         Some(output) => {
