@@ -3,6 +3,7 @@ import ssl
 
 from mcp.server.fastmcp import FastMCP
 import litellm
+from pymongo import MongoClient
 
 from src.tool_calls.rag.helpers import *
 from src.tool_calls.rag.document_loaders import CustomDirectoryLoader
@@ -11,6 +12,8 @@ from src.tool_calls.rag.text_splitters import CustomDocumentSplitter
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "ollama/mxbai-embed-large:latest")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_ADDRESS", "http://localhost:11434")
 RESOURCE_DIR = os.getenv("RESOURCE_DIRECTORY", "resources")
+MONGO_DB_NAME = os.getenv("MONGODB_DATABASE_NAME", "chatbot")
+MONGO_COLLECTION_NAME = os.getenv("MONGODB_VECTORDB_COLL_NAME", "vector-db")
 EMBEDDING_LENGTH = 1024
 AVAILABLE_RESOURCES = [f for f in os.listdir(RESOURCE_DIR) if os.path.isdir(os.path.join(RESOURCE_DIR, f))]
 CLEAR_EMBEDDINGS = False
@@ -116,12 +119,13 @@ def get_query_results(query: str, resource_name, db_collection):
 
 
 @mcp.tool()
-def get_context_from_resources(question: str, resources_to_retrieve_from: str, collection) -> str:
+def get_context_from_resources(question: str, resources_to_retrieve_from: str, mongo_uri:str) -> str:
     """
     Search Python package/library documentation and examples to find relevant context.
     Args:
         question (str): The user's question.
         resources_to_retrieve_from (str): The name of the library to search the documentation for. It should be one of the folder names in RESOURCE_DIR.
+        mongo_uri (str): MongoDB URI to connect
     Returns:
         str: Relevant context extracted from the library documentation.
     """
@@ -129,6 +133,9 @@ def get_context_from_resources(question: str, resources_to_retrieve_from: str, c
     if resources_to_retrieve_from not in AVAILABLE_RESOURCES:
         logger.error(f"Library '{resources_to_retrieve_from}' is not supported.")
         return f"Library '{resources_to_retrieve_from}' is not supported."
+    
+    mongo_client = MongoClient(mongo_uri)
+    collection = mongo_client[MONGO_DB_NAME][MONGO_COLLECTION_NAME]
 
     if CLEAR_EMBEDDINGS:
         clear_embeddings_collection(collection)
