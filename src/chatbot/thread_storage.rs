@@ -162,6 +162,12 @@ pub fn extract_variants_from_string(content: &str) -> Vec<StreamVariant> {
             }
         }
 
+        // For organisational purposes, some lines might be comments (or empty), so we need to skip those.
+        if line.trim().is_empty() || line.starts_with("//") {
+            trace!("Skipping empty or comment line: {}", line);
+            continue;
+        }
+
         let line = line.trim_matches('\"'); // Remove any quotes that might be there.
         let parts = line.split_once(':');
         trace!("Parts: {:?}", parts);

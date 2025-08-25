@@ -9,7 +9,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     auth::get_mongodb_uri,
-    chatbot::{thread_storage::cleanup_conversation, types},
+    chatbot::{thread_storage::cleanup_conversation, topic_extraction::summarize_topic, types},
 };
 
 /// Stores and loads threads from the mongoDB
@@ -52,34 +52,33 @@ pub async fn append_thread(
 
     // If there is some existing thread, we need to update the content.
     // The new content is the old content + the new content.
-    let (content, thread_exists) = if let Some(existing_thread) = existing_thread {
+    let (content, thread_exists, maybe_topic) = if let Some(existing_thread) = existing_thread {
         let mut existing_content = existing_thread.content;
         existing_content.append(&mut content);
         debug!("Found existing thread, will append content.");
-        (existing_content, true)
+        (existing_content, true, Some(existing_thread.topic))
     } else {
         debug!("No existing thread found, will create a new one.");
-        (content, false)
+        (content, false, None)
     };
 
     // If the thread exists in the DB, we need to overwrite it.
     // If not, we need to create a new thread.
 
-    // We also need to find the topic of the thread, which should be the user input (for now).
-    let topic = content.iter().rev().find_map(|variant| match variant {
+    // We also need to find the first message of the thread, which should be the user input (for now).
+    let first_message = content.iter().rev().find_map(|variant| match variant {
         types::StreamVariant::User(input) => Some(input),
         _ => None,
     });
-    // There should always be a User input there because at least the examples contain one.
-    let topic = if let Some(topic) = topic {
-        debug!("Found topic: {:?}", topic);
-        topic.to_owned()
-    } else {
-        debug!("No topic found, will use a placeholder.");
-        "No topic found".to_owned()
-    };
 
-    debug!("Found topic: {:?}", topic);
+    debug!("Found first message: {:?}", first_message);
+
+    // The topic is either what is already in the database, or the first message, summarized.
+    let topic = match (maybe_topic, first_message) {
+        (Some(existing_topic), _) => existing_topic,
+        (None, Some(first_message)) => summarize_topic(first_message).await,
+        _ => "No message found".to_owned(),
+    };
 
     let date = chrono::Utc::now().to_rfc3339(); // Also ISO 8601 compliant
 
@@ -219,7 +218,6 @@ pub async fn read_threads(user_id: &str, database: Database) -> Vec<MongoDBThrea
 }
 
 /// Constructs a MongoDB database connection using the Vault URL.
-/// If no Vault URL is given, the manually constructed database connection (which is mainly for testing purposes) is used.
 pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
     let mongodb_uri = get_mongodb_uri(vault_url).await?;
 
@@ -230,7 +228,8 @@ pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
             client
         }
         Err(e) => {
-            warn!("Failed to connect to MongoDB: {:?}; trying again with stripped options. (Freva doesn't adhere to the mongoDB connection string format entirely.)", e);
+            // Using warn! here is far too noisy as each request will trigger it.
+            info!("Failed to connect to MongoDB: {:?}; trying again with stripped options. (Freva doesn't adhere to the mongoDB connection string format entirely.)", e);
             // At the very end are options, that SHOULD be only after a slash, but Freva doesn't adhere to that.
             // So we strip the options and try again.
             if let Some(question_mark_index) = mongodb_uri.rfind('?') {

@@ -98,10 +98,9 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 }
                 Some((rest, last)) => {
                     // We'll have to check the last line
-                    let last_line = last.trim();
-                    if should_eval(last_line, py) {
+                    if should_eval(last, py) {
                         // We'll split it up.
-                        (Some(rest.to_string()), Some(last_line.to_string()))
+                        (Some(rest.to_string()), Some(last.to_string()))
                     } else {
                         (Some(code), None)
                     }
@@ -285,6 +284,12 @@ fn should_eval(line: &str, py: Python) -> bool {
     // let exceptions = line.contains("plt.show()") || line.contains("item()") || line.contains("freva.databrowser.metadata_search(");
     // !negative || exceptions
 
+    // Never, ever try to eval if the last line is indented, that will lead to an indentation
+    // error.
+    if line.starts_with(' ') || line.starts_with('\t') {
+        return false;
+    }
+
     // New approach: Python has the ast library, which we can use to parse the line and decide whether it should be evaluated.
 
     let to_check = CString::new(format!(
@@ -464,11 +469,16 @@ else:
 fn save_to_pickle_file(py: Python, locals: &Bound<PyDict>, thread_id: &str) {
     trace!("Saving the locals to a pickle file.");
 
+    // We want to save the result of databrowser searches, but they are unpickleable.
+    // By default, they contain metadata besides the result, which can be useful.
+    // I couldn't find a way to keep the metadata, but the results can simply be extracted by running it through a list().
+
     // First we filter the locals to only include the ones that are actually serializable.
     // We'll execute some python code to do that.
     let code = CString::new(format!(
         r"import dill # like pickle, but can handle >2GB variables
 from types import ModuleType
+import freva_client
 
 local_items = locals().copy()
 pickleable_vars = {{}}
@@ -480,6 +490,10 @@ for key, value in local_items.items():
             # We shouldn't pickle modules, so we'll just skip them.
             unpickleable_vars[key] = [None, value]
             continue
+        if isinstance(value, freva_client.query.databrowser):
+            # We cannot store it as a databrowser result, but we can store it as a list
+            pickleable_vars[key] = list(value)
+            continue # We don't want to store it twice
         dill.dumps(value)
         pickleable_vars[key] = value
     except Exception as e:

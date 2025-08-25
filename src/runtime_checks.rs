@@ -32,6 +32,12 @@ pub async fn run_runtime_checks() {
     // To make sure that this is caught early, we'll just test it here.
     let entire_prompt_json = chatbot::prompting::get_entire_prompt_json("testing", "testing");
     trace!("Starting messages JSON: {:?}", entire_prompt_json);
+    let entire_prompt_json_gpt_5 =
+        chatbot::prompting::get_entire_prompt_json_gpt_5("testing", "testing");
+    trace!(
+        "Starting messages JSON for GPT-5: {:?}",
+        entire_prompt_json_gpt_5
+    );
 
     trace!("Ping Response: {:?}", static_serve::RESPONSE_STRING);
 
@@ -137,6 +143,7 @@ pub async fn run_runtime_checks() {
     check_plot_extraction_false_negative().await;
     check_plot_extraction_false_positive().await;
     check_plot_extraction_close().await;
+    check_indentation().await;
     println!("Success!");
     info!(
         "The code interpreter is robust enough and behaves like a Jupyter notebook in all tests."
@@ -568,4 +575,26 @@ async fn check_plot_extraction_close() {
     // The plot should be extracted and returned as a string.
     assert!(matches!(output[0], StreamVariant::CodeOutput(ref inner, _) if inner.is_empty()));
     assert!(matches!(output[1], StreamVariant::Image(_)));
+}
+
+/// Tests whether or not the code interpreter can handle indentation on the last line.
+async fn check_indentation() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(
+            r#"{"code": "a=3\nif a < 2:\n\tprint('smaller')\nelse:\n\tprint('larger')"}"#
+                .to_string(),
+        ),
+        "test".to_string(),
+        None,
+        "testing".to_string(),
+    )
+    .await;
+    assert_eq!(output.len(), 1);
+    // The output should contain the results of the second branch.
+    // assert!(matches!(output[0], StreamVariant::CodeOutput(ref inner, _) if inner == "larger"));
+    let inner = match &output[0] {
+        StreamVariant::CodeOutput(inner, _) => inner,
+        _ => panic!("Expected a CodeOutput variant, instead got {:?}", output[0]),
+    };
+    assert_eq!(inner, "larger");
 }

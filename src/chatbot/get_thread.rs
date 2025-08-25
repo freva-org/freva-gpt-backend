@@ -58,7 +58,7 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
         // We now need the vault URL, so this fails.
         warn!("No vault URL provided, cannot connect to the database for threads.");
         return HttpResponse::UnprocessableEntity()
-            .body("Vault URL not found. Please provide a non-empty vault URL in the headers, of type String.");
+            .body("Vault URL not found. Please provide a non-empty vault URL in the headers.");
     };
 
     let database = match database {
@@ -83,7 +83,8 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
                         "The User requested thread with ID {} that does not exist.",
                         thread_id
                     );
-                    return HttpResponse::NotFound().body("Thread not found.");
+                    return HttpResponse::NotFound()
+                        .body("Thread not found. Maybe it exists on another freva instance?");
                 }
                 std::io::ErrorKind::PermissionDenied => {
                     // If the file is found but we may not access it, it's a server error.
@@ -109,7 +110,8 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
         Err(e) => {
             // If we can't serialize the content, we'll return a generic error.
             error!("Error serializing thread content: {:?}", e);
-            return HttpResponse::InternalServerError().body("Error serializing thread content.");
+            return HttpResponse::InternalServerError()
+                .body("Error serializing thread content, the file is probably malformed.");
         }
     };
 

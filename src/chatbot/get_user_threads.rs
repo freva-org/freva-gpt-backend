@@ -2,7 +2,10 @@ use actix_web::{HttpRequest, HttpResponse, Responder};
 use documented::docs_const;
 use tracing::{debug, warn};
 
-use crate::chatbot::mongodb_storage::{get_database, read_threads};
+use crate::{
+    auth::ALLOW_FALLBACK_OLD_AUTH,
+    chatbot::mongodb_storage::{get_database, read_threads},
+};
 
 /// # getuserthreads
 /// Takes in a user_id and returns the latest 10 threads of the user.
@@ -27,15 +30,21 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
     let user_id = match maybe_username {
         Some(user_id) => user_id,
         None => {
-            // Also try to get the user_id from the query parameters.
-            match qstring.get("user_id") {
-                Some(user_id) => user_id.to_string(),
-                None => {
-                    // If the user ID is not found, we'll return a 422
-                    return HttpResponse::UnprocessableEntity().body(
-                        "User ID not found. Please provide a user_id in the query parameters.",
-                    );
+            // Also try to get the user_id from the query parameters, if allowed.
+            if ALLOW_FALLBACK_OLD_AUTH {
+                match qstring.get("user_id") {
+                    Some(user_id) => user_id.to_string(),
+                    None => {
+                        // If the user ID is not found, we'll return a 422
+                        return HttpResponse::UnprocessableEntity().body(
+                            "User ID not found. Please provide a user_id in the query parameters.",
+                        );
+                    }
                 }
+            } else {
+                return HttpResponse::UnprocessableEntity().body(
+                    "Could not determine User ID. Please authenticate using OpenID Connect.",
+                );
             }
         }
     };
@@ -49,9 +58,8 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
 
     let Some(vault_url) = maybe_vault_url else {
         warn!("The User requested a stream without a vault URL.");
-        return HttpResponse::UnprocessableEntity().body(
-            "Vault URL not found. Please provide a non-empty vault URL in the headers, of type String.",
-        );
+        return HttpResponse::UnprocessableEntity()
+            .body("Vault URL not found. Please provide a non-empty vault URL in the headers.");
     };
 
     // If we don't have a vault URL, we'll automatically fall back to the local (testing) database.

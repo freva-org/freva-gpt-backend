@@ -15,8 +15,17 @@ services:
       - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/target:/app/target
       - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles # Deprecated, once used for test data before freva support was added. Now used for debugging.
       - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/python_pickles:/app/python_pickles
+      - /scratch/b/b380001/freva-gpt/rw_dir/:/app/rw_dir # All instances share the rw_dir for accessing the data the LLM generated.
     networks:
       - freva-gpt
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:${TARGET_PORT:-8502}/api/chatbot/help",
+        ]
   ollama: # Ollama is only for the backend and not accessible from the outside. Port 11434 is not exposed.
     image: ollama/ollama
     hostname: ollama-instance-${INSTANCE_NAME}
@@ -24,6 +33,8 @@ services:
       - /container/da/freva-gpt-ollama-LLMs/.ollama:/root/.ollama
     networks:
       - freva-gpt
+    healthcheck:
+      test: "bash -c 'cat < /dev/null > /dev/tcp/localhost/11434'"
     deploy:
       resources:
         reservations:
@@ -37,4 +48,3 @@ networks:
     driver: bridge
 # The subnet is not set to avoid conflicts with other potentially running networks on the same machine.
 # Note: Named networks by default aren't shared between different docker-compose projects, even if they have the same name, as long as they are in separate directories.
-
