@@ -16,8 +16,8 @@ pub mod get_thread;
 /// Internal use: handles the storing and retrieval of the streamed data
 pub mod thread_storage;
 
-/// Internal use: handles the storing and retrieval of the streamed data in a mongoDB database
-pub mod mongodb_storage;
+/// All modules that interact with MongoDB
+pub mod mongodb;
 
 /// Given a user request, generate a summary to store in the mongodb database
 pub mod topic_extraction;
@@ -39,9 +39,6 @@ pub mod available_chatbots_endpoint;
 
 /// Internally used to handle the heartbeat that is happening while the code interpreter is running.
 pub mod heartbeat;
-
-/// Returns the latest few threads for a given authenticated user
-pub mod get_user_threads;
 
 // Defines a few useful static variables that are used throughout the chatbot.
 

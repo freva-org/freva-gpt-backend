@@ -37,8 +37,8 @@ def get_avail_chatbots():
     print(response.text)
     return response.json()
 
-def get_user_threads():
-    response = get_request("/getuserthreads?")
+def get_user_threads(num_threads=None):
+    response = get_request("/getuserthreads?" + (f"&num_threads={num_threads}" if num_threads else ""))
     print(response.text)
     return response.json()
 
@@ -336,12 +336,12 @@ def test_third_request():
     assert any("Sebastian" in i for i in response3.assistant_variants)
 
 
+should_test_mongo = True
 def test_get_user_threads():
     ''' Can the Frontend request the threads of a user? ''' # Since Version 1.9.0
     # Version 1.9.0 introduced the ability to request the threads of a user.
     # This requires MongoDB to be turned on, so this switch can be turned off to disable this feature.
-    should_test = True
-    if should_test:
+    if should_test_mongo:
         response = get_user_threads()
         # The response should be a list of threads, each with a thread_id and a chatbot name
         assert isinstance(response, list)
@@ -429,6 +429,14 @@ def test_non_alphanumeric_user_id():
         # Reset the user ID to the default value, so that the other tests can run without issues.
         global_user_id = "testing"
         
+
+def test_get_user_threads_with_n():
+    ''' Can the Frontend request a specific number of threads of a user? ''' # Since Version TODO
+    # This test is again dependant on MongoDB being turned on.
+    if should_test_mongo:
+        # We'll ask for 12 threads and assume their format is correct as the other test already tested that. 
+        response = get_user_threads(num_threads = 12)
+        assert len(response) == 12, "Expected 12 threads, but got: " + str(len(response))
 
 
 # --------------------------------

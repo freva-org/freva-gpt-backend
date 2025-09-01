@@ -3,7 +3,7 @@ use documented::docs_const;
 use qstring::QString;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::chatbot::{mongodb_storage::get_database, types::StreamVariant};
+use crate::chatbot::{mongodb::mongodb_storage::get_database, types::StreamVariant};
 
 use super::storage_router::read_thread;
 
@@ -70,7 +70,7 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
         }
     };
 
-    // Instead of retrieving from OpenAI, we need to retrieve from disk since that is where all streamed data is stored.
+    // Instead of retrieving from OpenAI, we need to retrieve from the database since that is where all streamed data is stored.
     let result = match read_thread(thread_id, database).await {
         Ok(content) => content,
         Err(e) => {

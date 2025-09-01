@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// Stores and loads threads from the mongoDB
-use super::types::Conversation;
+use crate::chatbot::types::Conversation;
 
 // Note: Bianca needs the user_id, thread_id, date and "topic" of a thread for the frontend, so that will be the four contents beside the main content.
 /// The content of a thread in the mongoDB database.
@@ -182,8 +182,8 @@ pub async fn read_thread(thread_id: &str, database: Database) -> Option<MongoDBT
     }
 }
 
-/// Recieves a user_id and returns the last 10 threads of the user.
-pub async fn read_threads(user_id: &str, database: Database) -> Vec<MongoDBThread> {
+/// Recieves a user_id and returns the last n threads of the user.
+pub async fn read_threads(user_id: &str, database: Database, n: u8) -> Vec<MongoDBThread> {
     debug!("Will load threads for user {}", user_id);
 
     // Query the database by user_id.
@@ -192,7 +192,7 @@ pub async fn read_threads(user_id: &str, database: Database) -> Vec<MongoDBThrea
         .find(doc! {
             "user_id": user_id
         })
-        .limit(-10) // Don't do 10 requests, do a single one for all 10.
+        .limit(-std::convert::Into::<i64>::into(n)) // Don't do n requests, do a single one for all n.
         .sort(doc! {
             "date": -1
         })

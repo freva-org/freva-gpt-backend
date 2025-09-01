@@ -29,7 +29,7 @@ use crate::{
             new_conversation_id, save_and_remove_conversation,
         },
         heartbeat::heartbeat_content,
-        mongodb_storage::get_database,
+        mongodb::mongodb_storage::get_database,
         prompting::{
             get_entire_prompt, get_entire_prompt_gpt_5, get_entire_prompt_json,
             get_entire_prompt_json_gpt_5,

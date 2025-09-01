@@ -82,7 +82,7 @@ async fn main() -> std::io::Result<()> {
                 ) // AvailableChatbots, get the available chatbots.
                 .route(
                     "/getuserthreads",
-                    web::get().to(chatbot::get_user_threads::get_user_threads)
+                    web::get().to(chatbot::mongodb::get_user_threads::get_user_threads)
                 ), // GetUserThreads, get the latest 10 threads of the user.
             web::scope("/ping").route(
                 "",

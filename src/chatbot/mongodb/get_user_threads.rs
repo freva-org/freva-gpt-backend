@@ -1,14 +1,15 @@
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use documented::docs_const;
-use tracing::{debug, warn};
+use tracing::{debug, trace, warn};
 
 use crate::{
     auth::ALLOW_FALLBACK_OLD_AUTH,
-    chatbot::mongodb_storage::{get_database, read_threads},
+    chatbot::mongodb::mongodb_storage::{get_database, read_threads},
 };
 
 /// # getuserthreads
-/// Takes in a user_id and returns the latest 10 threads of the user.
+/// Takes in a user_id and returns the latest n threads of the user.
+/// n is an optional parameter that defaults to 10.
 ///
 /// The user should ideally authenticate themselves using the OpenID Connect token.
 /// Alternatively, the user_id can be passed in as a query parameter.
@@ -71,8 +72,18 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
         }
     };
 
-    // Retrieve the latest 10 threads of the user from the database.
-    let threads = read_threads(&user_id, database).await;
+    // Try to get n from the qstring
+    let n = match qstring.get("num_threads") {
+        Some(n) => {
+            debug!("Parsed num_threads: {}", n);
+            n.parse::<u8>().unwrap_or(10)
+        }
+        None => 10,
+    };
+    trace!("Final num_threads: {}", n);
+
+    // Retrieve the latest n threads of the user from the database.
+    let threads = read_threads(&user_id, database, n).await;
 
     debug!("Threads: {:?}", threads);
     HttpResponse::Ok()
