@@ -15,7 +15,7 @@ use reqwest::Client;
 /// If a username was found in the token check, it will be returned.
 use tracing::{debug, error, info, trace, warn};
 
-static ALLOW_FALLBACK_OLD_AUTH: bool = false; // Whether or not the old auth system should be used as a fallback.
+pub static ALLOW_FALLBACK_OLD_AUTH: bool = false; // Whether or not the old auth system should be used as a fallback.
 
 pub async fn authorize_or_fail_fn(
     qstring: &QString,
@@ -137,9 +137,14 @@ pub async fn authorize_or_fail_fn(
         (None, None) => {
             // If the key is not found, we'll return a 401.
             warn!("No key provided in the request.");
-            Err(HttpResponse::Unauthorized().body(
-                "No key provided in the request. Please set the auth_key in the query parameters.",
-            ))
+            if ALLOW_FALLBACK_OLD_AUTH {
+                Err(HttpResponse::Unauthorized().body(
+                    "No key provided in the request. Please set the auth_key in the query parameters.",
+                ))
+            } else {
+                Err(HttpResponse::Unauthorized()
+                    .body("Some necessary field weren't found in the request, please make sure to use the nginx proxy. If this is the first time logging in, check whether the nginx proxy and sets the right headers."))
+            }
         }
     }
 }
@@ -153,16 +158,16 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
 
     // If the URL is set, we'll send a GET request to it with the token in the header.
 
-    // The entire url ending is "/api/freva-nextgen/auth/v2/userinfo",
+    // The entire url ending is "/api/freva-nextgen/auth/v2/systemuser",
     // But it sometimes doesn't send the api and nextgen part, so we need to add it ourselves.
-    let path = if rest_url.ends_with("/api/freva-nextgen/auth/v2/userinfo") {
+    let path = if rest_url.ends_with("/api/freva-nextgen/auth/v2/systemuser") {
         "".to_string() // The URL already contains the path.
     } else if rest_url.ends_with("/api/freva-nextgen/") {
-        "auth/v2/userinfo".to_string()
+        "auth/v2/systemuser".to_string()
     } else if rest_url.ends_with("/api/freva-nextgen") {
-        "/auth/v2/userinfo".to_string()
+        "/auth/v2/systemuser".to_string()
     } else {
-        "/api/freva-nextgen/auth/v2/userinfo".to_string() // The URL does not contain the path, so we add it.
+        "/api/freva-nextgen/auth/v2/systemuser".to_string() // The URL does not contain the path, so we add it.
     };
 
     debug!("Using path: {}", path);
@@ -171,6 +176,8 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
         .get(rest_url.to_string() + &path)
         .header("Authorization", format!("Bearer {token}"));
     let response = response.send().await;
+
+    trace!("Full response for token check: {:?}", response);
 
     let result = match response {
         Ok(res) => {
@@ -195,7 +202,8 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
             // If there was an error sending the request, we'll return a 503.
             error!("Error sending token check request: {}", e);
             return Err(
-                HttpResponse::ServiceUnavailable().body("Error sending token check request."), // This is technically about the vault, but 503 fits better than 401 here.
+                HttpResponse::ServiceUnavailable()
+                    .body("Error sending token check request, is the URL correct?"), // This is technically about the vault, but 503 fits better than 401 here.
             );
         }
     };
@@ -204,15 +212,16 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
     let username = match serde_json::from_str::<serde_json::Value>(&result) {
         Ok(json) => {
             // If the JSON is valid, we'll return the username.
-            if let Some(username) = json["username"].as_str() {
+            if let Some(username) = json["pw_name"].as_str() {
                 username.to_string()
             } else {
                 // If the username is not found, this is either because the token is invalid or the response is malformed.
                 // If the token is invalid, the response will contain a "detail" field with an error message.
                 if let Some(detail) = json["detail"].as_str() {
                     error!("Token check failed, detail: {}", detail);
-                    return Err(HttpResponse::Unauthorized()
-                        .body(format!("Token check failed: {}", detail)));
+                    return Err(
+                        HttpResponse::Unauthorized().body(format!("Token check failed: {detail}"))
+                    );
                 } else {
                     // The response was malformed, that's a 502.
                     error!("Token check response is malformed, no username found.");
@@ -258,7 +267,8 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
             } else {
                 // If the response is not successful, we'll return a 502.
                 warn!("Failed to get MongoDB URL, status code: {}", res.status());
-                return Err(HttpResponse::BadGateway().body("Failed to get MongoDB URL."));
+                return Err(HttpResponse::BadGateway()
+                    .body("Failed to get MongoDB URL. Is Nginx running correctly?"));
             }
         }
         Err(e) => {
@@ -288,7 +298,7 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
         Err(e) => {
             // If the JSON is not valid, we'll return a 502.
             error!("Error parsing vault response: {}", e);
-            return Err(HttpResponse::BadGateway().body("Error parsing vault response."));
+            return Err(HttpResponse::BadGateway().body("Vault response was malformed."));
         }
     };
     debug!("MongoDB URL: {}", mongodb_url);

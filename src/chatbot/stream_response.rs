@@ -18,16 +18,22 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    auth::is_guest,
+    auth::{is_guest, ALLOW_FALLBACK_OLD_AUTH},
     chatbot::{
-        available_chatbots::{model_ends_on_no_choice, model_supports_images, DEFAULTCHATBOT},
+        available_chatbots::{
+            model_ends_on_no_choice, model_is_gpt_5, model_is_reasoning, model_supports_images,
+            DEFAULTCHATBOT,
+        },
         handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
             new_conversation_id, save_and_remove_conversation,
         },
         heartbeat::heartbeat_content,
         mongodb_storage::get_database,
-        prompting::{get_entire_prompt, get_entire_prompt_json},
+        prompting::{
+            get_entire_prompt, get_entire_prompt_gpt_5, get_entire_prompt_json,
+            get_entire_prompt_json_gpt_5,
+        },
         storage_router::read_thread,
         types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
         LITE_LLM_CLIENT,
@@ -87,8 +93,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         Some(thread_id) => (thread_id.to_string(), false),
     };
 
-    // New in Version 1.9.1: require the user_id to be set.
-    // Later, proper authentication will take over.
+    // Only allow setting the user_id if the ALLOW_FALLBACK_OLD_AUTH is enabled.
     let user_id = match maybe_username {
         Some(username) => {
             // If the user is authenticated, we'll use their username as the user_id.
@@ -99,23 +104,30 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
             username
         }
         None => {
-            match qstring.get("user_id") {
-                None | Some("") => {
-                    // If the user ID is not found, we'll return a 400
-                    warn!("The User requested a stream without a user_id.");
-                    // For convenience, we'll also return the list of recieved parameters.
-                    let query_parameter_keys = qstring
-                        .to_pairs()
-                        .iter()
-                        .map(|(key, _)| *key)
-                        .collect::<Vec<_>>()
-                        .join(", ");
+            if ALLOW_FALLBACK_OLD_AUTH {
+                match qstring.get("user_id") {
+                    None | Some("") => {
+                        // If the user ID is not found, we'll return a 400
+                        warn!("The User requested a stream without a user_id.");
+                        // For convenience, we'll also return the list of recieved parameters.
+                        let query_parameter_keys = qstring
+                            .to_pairs()
+                            .iter()
+                            .map(|(key, _)| *key)
+                            .collect::<Vec<_>>()
+                            .join(", ");
 
-                    return HttpResponse::UnprocessableEntity().body(
+                        return HttpResponse::UnprocessableEntity().body(
                         "User ID not found. Please provide a non-empty user_id in the query parameters.\nHint: The following query parameters were received: ".to_string() + &query_parameter_keys,
                     );
+                    }
+                    Some(user_id) => user_id.to_string(),
                 }
-                Some(user_id) => user_id.to_string(),
+            } else {
+                // Fallback not allowed, return useful error message.
+                warn!("The User requested a stream without them being authenticated; no user_id found");
+                return HttpResponse::UnprocessableEntity()
+                    .body("Could not determine User_id. Please authenticate and try again.");
             }
         }
     };
@@ -252,12 +264,20 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     let messages = if create_new {
         // If the thread is new, we'll start with the base messages and the user's input.
-        let mut base_message: Vec<ChatCompletionRequestMessage> =
-            get_entire_prompt(&user_id, &thread_id);
+        let mut base_message: Vec<ChatCompletionRequestMessage> = if model_is_gpt_5(chatbot.clone())
+        {
+            get_entire_prompt_gpt_5(&user_id, &thread_id)
+        } else {
+            get_entire_prompt(&user_id, &thread_id)
+        };
 
         trace!("Adding base message to stream.");
 
-        let entire_prompt = get_entire_prompt_json(&user_id, &thread_id);
+        let entire_prompt = if model_is_gpt_5(chatbot.clone()) {
+            get_entire_prompt_json_gpt_5(&user_id, &thread_id)
+        } else {
+            get_entire_prompt_json(&user_id, &thread_id)
+        };
 
         let starting_prompt = StreamVariant::Prompt(entire_prompt);
         add_to_conversation(
@@ -358,20 +378,14 @@ fn build_request(
             include_usage: true,
         });
 
-    match chatbot {
-        // AvailableChatbots::OpenAI(OpenAIModels::o1_mini | OpenAIModels::o3_mini) => {
-        AvailableChatbots(modelname)
-            if modelname.clone().starts_with("o1-mini") || modelname.starts_with("o3-mini") =>
-        {
-            partial_request = partial_request.max_completion_tokens(16000u32); // The max tokens parameter is called differently for the reasoning models.
-        }
-        _ => {
-            partial_request = partial_request
-                .parallel_tool_calls(false) // No parallel tool calls!
-                .temperature(0.4) // The model shouldn't be too creative, but also not too boring.
-                .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
-                .max_tokens(16000u32);
-        }
+    if model_is_reasoning(chatbot) {
+        partial_request = partial_request.max_completion_tokens(16000u32); // The max tokens parameter is called differently for the reasoning models.
+    } else {
+        partial_request = partial_request
+            .parallel_tool_calls(false) // No parallel tool calls!
+            .temperature(0.4) // The model shouldn't be too creative, but also not too boring.
+            .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
+            .max_tokens(16000u32);
     }
 
     partial_request.build()

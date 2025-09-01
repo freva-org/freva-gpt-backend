@@ -112,10 +112,22 @@ pub fn model_supports_images(model: AvailableChatbots) -> bool {
     match model {
         // The new system only identifies the models by their name, so we will just check the name.
         AvailableChatbots(ref model_name)
-            if model_name.starts_with("gpt-4o") || model_name.starts_with("gpt-4.1") =>
+            if model_name.starts_with("gpt-4o")
+                || model_name.starts_with("gpt-5")
+                || model_name.starts_with("gpt-4.1") =>
         {
             true
         }
         _ => false,
     }
+}
+
+/// Some OpenAI Models are reasoning models and the parameters have different names.
+pub fn model_is_reasoning(model: AvailableChatbots) -> bool {
+    model.0.starts_with("o3") || model.0.starts_with("o4") || model.0.starts_with("gpt-5")
+}
+
+/// The new GPT-5 models expect different prompting, so we'll need to change the prompt based on whether or not a model is GPT-5-like.
+pub fn model_is_gpt_5(model: AvailableChatbots) -> bool {
+    model.0.starts_with("gpt-5")
 }

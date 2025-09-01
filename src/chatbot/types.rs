@@ -1,7 +1,7 @@
 use core::fmt;
 
 use async_openai::types::{
-    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage, ChatCompletionRequestMessageContentPartImage, ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall, ImageUrl
+    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage, ChatCompletionRequestMessageContentPartImage, ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall, ImageDetail, ImageUrl
 };
 use documented::Documented;
 use serde::{Deserialize, Serialize};
@@ -467,23 +467,30 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>, send_images: bool) -> Vec
                     if let Some(buffer) = assistant_message_buffer.clone() {
                         all_oai_messages.push(ChatCompletionRequestMessage::Assistant(
                             ChatCompletionRequestAssistantMessage {
-                                ..buffer //TODO: This looks weird?
+                                ..buffer
                             },
                         ));
                         assistant_message_buffer = None; // Clear the buffer before sending the image.
                     }
                     // The image needs to be sent as a user message, because that's the protocol for some reason. 
 
+                    let url = "data:image/png;base64,".to_string() + &base64_encoded_image; // Should always be a PNG.
+                    trace!("Sending Image to LLM: {}", url);
+
                     let image_message = ChatCompletionRequestMessage::User(
                         ChatCompletionRequestUserMessage {
                             name: Some("frevaGPT".to_string()),
                             content: async_openai::types::ChatCompletionRequestUserMessageContent::Array(
                                 vec![
-
+                                    async_openai::types::ChatCompletionRequestUserMessageContentPart::Text(
+                                        async_openai::types::ChatCompletionRequestMessageContentPartText {
+                                            text: "Here is the image returned by the Code Interpreter.".to_string(),
+                                        }
+                                    ),
                                     async_openai::types::ChatCompletionRequestUserMessageContentPart::ImageUrl(ChatCompletionRequestMessageContentPartImage{
                                         image_url: ImageUrl {
-                                            url: "data:image/png;base64,".to_string() + &base64_encoded_image, // Should always be a PNG. 
-                                            ..Default::default()
+                                            url,
+                                            detail: Some(ImageDetail::High),
                                         }
                                     }),
                                     ]

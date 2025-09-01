@@ -19,6 +19,9 @@ pub mod thread_storage;
 /// Internal use: handles the storing and retrieval of the streamed data in a mongoDB database
 pub mod mongodb_storage;
 
+/// Given a user request, generate a summary to store in the mongodb database
+pub mod topic_extraction;
+
 /// Streams the response from the chatbot
 pub mod stream_response;
 

@@ -361,7 +361,10 @@ fn post_process(code: String, user_id: String, thread_id: String) -> String {
         ("pd.", "import pandas as pd\n"),
         ("ccrs.", "import cartopy.crs as ccrs\n"),
         ("cartopy.", "import cartopy\n"),
-        ("cfeature", "import cartopy.feature as cfeature\n"),
+        ("cfeature.", "import cartopy.feature as cfeature\n"),
+        ("egh.", "import easygems.healpix as egh\n"),
+        ("hp.", "import healpy as hp\n"),
+        ("cm.", "import matplotlib.cm as cm\n"),
     ];
 
     for (detect, add) in &libraries {
@@ -394,7 +397,7 @@ fn post_process_output(output: &str, code: &str) -> String {
     // Loop over all lines. If one starts with "SyntaxError", we'll return it.
     let mut synerr_line = None;
     for line in output.lines() {
-        if line.starts_with("SyntaxError") || line.starts_with("IndentationError"){
+        if line.starts_with("SyntaxError") || line.starts_with("IndentationError") {
             synerr_line = Some(line);
             break;
         }
