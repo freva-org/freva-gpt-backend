@@ -24,15 +24,13 @@ model_list:
   #      api_base: "http://ollama:11434/v1"
   #    model_info:
   #      supports_function_calling: true
-  
-  
-      #- model_name: "qwen3:235b-a22b-instruct-2507-q4_K_M" # Doesn't fit into VRAM, ollama doesn't do VRAM->RAM offloading
-      # litellm_params:
-      # model: "openai/qwen3:235b-a22b-instruct-2507-q4_K_M"
-      #api_base: "http://ollama:11434/v1"
-      #model_info:
-      #supports_function_calling: true
 
+  #- model_name: "qwen3:235b-a22b-instruct-2507-q4_K_M" # Doesn't fit into VRAM, ollama doesn't do VRAM->RAM offloading
+  # litellm_params:
+  # model: "openai/qwen3:235b-a22b-instruct-2507-q4_K_M"
+  #api_base: "http://ollama:11434/v1"
+  #model_info:
+  #supports_function_calling: true
 
   - model_name: "gpt-oss:20b" # Open Source model from Openai
     litellm_params:
@@ -40,7 +38,6 @@ model_list:
       api_base: "http://ollama:11434/v1"
     model_info:
       supports_function_calling: true
-
 
   - model_name: "qwen3-coder:30b-TODO" # Doesn't support tool calling from Ollama yet
     litellm_params:
@@ -69,13 +66,13 @@ model_list:
       supports_function_calling: true
 
       # Development models
-  - model_name: "qwen3:4b-development"
+  - model_name: "qwen3:4b"
     litellm_params:
       model: "openai/qwen3:4b"
       api_base: "http://host.docker.internal:11434/v1" # For development only!
     model_info:
       supports_function_calling: true
-  - model_name: "qwen2.5:3b-development"
+  - model_name: "qwen2.5:3b"
     litellm_params:
       model: "openai/qwen2.5:3b"
       api_base: "http://host.docker.internal:11434/v1" # For development only!
@@ -84,3 +81,4 @@ model_list:
 
 litellm_settings:
   drop_params: true # Not all models support the same parameters. LiteLLM can automatically drop unsupported parameters.
+  # set_verbose: true # For debugging, prints a lot more info, including secrets. Leave this on during production is highly discouraged.

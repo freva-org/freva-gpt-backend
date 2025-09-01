@@ -34,8 +34,9 @@ DOES NOT AUTO-IMPORT ANYTHING. You need to import the libraries you need yoursel
                 .to_string(),
         ),
         parameters: Some(CODE_INTERPRETER_PARAMETER.clone()),
-        strict: None, // Structured Output has to either be the entire answer or nothing.
-                      // So we can't use that functionality here :(
+        strict: Some(true), // Structured Output has to either be the entire answer or nothing.
+                            // So we can't use that functionality here :(
+                            // Qwen is behaving weirdly, I'll try enabling it to test it out.
     }
 });
 
@@ -48,7 +49,8 @@ static CODE_INTERPRETER_PARAMETER: Lazy<serde_json::Value> = Lazy::new(|| {
                 "description" : "The python code to be executed."
             }
         },
-        "required" : ["code"]
+        "required" : ["code"],
+        "additionalProperties": false
     })
 });
 

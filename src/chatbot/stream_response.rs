@@ -238,8 +238,8 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         }
         Some(chatbot) => match String::try_into((*chatbot).to_owned()) {
             Ok(chatbot) => chatbot,
-            Err(e) => {
-                warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", e);
+            Err(()) => {
+                warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", chatbot);
                 return HttpResponse::UnprocessableEntity().body("Chatbot not found. Consult the /availablechatbots endpoint for available chatbots.");
             }
         },

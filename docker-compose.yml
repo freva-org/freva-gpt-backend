@@ -26,8 +26,9 @@ services:
       - ./litellm_config.yaml:/app/config.yaml # Mount the local litellm_config.yaml file to the container
     command:
       - "--config=/app/config.yaml"
-    ports:
-      - "4000:4000" # Map the container port to the host, change the host port if necessary
+    # ports:
+    #   - 4000:4000
+    # DO NOT open the litellm port to the outside; instead, configure the backend to connect to the container directly. See the example config.
     env_file:
       - .env # Load local .env file
     networks:
