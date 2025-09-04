@@ -37,8 +37,8 @@ def get_avail_chatbots():
     print(response.text)
     return response.json()
 
-def get_user_threads(num_threads=None):
-    response = get_request("/getuserthreads?" + (f"&num_threads={num_threads}" if num_threads else ""))
+def get_user_threads(num_threads=None, page=0) -> tuple[list, int]:
+    response = get_request(f"/getuserthreads?num_threads={num_threads}&page={page}")
     print(response.text)
     return response.json()
 
@@ -377,6 +377,8 @@ def test_get_user_threads():
 
 def test_update_topic():
     ''' Can the frontend update the topic of a past thread?''' # Since Version 1.11.1
+    if not should_test_mongo:
+        return
     # So there is the get_user_threads endpoint which returns the past few threads of a user. 
     # We'll grab the latest thread, check the topic, set it to another value, and check whether that worked. 
     response = get_user_threads()
@@ -393,6 +395,21 @@ def test_update_topic():
 
     updated_thread = get_user_threads()[0][0] # First thread (second top level item is the total number of threads of that user.)
     assert updated_thread["topic"] == new_topic, "Failed to update thread topic"
+
+
+def test_get_user_threads_paginated():
+    ''' Can the frontend request a specific page of threads?''' # Since Version 1.11.1
+    if not should_test_mongo:
+        return
+
+    # We'll run a standard request against get_user threads with n=2 and then another with page = 1 and check that no thread is in both results.
+    response_page_0 = get_user_threads(num_threads=2) # page = 0 is implied
+    response_page_1 = get_user_threads(num_threads=2, page=1)
+    thread_ids_0 = set([i["thread_id"] for i in response_page_0[0]])
+    thread_ids_1 = set([i["thread_id"] for i in response_page_1[0]])
+    
+    # Set intersection should be empty. 
+    assert not thread_ids_0 & thread_ids_1, "Threads should be different between pages"
 
 
 def test_use_rw_dir():

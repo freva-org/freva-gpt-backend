@@ -183,10 +183,12 @@ pub async fn read_thread(thread_id: &str, database: Database) -> Option<MongoDBT
 }
 
 /// Recieves a user_id and returns the last n threads of the user as well as the number of threads that user has.
+/// Supports naive pagination.
 pub async fn read_threads_and_num(
     user_id: &str,
     database: Database,
     n: u8,
+    page: Option<u8>,
 ) -> (Vec<MongoDBThread>, u64) {
     debug!("Will load threads for user {}", user_id);
 
@@ -200,7 +202,13 @@ pub async fn read_threads_and_num(
         .sort(doc! {
             "date": -1
         })
+        .skip((page.unwrap_or(0) * n) as u64) // Skip to the correct page
         .await;
+
+    // TODO: skip+limit is an antipattern for a good reason; this basically needs to look through the entire database because of the skip.
+    // Maybe (depending on the inner workings of MongoDB), using a Single Field Index with the user_id as key might improve performance.
+    // Additionally, using aggregation pipelines could help with performance much more, but I am not sure how they work, and the examples don't make sense to me.
+    // If we get some performance problems, I'll look into it again.
 
     // Additionally, we need to ask the database how many threads the user has in total.
     let total_threads = database

@@ -10,6 +10,7 @@ use crate::{
 /// # getuserthreads
 /// Takes in a user_id and returns the latest n threads of the user.
 /// n is an optional parameter that defaults to 10.
+/// if a page number (0-based) is passed, it instead paginates and uses that page number
 ///
 /// The user should ideally authenticate themselves using the OpenID Connect token.
 /// Alternatively, the user_id can be passed in as a query parameter.
@@ -82,8 +83,10 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
     };
     trace!("Final num_threads: {}", n);
 
+    let page = qstring.get("page").and_then(|p| p.parse::<u8>().ok());
+
     // Retrieve the latest n threads of the user from the database.
-    let threads = read_threads_and_num(&user_id, database, n).await;
+    let threads = read_threads_and_num(&user_id, database, n, page).await;
 
     debug!("Threads: {:?}", threads);
     HttpResponse::Ok()
