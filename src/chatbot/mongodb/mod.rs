@@ -5,3 +5,5 @@ pub mod mongodb_storage;
 pub mod get_user_threads;
 
 pub mod set_thread_topic;
+
+pub mod search_threads;

@@ -2,7 +2,10 @@ use std::env;
 
 use actix_web::HttpResponse;
 use futures::TryStreamExt;
-use mongodb::{bson::doc, Database};
+use mongodb::{
+    bson::{doc, Document},
+    Database,
+};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, trace, warn};
@@ -187,8 +190,8 @@ pub async fn read_thread(thread_id: &str, database: Database) -> Option<MongoDBT
 pub async fn read_threads_and_num(
     user_id: &str,
     database: Database,
-    n: u8,
-    page: Option<u8>,
+    n: u32,
+    page: Option<u32>,
 ) -> (Vec<MongoDBThread>, u64) {
     debug!("Will load threads for user {}", user_id);
 
@@ -202,7 +205,7 @@ pub async fn read_threads_and_num(
         .sort(doc! {
             "date": -1
         })
-        .skip((page.unwrap_or(0) * n) as u64) // Skip to the correct page
+        .skip(page.unwrap_or(0) as u64 * n as u64) // Skip to the correct page
         .await;
 
     // TODO: skip+limit is an antipattern for a good reason; this basically needs to look through the entire database because of the skip.
@@ -289,6 +292,95 @@ pub async fn update_topic(
             Err(HttpResponse::InternalServerError().body("Failed to update topic"))
         }
     }
+}
+
+/// Searches the database for threads from a specific user based on the variants that occur in it, i.E if a search searches ("user", "ERA6"),
+/// It searches for all threads that include a variant of user that contains ERA6.
+pub async fn query_by_variant(
+    user_id: &str,
+    variant: &str,
+    query: &str,
+    num_threads: u32,
+    page: u32,
+    database: Database,
+) -> Result<Vec<MongoDBThread>, HttpResponse> {
+    // The variant is checked on the call side, but it's inside the content array, so we need to use $elemMatch inside the doc!.
+
+    // // To implement some simplified version of fuzzy search, we'll use word-based fuzzy search
+    // let words = query.split_ascii_whitespace();
+    // let query = words
+    //     .map(|word| format!("{word}.*"))
+    //     .collect::<Vec<_>>()
+    //     .join("");
+    // // We'll disable fuzzy search for now, it can be enabled on request.
+
+    let filter = doc! {
+        "user_id": user_id,
+        "content": {
+            "$elemMatch": {
+                "variant": variant,
+                "text": { "$regex": query, "$options": "i" }
+            }
+        }
+    };
+
+    query_by_mongodb_filter(filter, num_threads, page, database).await
+}
+
+/// Searches the database for threads from a specific user with topics that contain a given query.
+/// Supports limiting the number of returned threads and pagination.
+pub async fn query_by_topic(
+    user_id: &str,
+    query: &str,
+    num_threads: u32,
+    page: u32,
+    database: Database,
+) -> Result<Vec<MongoDBThread>, HttpResponse> {
+    // It's a plain topic, so we just insert a regex filter for the topic.
+    let filter = doc! {
+        "user_id": user_id,
+        "topic": { "$regex": query, "$options": "i" }
+    };
+
+    debug!(
+        "Searching for threads for user {} with query {}",
+        user_id, query
+    );
+
+    query_by_mongodb_filter(filter, num_threads, page, database).await
+}
+
+async fn query_by_mongodb_filter(
+    filter: Document,
+    num_threads: u32,
+    page: u32,
+    database: Database,
+) -> Result<Vec<MongoDBThread>, HttpResponse> {
+    let cursor = database
+        .collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME)
+        .find(filter)
+        .sort(doc! {
+            "date": -1
+        })
+        .skip(page as u64 * num_threads as u64)
+        .limit(-(num_threads as i64))
+        .await;
+
+    let mut cursor = match cursor {
+        Ok(cursor) => cursor,
+        Err(e) => {
+            warn!("Failed to execute query: {:?}", e);
+            return Err(HttpResponse::InternalServerError().body("Failed to execute query"));
+        }
+    };
+
+    let mut threads = Vec::new();
+
+    while let Ok(Some(thread)) = cursor.try_next().await {
+        threads.push(thread);
+    }
+
+    Ok(threads)
 }
 
 /// Constructs a MongoDB database connection using the Vault URL.

@@ -47,6 +47,11 @@ def set_thread_topic(thread_id, new_topic):
     print(response.text)
     return response.text
 
+def search_database(query: str):
+    response = get_request(f"/searchthreads?query={query}")
+    print(response.text)
+    return response.json()
+
 @dataclass
 class StreamResult:
     chatbot: str | None
@@ -411,6 +416,34 @@ def test_get_user_threads_paginated():
     # Set intersection should be empty. 
     assert not thread_ids_0 & thread_ids_1, "Threads should be different between pages"
 
+def test_query_database():
+    ''' Can the frontend query the database?''' # Since Version 1.11.1
+    if not should_test_mongo:
+        return
+
+    response = search_database("test")
+    print(response)
+    # We can't test this in a useful way, so we'll just check that everything is in the right format.
+    assert response is not None
+    assert isinstance(response, list)
+    for i in response:
+        assert "thread_id" in i
+        assert "user_id" in i
+        assert "date" in i
+        assert "topic" in i
+        assert "content" in i
+
+def test_query_database_prefix():
+    ''' Can the frontend query the database while specifying the variant where the query string occured?''' # Since Version 1.11.1
+    # The prefix is a bit underdocumented, but if we specify "ai:sorry", it should specifically search for threads where the assistant said sorry. 
+    # This is again quite hard to test for, so we instead to two request, where the second replaces the colon with a space and check whether that changes the result
+    if not should_test_mongo:
+        return
+    response_ai = search_database("user :introduction")
+    print(response_ai)
+    response_space = search_database("user introduction")
+    print(response_space)
+    assert response_ai != response_space, "Responses should be different"
 
 def test_use_rw_dir():
     ''' Does the LLM understand how it can use the rw directory? ''' # Since Version 1.9.0

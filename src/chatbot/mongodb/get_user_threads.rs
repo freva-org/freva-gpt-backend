@@ -77,13 +77,13 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
     let n = match qstring.get("num_threads") {
         Some(n) => {
             debug!("Parsed num_threads: {}", n);
-            n.parse::<u8>().unwrap_or(10)
+            n.parse::<u32>().unwrap_or(10)
         }
         None => 10,
     };
     trace!("Final num_threads: {}", n);
 
-    let page = qstring.get("page").and_then(|p| p.parse::<u8>().ok());
+    let page = qstring.get("page").and_then(|p| p.parse::<u32>().ok());
 
     // Retrieve the latest n threads of the user from the database.
     let threads = read_threads_and_num(&user_id, database, n, page).await;
