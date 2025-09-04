@@ -42,6 +42,11 @@ def get_user_threads(num_threads=None):
     print(response.text)
     return response.json()
 
+def set_thread_topic(thread_id, new_topic):
+    response = get_request(f"/setthreadtopic?thread_id={thread_id}&new_topic={new_topic}")
+    print(response.text)
+    return response.text
+
 @dataclass
 class StreamResult:
     chatbot: str | None
@@ -92,7 +97,7 @@ class StreamResult:
 
 
             self.thread_id = json.loads(self.json_response[0]["content"])["thread_id"]
-            print("Debug: thread_id: " + self.thread_id) # Alway print the thread_id for debugging, so that when a test fails, we know which thread_id to look at.
+            print("Debug: thread_id: " + (self.thread_id or "None")) # Alway print the thread_id for debugging, so that when a test fails, we know which thread_id to look at.
 
     def has_error_variants(self):
         return any([ "error" in i["variant"].lower() for i in self.json_response])
@@ -201,6 +206,7 @@ def get_hello_world_thread_id() -> str:
     response = generate_full_response("Please use the code_interpreter tool to run the following code exactly and only once: \"print('Hello\\nWorld\\n!', flush=True)\".", chatbot="gpt-4.1-mini")
     # Just make sure the code output contains "Hello World !"
     assert any("Hello\nWorld\n!" in i for i in response.codeoutput_variants)
+    assert response.thread_id, "No thread_id found"
     # Now return the thread_id for further testing
     return response.thread_id
 
@@ -363,6 +369,23 @@ def test_get_user_threads():
             assert all("variant" in j for j in inner_content)
             assert all("content" in j for j in inner_content)
         
+
+def test_update_topic():
+    ''' Can the frontend update the topic of a past thread?''' # Since Version 1.10.4
+    # So there is the get_user_threads endpoint which returns the past few threads of a user. 
+    # We'll grab the latest thread, check the topic, set it to another value, and check whether that worked. 
+    threads = get_user_threads()
+    latest_thread = threads[0] if threads else None
+    assert latest_thread is not None, "No threads found"
+
+    old_topic = latest_thread["topic"]
+    new_topic = old_topic + " - Updated" # To make sure it can never accidentally match the old topic
+
+    result = set_thread_topic(latest_thread["thread_id"], new_topic)
+    print(result)
+
+    updated_thread = get_user_threads()[0]
+    assert updated_thread["topic"] == new_topic, "Failed to update thread topic"
 
 
 def test_use_rw_dir():

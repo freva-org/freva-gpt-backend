@@ -217,6 +217,49 @@ pub async fn read_threads(user_id: &str, database: Database, n: u8) -> Vec<Mongo
     }
 }
 
+/// Updates the topic of a given thread of a specific user
+pub async fn update_topic(
+    thread_id: &str,
+    user_id: &str,
+    new_topic: &str,
+    database: Database,
+) -> Result<(), HttpResponse> {
+    debug!(
+        "Will update topic of thread {} for user {}",
+        thread_id, user_id
+    );
+
+    let result = database
+        .collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME)
+        .update_one(
+            doc! {
+                "thread_id": thread_id,
+                "user_id": user_id
+            },
+            doc! {
+                "$set": {
+                    "topic": new_topic,
+                }
+            },
+        )
+        .await;
+
+    match result {
+        Ok(update_result) => {
+            debug!("Updated topic of thread in database.");
+            trace!("Update result: {:?}", update_result);
+            Ok(())
+        }
+        Err(e) => {
+            warn!(
+                "Failed to update topic of thread in database: {:?}; cannot update topic!",
+                e
+            );
+            Err(HttpResponse::InternalServerError().body("Failed to update topic"))
+        }
+    }
+}
+
 /// Constructs a MongoDB database connection using the Vault URL.
 pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
     let mongodb_uri = get_mongodb_uri(vault_url).await?;

@@ -83,7 +83,15 @@ async fn main() -> std::io::Result<()> {
                 .route(
                     "/getuserthreads",
                     web::get().to(chatbot::mongodb::get_user_threads::get_user_threads)
-                ), // GetUserThreads, get the latest 10 threads of the user.
+                ) // GetUserThreads, get the latest 10 threads of the user.
+                .route(
+                    "/setthreadtopic",
+                    web::post().to(chatbot::mongodb::set_thread_topic::set_thread_topic)
+                ) // set thread topic, where the user can change the topic of a specific thread
+                .route(
+                    "/setthreadtopic",
+                    web::get().to(chatbot::mongodb::set_thread_topic::set_thread_topic)
+                ), // Also allow the get method
             web::scope("/ping").route(
                 "",
                 actix_web::web::get().to(static_serve::moved_permanently)
