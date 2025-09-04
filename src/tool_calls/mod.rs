@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_openai::types::{ChatCompletionTool, FunctionObject};
-use rust_mcp_sdk::{mcp_client::ClientRuntime, schema::Tool, McpClient};
+use rmcp::{model::Tool, service::RunningService, RoleClient};
 use tracing::{debug, error, trace, warn};
 
 /// Routes the tool call to the appropriate function.
@@ -24,6 +24,8 @@ pub async fn all_tools() -> Vec<async_openai::types::ChatCompletionTool> {
     let mut tools = ALL_TOOLS_NO_MCP.clone();
 
     let mcp_tools_raw = mcp::ALL_MCP_CLIENTS
+        .force()
+        .await
         .iter()
         // .flat_map(async |client| client.list_tools(None).await.unwrap_or_default().tools),
         .map(async |client| mcp_client_to_tools(client.clone()).await)
@@ -46,7 +48,9 @@ pub async fn all_tools() -> Vec<async_openai::types::ChatCompletionTool> {
 
 /// Returns properly formatted tools from the MCP servers.
 /// Doesn't surface errors and instead just returns an empty vector if something goes wrong.
-async fn mcp_client_to_tools(client: Arc<ClientRuntime>) -> Vec<ChatCompletionTool> {
+async fn mcp_client_to_tools(
+    client: Arc<RunningService<RoleClient, ()>>,
+) -> Vec<ChatCompletionTool> {
     let raw_tool_result = match client.list_tools(None).await {
         Ok(tools) => tools,
         Err(e) => {
@@ -87,8 +91,8 @@ fn convert_tool(tool: Tool) -> Option<ChatCompletionTool> {
     };
 
     let function = FunctionObject {
-        name: tool.name,
-        description: tool.description,
+        name: tool.name.to_string(),
+        description: tool.description.map(|d| d.to_string()),
         parameters: Some(parameters),
         strict: None, // Again, we can't use strict mode
     };

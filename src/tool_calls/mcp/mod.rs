@@ -5,68 +5,62 @@ pub mod execute;
 
 use std::sync::Arc;
 
-use once_cell::sync::Lazy;
-use rust_mcp_sdk::{
-    mcp_client::{client_runtime, ClientHandler, ClientRuntime},
-    schema::{
-        ClientCapabilities, Implementation, InitializeRequestParams, RpcError,
-        LATEST_PROTOCOL_VERSION,
-    },
-    McpClient, StdioTransport, TransportOptions,
-};
-use tracing::debug;
-
-use crate::static_serve::VERSION;
-
-/// The MCP library requires a type for the client handling.
-struct MCPClient;
-#[async_trait::async_trait]
-impl ClientHandler for MCPClient {
-    async fn handle_process_error(
-        &self,
-        error_message: String,
-        _runtime: &dyn McpClient,
-    ) -> std::result::Result<(), RpcError> {
-        debug!("MCP Client encountered an error: {}", error_message); // We silence the error handling for now.
-        Ok(())
-    }
-}
+use async_lazy::Lazy;
+use rmcp::service::RunningService;
+use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
+use rmcp::{RoleClient, ServiceExt};
+use tokio::process::Command;
+use tracing::{debug, error};
 
 /// The global MCP Client that has connections to all supported MCP servers.
-static MCP_TEST_CLIENT: Lazy<Arc<ClientRuntime>> = Lazy::new(|| {
-    // First, we need the details of the Client we want to build.
-    let client_details = InitializeRequestParams {
-        capabilities: ClientCapabilities::default(), // No capabilities for now.
-        client_info: Implementation {
-            name: "Freva-GPT MCP Client".to_string(),
-            version: VERSION.to_string(),
-        },
-        protocol_version: LATEST_PROTOCOL_VERSION.to_string(),
-    };
+static MCP_TEST_CLIENT: Lazy<Option<Arc<RunningService<RoleClient, ()>>>> = Lazy::new(|| {
+    Box::pin(async {
+        // For testing purposes, use Tokio to spawn a child process for the MCP server.
+        let client = ()
+            .serve({
+                let spawned = TokioChildProcess::new(Command::new("uv").configure(|cmd| {
+                    cmd.arg("run").arg("src/tool_calls/mcp/hostname.py");
+                }));
+                let Ok(process) = spawned else {
+                    // Failed to spawn the process. This is bad, but we shouldn't crash. Throw an Error and return None
+                    error!("Failed to spawn MCP server process");
+                    return None;
+                };
+                process
+            })
+            .await;
 
-    // We'll use stdio transport for the MCP Client for now.
-    let transport = match StdioTransport::create_with_server_launch(
-        "uv",
-        vec![
-            "run".to_string(),
-            "src/tool_calls/mcp/hostname.py".to_string(),
-        ], // Just a dummy MCP server for testing purposes.
-        None,
-        TransportOptions::default(),
-    ) {
-        Ok(transport) => transport,
-        Err(e) => {
-            panic!("Failed to create MCP Client transport: {}", e);
-        }
-    };
+        let client = match client {
+            Ok(client) => client,
+            Err(e) => {
+                error!("Failed to create MCP client: {}", e);
+                return None;
+            }
+        };
 
-    // Dummy Handler for the MCP Client.
-    let handler = MCPClient;
+        let server_info = client.peer_info();
+        debug!("Connected to MCP server: {:?}", server_info);
 
-    client_runtime::create_client(client_details, transport, handler)
+        let tools = client.list_all_tools().await;
+        debug!("MCP server tools: {:?}", tools);
+
+        // // Dummy Handler for the MCP Client.
+        // let handler = MCPClient;
+
+        // client_runtime::create_client(client_details, transport, handler)
+
+        Some(Arc::new(client))
+    })
 });
 
 /// The `rust_mcp_sdk` library assigns a client to each MCP server, so we'll collect them here.
-pub static ALL_MCP_CLIENTS: Lazy<Vec<Arc<ClientRuntime>>> = Lazy::new(|| {
-    vec![MCP_TEST_CLIENT.clone()] // Add more clients as needed.
+pub static ALL_MCP_CLIENTS: Lazy<Vec<Arc<RunningService<RoleClient, ()>>>> = Lazy::new(|| {
+    Box::pin(async {
+        // We need to collect all the MCP clients here.
+        let mut clients = Vec::new();
+        if let Some(client) = (*MCP_TEST_CLIENT.force().await).clone() {
+            clients.push(client);
+        }
+        clients
+    })
 });

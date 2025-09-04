@@ -42,7 +42,7 @@ itertools = "0.14.0"
 mongodb = { version = "3.2.3" }
 chrono = { version = "0.4.41", default-features = false }
 async-lazy = "0.1.2"
-rust-mcp-sdk = "0.4.2"
+rmcp = {version = "0.6.1", features=["client", "transport-child-process"] }
 
 [lints.rust]
 unsafe_code = "forbid"
