@@ -349,15 +349,20 @@ def test_get_user_threads():
     # This requires MongoDB to be turned on, so this switch can be turned off to disable this feature.
     if should_test_mongo:
         response = get_user_threads()
+        # Since Version 1.11.0, this also includes the total number of threads.
+        assert (isinstance(response, list) or (isinstance(response, tuple)) and len(response) == 2)
+        threads, num_threads = response
+        assert isinstance(num_threads, int)
+        assert num_threads >= len(threads)
         # The response should be a list of threads, each with a thread_id and a chatbot name
-        assert isinstance(response, list)
-        assert all(isinstance(i, dict) for i in response)
-        assert all("thread_id" in i for i in response)
-        assert all("user_id" in i for i in response)
-        assert all("date" in i for i in response)
-        assert all("topic" in i for i in response)
-        assert all("content" in i for i in response)
-        for i in response:
+        assert isinstance(threads, list)
+        assert all(isinstance(i, dict) for i in threads)
+        assert all("thread_id" in i for i in threads)
+        assert all("user_id" in i for i in threads)
+        assert all("date" in i for i in threads)
+        assert all("topic" in i for i in threads)
+        assert all("content" in i for i in threads)
+        for i in threads:
             assert isinstance(i["thread_id"], str)
             assert isinstance(i["user_id"], str)
             assert isinstance(i["date"], str)
@@ -371,10 +376,12 @@ def test_get_user_threads():
         
 
 def test_update_topic():
-    ''' Can the frontend update the topic of a past thread?''' # Since Version 1.10.4
+    ''' Can the frontend update the topic of a past thread?''' # Since Version 1.11.1
     # So there is the get_user_threads endpoint which returns the past few threads of a user. 
     # We'll grab the latest thread, check the topic, set it to another value, and check whether that worked. 
-    threads = get_user_threads()
+    response = get_user_threads()
+    print(response)
+    threads = response[0]
     latest_thread = threads[0] if threads else None
     assert latest_thread is not None, "No threads found"
 
@@ -384,7 +391,7 @@ def test_update_topic():
     result = set_thread_topic(latest_thread["thread_id"], new_topic)
     print(result)
 
-    updated_thread = get_user_threads()[0]
+    updated_thread = get_user_threads()[0][0] # First thread (second top level item is the total number of threads of that user.)
     assert updated_thread["topic"] == new_topic, "Failed to update thread topic"
 
 
@@ -457,9 +464,11 @@ def test_get_user_threads_with_n():
     ''' Can the Frontend request a specific number of threads of a user? ''' # Since Version TODO
     # This test is again dependant on MongoDB being turned on.
     if should_test_mongo:
-        # We'll ask for 12 threads and assume their format is correct as the other test already tested that. 
-        response = get_user_threads(num_threads = 12)
-        assert len(response) == 12, "Expected 12 threads, but got: " + str(len(response))
+        # We'll ask for 12 threads and assume their format is correct as the other test already tested that.
+        response = get_user_threads(num_threads=12)
+        threads, num_threads = response
+        assert num_threads >= 12, "User does not have 12 threads yet, cannot test."
+        assert len(threads) == 12, "Expected 12 threads, but got: " + str(len(threads))
 
 
 # --------------------------------

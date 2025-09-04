@@ -4,7 +4,7 @@ use tracing::{debug, trace, warn};
 
 use crate::{
     auth::ALLOW_FALLBACK_OLD_AUTH,
-    chatbot::mongodb::mongodb_storage::{get_database, read_threads},
+    chatbot::mongodb::mongodb_storage::{get_database, read_threads_and_num},
 };
 
 /// # getuserthreads
@@ -83,7 +83,7 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
     trace!("Final num_threads: {}", n);
 
     // Retrieve the latest n threads of the user from the database.
-    let threads = read_threads(&user_id, database, n).await;
+    let threads = read_threads_and_num(&user_id, database, n).await;
 
     debug!("Threads: {:?}", threads);
     HttpResponse::Ok()

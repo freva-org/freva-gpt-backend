@@ -182,8 +182,12 @@ pub async fn read_thread(thread_id: &str, database: Database) -> Option<MongoDBT
     }
 }
 
-/// Recieves a user_id and returns the last n threads of the user.
-pub async fn read_threads(user_id: &str, database: Database, n: u8) -> Vec<MongoDBThread> {
+/// Recieves a user_id and returns the last n threads of the user as well as the number of threads that user has.
+pub async fn read_threads_and_num(
+    user_id: &str,
+    database: Database,
+    n: u8,
+) -> (Vec<MongoDBThread>, u64) {
     debug!("Will load threads for user {}", user_id);
 
     // Query the database by user_id.
@@ -198,21 +202,40 @@ pub async fn read_threads(user_id: &str, database: Database, n: u8) -> Vec<Mongo
         })
         .await;
 
+    // Additionally, we need to ask the database how many threads the user has in total.
+    let total_threads = database
+        .collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME)
+        .count_documents(doc! {
+            "user_id": user_id
+        })
+        .await;
+
+    let total_threads = match total_threads {
+        Ok(count) => count,
+        Err(e) => {
+            warn!(
+                "Failed to count documents for user {}: {:?}; assuming 0",
+                user_id, e
+            );
+            0
+        }
+    };
+
     match result {
         Ok(mut inner) => {
             debug!("Loaded threads from database.");
-            // The logic for collecting the theads is a bit tricky.
+            // The logic for collecting the threads is a bit tricky.
             let mut thread_vec = Vec::new();
-            // inner.collect::<Vec<MongoDBThread>>().await.unwrap_or_default().into()
+
             while let Ok(Some(inner)) = inner.try_next().await {
                 thread_vec.push(inner);
             }
-            // Is the order correct? TODO!
-            thread_vec
+
+            (thread_vec, total_threads)
         }
         Err(e) => {
             info!("Failed to load threads: {:?}; expecting it to not exist", e);
-            vec![]
+            (vec![], 0)
         }
     }
 }
