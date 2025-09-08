@@ -78,7 +78,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let headers = req.headers();
 
     trace!("Query string: {:?}", qstring);
-    trace!("Headers: {:?}", headers);
+    // trace!("Headers: {:?}", headers);
 
     // First try to authorize the user.
     let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);

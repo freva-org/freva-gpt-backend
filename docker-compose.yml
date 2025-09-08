@@ -14,7 +14,7 @@ services:
       - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/threads:/app/threads
       - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/target:/app/target
       - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles # Deprecated, once used for test data before freva support was added. Now used for debugging.
-      - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/python_pickles:/app/python_pickles
+      - /scratch/b/b380001/freva-gpt/python_pickles:/app/python_pickles
       - /scratch/b/b380001/freva-gpt/rw_dir/:/app/rw_dir # All instances share the rw_dir for accessing the data the LLM generated.
     networks:
       - freva-gpt

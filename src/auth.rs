@@ -47,7 +47,7 @@ pub async fn authorize_or_fail_fn(
                         .body("Authorization header is not a valid UTF-8 string."));
                 }
             };
-            debug!("Authorization header: {}", auth_string);
+            // debug!("Authorization header: {}", auth_string); // This can contain sensitive information, so don't log it.
             debug!("Query string auth_key: {:?}", maybe_key);
             // The Authentication header is a Bearer token, so we need to extract the token from it.
             let Some(token) = auth_string.strip_prefix("Bearer ") else {
@@ -153,7 +153,7 @@ static REQWEST_CLIENT: Lazy<Client> = Lazy::new(reqwest::Client::new);
 
 /// Recives a token, checks it against the URL provided in the header and returns the username.
 async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, HttpResponse> {
-    debug!("Checking token: {}", token);
+    // debug!("Checking token: {}", token);
     debug!("Using rest URL: {}", rest_url);
 
     // If the URL is set, we'll send a GET request to it with the token in the header.
@@ -244,7 +244,7 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
 /// Receives the vault URL and returns the URL to the `MongoDB` database to use.
 pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
     // The vault URL will be contained in the answer to the request to the vault. (No endpoint or authentication needed.)
-    debug!("Getting MongoDB URL from vault: {}", vault_url);
+    // debug!("Getting MongoDB URL from vault: {}", vault_url);
     let response = REQWEST_CLIENT.get(vault_url).send().await;
 
     // Extract the result or fail
@@ -253,7 +253,7 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
             if res.status().is_success() {
                 // If the response is successful, we'll return the MongoDB URL.
                 let content = res.text().await;
-                debug!("Response from vault: {:?}", content);
+                // debug!("Response from vault: {:?}", content);
                 let content = match content {
                     Ok(text) => text.trim().to_owned(),
                     Err(e) => {
@@ -262,7 +262,7 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
                             .body("Error reading response text from vault."));
                     }
                 };
-                debug!("Vault response: {}", content);
+                // debug!("Vault response: {}", content);
                 content
             } else {
                 // If the response is not successful, we'll return a 502.
@@ -301,7 +301,7 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
             return Err(HttpResponse::BadGateway().body("Vault response was malformed."));
         }
     };
-    debug!("MongoDB URL: {}", mongodb_url);
+    // debug!("MongoDB URL: {}", mongodb_url);
     Ok(mongodb_url)
 }
 

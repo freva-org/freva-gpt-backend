@@ -235,10 +235,10 @@ pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
             if let Some(question_mark_index) = mongodb_uri.rfind('?') {
                 // Strip the options from the URI.
                 let stripped_uri = &mongodb_uri[..question_mark_index];
-                debug!("Stripped MongoDB URI: {}", stripped_uri);
+                // debug!("Stripped MongoDB URI: {}", stripped_uri);
                 match mongodb::Client::with_uri_str(stripped_uri).await {
                     Ok(client) => {
-                        debug!("Successfully connected to MongoDB at {}", stripped_uri);
+                        // debug!("Successfully connected to MongoDB at {}", stripped_uri);
                         client
                     }
                     Err(e) => {
