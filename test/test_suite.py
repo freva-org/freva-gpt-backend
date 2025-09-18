@@ -193,6 +193,8 @@ def test_available_chatbots():
     response = get_avail_chatbots()
     assert "gpt-5" in response
     assert "gpt-5-mini" in response
+    assert "gpt-5" in response
+    assert "gpt-5-mini" in response
     assert "gpt-4o-mini" in response
     assert "gpt-4o" in response
 
@@ -313,10 +315,12 @@ To test this. Please run the following code: \"x = 42\nraise Exception('This is 
     response = generate_full_response(input, chatbot="gpt-4.1-mini")
     # The code output should now contain the exception message
     assert any(["This is a test exception" in i for i in response.codeoutput_variants])
+    assert any(["This is a test exception" in i for i in response.codeoutput_variants])
 
     # Now make sure the variable x is still stored
     response2 = generate_full_response("Please demonstrate the fact that the code interpreter does not persist variables after exceptions by printing x without reassigning it.", chatbot="gpt-5-mini", thread_id=response.thread_id)
     # The code output should now contain 42
+    assert any(["42" in i for i in response2.codeoutput_variants])
     assert any(["42" in i for i in response2.codeoutput_variants])
 
 def test_third_request():

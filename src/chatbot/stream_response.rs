@@ -34,9 +34,9 @@ use crate::{
             get_entire_prompt, get_entire_prompt_gpt_5, get_entire_prompt_json,
             get_entire_prompt_json_gpt_5,
         },
-        select_client,
         storage_router::read_thread,
         types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
+        LITE_LLM_CLIENT,
     },
     logging::{silence_logger, undo_silence_logger},
     tool_calls::{code_interpreter::verify_can_access, route_call::route_call, ALL_TOOLS},
@@ -246,9 +246,9 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let chatbot = match qstring.get("chatbot") {
         None | Some("") => {
             debug!("Using default chatbot as user didn't supply one.");
-            DEFAULTCHATBOT
+            DEFAULTCHATBOT.clone()
         }
-        Some(chatbot) => match String::try_into(chatbot.to_owned()) {
+        Some(chatbot) => match String::try_into((*chatbot).to_owned()) {
             Ok(chatbot) => chatbot,
             Err(()) => {
                 warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", chatbot);
@@ -264,7 +264,8 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     let messages = if create_new {
         // If the thread is new, we'll start with the base messages and the user's input.
-        let mut base_message: Vec<ChatCompletionRequestMessage> = if model_is_gpt_5(chatbot) {
+        let mut base_message: Vec<ChatCompletionRequestMessage> = if model_is_gpt_5(chatbot.clone())
+        {
             get_entire_prompt_gpt_5(&user_id, &thread_id)
         } else {
             get_entire_prompt(&user_id, &thread_id)
@@ -272,7 +273,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
         trace!("Adding base message to stream.");
 
-        let entire_prompt = if model_is_gpt_5(chatbot) {
+        let entire_prompt = if model_is_gpt_5(chatbot.clone()) {
             get_entire_prompt_json_gpt_5(&user_id, &thread_id)
         } else {
             get_entire_prompt_json(&user_id, &thread_id)
@@ -307,7 +308,8 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         };
 
         // We have a Vec of StreamVariant, but we want a Vec of ChatCompletionRequestMessage.
-        let mut past_messages = help_convert_sv_ccrm(content, model_supports_images(chatbot));
+        let mut past_messages =
+            help_convert_sv_ccrm(content, model_supports_images(chatbot.clone()));
         let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
             name: Some("user".to_string()),
             content: async_openai::types::ChatCompletionRequestUserMessageContent::Text(
@@ -331,7 +333,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         user_id.clone(),
     );
 
-    let request: CreateChatCompletionRequest = match build_request(messages, chatbot) {
+    let request: CreateChatCompletionRequest = match build_request(messages, chatbot.clone()) {
         Ok(request) => request,
         Err(e) => {
             // If we can't build the request, we'll return a generic error.
@@ -366,7 +368,7 @@ fn build_request(
 
     let mut default_args = CreateChatCompletionRequestArgs::default(); // If the partial_request would be set to default here, the lifetime would be too short.
     let mut partial_request = default_args
-        .model(String::from(chatbot))
+        .model(String::from(chatbot.clone()))
         .n(1)
         .messages(messages)
         .stream(true)
@@ -412,12 +414,7 @@ async fn create_and_stream(
     user_id: String,
     database: Database,
 ) -> actix_web::HttpResponse {
-    let open_ai_stream = match select_client(chatbot)
-        .await
-        .chat()
-        .create_stream(request)
-        .await
-    {
+    let open_ai_stream = match LITE_LLM_CLIENT.chat().create_stream(request).await {
         Ok(stream) => stream.fuse(), // Fuse the stream so calling next() will return None after the stream ends instead of blocking.
         Err(e) => {
             // If we can't create the stream, we'll return a generic error.
@@ -452,10 +449,11 @@ async fn create_and_stream(
             mut llama_tool_call_content,
             mut reciever,
         )| {
-            // It is required to clone the freva_config_path, because it is moved into the closure. Same with the user_id. And the database.
+            // It is required to clone the freva_config_path, because it is moved into the closure. Same with the user_id. And the database. And now the chatbot.
             let freva_config_path_clone = freva_config_path.clone();
             let user_id = user_id.clone();
             let database = database.clone();
+            let chatbot = chatbot.clone();
             async move {
                 // Even higher priority than stopping the stream is sending the thread_id hint.
                 if should_hint_thread_id {
@@ -1054,7 +1052,7 @@ async fn oai_stream_to_variants(
                 }
             } else {
                 // Some models (specifically some of the qwen family, have the tendency to not return any choices to mark the end of the stream.)
-                if model_ends_on_no_choice(chatbot) {
+                if model_ends_on_no_choice(chatbot.clone()) {
                     debug!("Qwen-like model ended stream without choice, simulating stop event.");
                     // Differentiatie between a tool call and a standard stop by the tool arguments and tool name.
                     let finish_reason = if !tool_arguments.is_empty() && tool_name.is_some() {
@@ -1094,35 +1092,37 @@ async fn oai_stream_to_variants(
         None => {
             // The llama chatbot sometimes forgets to write </tool_call> at the end of the tool call.
             // If it's not an openAI chatbot, check whether we can get some tool call from the running tool.
-            if matches!(chatbot, AvailableChatbots::Ollama(_)) {
-                // Try to get the tool call from the running tool.
-                let tool_call = try_extract_tool_call(
-                    &llama_tool_call_content
-                        .take()
-                        .map(|c| c.take())
-                        .unwrap_or_default(),
-                );
-                match tool_call {
-                    None => {
-                        info!("Stream ended abruptly and without error. Ollama just does this, returning streamend.");
-                        vec![StreamVariant::StreamEnd("Ollama Stream ended".to_string())]
-                    }
-                    Some((name, arguments)) => {
-                        // We know it's the code interpreter and can send it as a delta.
-                        trace!("Tool call: {:?} with arguments: {:?}", name, arguments);
-                        vec![
-                            StreamVariant::Code(arguments, generate_id()),
-                            StreamVariant::StreamEnd("Ollama Stream ended".to_string()), // We still need to end the stream, because the tool call is done.
-                        ]
-                    }
+            // if matches!(chatbot, AvailableChatbots::Ollama(_)) {
+            // Try to get the tool call from the running tool.
+            let tool_call = try_extract_tool_call(
+                &llama_tool_call_content
+                    .take()
+                    .map(|c| c.take())
+                    .unwrap_or_default(),
+            );
+            match tool_call {
+                None => {
+                    info!("Stream ended abruptly and without error.");
+                    vec![StreamVariant::StreamEnd(
+                        "Stream ended abruptly.".to_string(),
+                    )]
                 }
-            } else {
-                // Else, it's just an abrupt end of the stream.
-                warn!("Stream ended abruptly and without error. This should not happen; returning StreamEnd.");
-                vec![StreamVariant::StreamEnd(
-                    "Stream ended abruptly".to_string(),
-                )]
+                Some((name, arguments)) => {
+                    // We know it's the code interpreter and can send it as a delta.
+                    trace!("Tool call: {:?} with arguments: {:?}", name, arguments);
+                    vec![
+                        StreamVariant::Code(arguments, generate_id()),
+                        StreamVariant::StreamEnd("Stream ended".to_string()), // We still need to end the stream, because the tool call is done.
+                    ]
+                }
             }
+            // } else {
+            //     // Else, it's just an abrupt end of the stream.
+            //     warn!("Stream ended abruptly and without error. This should not happen; returning StreamEnd.");
+            //     vec![StreamVariant::StreamEnd(
+            //         "Stream ended abruptly".to_string(),
+            //     )]
+            // }
         }
     }
 }
@@ -1238,7 +1238,7 @@ async fn restart_stream(
 
             // The stream wants a vector of ChatCompletionRequestMessage, so we need to convert the StreamVariants to that.
             let all_oai_messages =
-                help_convert_sv_ccrm(all_messages, model_supports_images(chatbot));
+                help_convert_sv_ccrm(all_messages, model_supports_images(chatbot.clone()));
 
             trace!("All messages: {:?}", all_oai_messages);
 
@@ -1253,12 +1253,7 @@ async fn restart_stream(
                 }
                 Ok(request) => {
                     trace!("Request built successfully: {:?}", request);
-                    match select_client(chatbot)
-                        .await
-                        .chat()
-                        .create_stream(request)
-                        .await
-                    {
+                    match LITE_LLM_CLIENT.chat().create_stream(request).await {
                         Err(e) => {
                             // If we can't create the stream, we'll return a generic error.
                             warn!("Error creating stream: {:?}", e);

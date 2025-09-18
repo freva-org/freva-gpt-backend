@@ -4,10 +4,7 @@ use async_openai::types::{
 };
 use tracing::warn;
 
-use crate::chatbot::{
-    available_chatbots::{AvailableChatbots, OpenAIModels},
-    select_client,
-};
+use crate::chatbot::LITE_LLM_CLIENT;
 
 /// Given a "topic", that is, the users' first actual request of the conversation, sum it up.
 /// This will then be used as a summary for the history view on the frontend.
@@ -41,8 +38,7 @@ pub async fn summarize_topic(topic: &str) -> String {
         ..Default::default()
     };
 
-    let chatbot = AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1_mini);
-    let result = match select_client(chatbot).await.chat().create(request).await {
+    let result = match LITE_LLM_CLIENT.chat().create(request).await {
         Ok(response) => response.choices.first().map_or_else(
             || {
                 warn!("No summary available, list of choices was empty.");
