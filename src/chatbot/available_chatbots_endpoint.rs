@@ -23,7 +23,7 @@ pub async fn available_chatbots_endpoint(req: HttpRequest) -> impl Responder {
     // The user wants a list of Strings, not the enum.
     let chatbot_string_list = crate::chatbot::available_chatbots::AVAILABLE_CHATBOTS
         .iter()
-        .map(|chatbot| String::from(*chatbot))
+        .map(|chatbot| chatbot.clone().into())
         .collect::<Vec<String>>();
 
     HttpResponse::Ok().json(chatbot_string_list)

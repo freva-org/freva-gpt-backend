@@ -26,6 +26,22 @@ services:
           "-f",
           "http://localhost:${TARGET_PORT:-8502}/api/chatbot/help",
         ]
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    hostname: litellm-instance-${INSTANCE_NAME}
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml # Mount the local litellm_config.yaml file to the container
+    command:
+      - "--config=/app/config.yaml"
+    # ports:
+    #   - 4000:4000
+    # DO NOT open the litellm port to the outside; instead, configure the backend to connect to the container directly. See the example config.
+    env_file:
+      - .env # Load local .env file
+    networks:
+      - freva-gpt
+    healthcheck:
+      test: "curl http://localhost:4000/health/readiness"
   ollama: # Ollama is only for the backend and not accessible from the outside. Port 11434 is not exposed.
     image: ollama/ollama
     hostname: ollama-instance-${INSTANCE_NAME}

@@ -1,81 +1,78 @@
-use tracing::debug;
+use once_cell::sync::Lazy;
+use tracing::{debug, error, info, trace, warn};
 
 /// The list of available chatbots that the user can choose from.
 /// The first one is the default chatbot.
-pub static AVAILABLE_CHATBOTS: &[AvailableChatbots] = &[
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1), // New default model, better than 4o
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1_mini),
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_4_1_nano),
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_5), // Does not support streaming for non-verified organisations. Also uses a different paradigm for prompting.
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_5_mini),
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_5_nano),
-    AvailableChatbots::OpenAI(OpenAIModels::o3),
-    AvailableChatbots::OpenAI(OpenAIModels::o4_mini),
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_4o),
-    AvailableChatbots::OpenAI(OpenAIModels::gpt_4o_mini),
-    // AvailableChatbots::Ollama(OllamaModels::llama3_2_3B),
-    // AvailableChatbots::Ollama(OllamaModels::llama3_1_70B),
-    // AvailableChatbots::Ollama(OllamaModels::llama3_1_8B),
-    // AvailableChatbots::Ollama(OllamaModels::llama3_groq_8B),
-    // AvailableChatbots::Ollama(OllamaModels::gemma2),
-    AvailableChatbots::Ollama(OllamaModels::qwen2_5_3B), // Only one active for development purposes. Will be expanded back after the 12th.
-    // AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B),
-    // AvailableChatbots::Ollama(OllamaModels::qwen2_5_7B_tool),
-    // AvailableChatbots::Ollama(OllamaModels::qwen2_5_32B),
-    // AvailableChatbots::Google(GoogleModels::gemini_1_5_flash), // Not yet available in the EU.
-    // AvailableChatbots::Ollama(OllamaModels::deepseek_r1_70b), // Doesn't support tool calls!.
-    AvailableChatbots::Ollama(OllamaModels::deepseek_r1_32b_tools), // the community model, doesn't support tool calls yet, the community needs to work on it
-    AvailableChatbots::Ollama(OllamaModels::qwq),
-    AvailableChatbots::Ollama(OllamaModels::gpt_oss_20b), // OpenAI Open Source Model
-];
+pub static AVAILABLE_CHATBOTS: Lazy<Vec<AvailableChatbots>> = Lazy::new(|| {
+    let chatbots = get_available_chatbots_from_litellm_file();
+    if chatbots.is_empty() {
+        error!("No available chatbots found in the LiteLLM file. Please check the configuration.");
+        eprintln!("Error: No available chatbots found in the LiteLLM file. Please check the configuration.");
+        std::process::exit(1); // This is fatal because we can't run without any chatbots.
+                               // But because it's in a lazy static, exiting is not a problem; it will never do it "in production", but before.
+    }
+    info!("Available chatbots: {:?}", chatbots);
+    chatbots
+});
+
+/// Because we want a single source of truth for the available chatbots, we will read them from the file where LiteLLM stores them.
+/// This is a yaml file, but I'll just read it as a string and parse it manually.
+fn get_available_chatbots_from_litellm_file() -> Vec<AvailableChatbots> {
+    // For now, we can just include the file, but later we might want to read it instead.
+    let file_content = include_str!("../../litellm_config.yaml");
+
+    // We are looking for lines that contain "model_name" and then want to extract the model name,
+    // which is after that in quotes.
+    // Example: \t - model_name: "qwen2_5_0b_instruct"
+    let mut chatbots = Vec::new();
+    for line in file_content.lines() {
+        trace!("Processing line: {}", line);
+        // In order to respsect commenting out, we will only look for lines that start with only spaces and maybe a dash.
+        let line = line.trim_matches(|c: char| c == '-' || c.is_whitespace());
+        if line.starts_with("model_name:") {
+            // Expect the model name to be in quotes, and those quotes are the only thing on the line.
+            if let Some(start) = line.find('"') {
+                if let Some(end) = line.rfind('"') {
+                    let model_name = line[start + 1..end].trim().to_string();
+                    if !model_name.is_empty() {
+                        chatbots.push(AvailableChatbots(model_name));
+                    } else {
+                        warn!("Found an empty model name in the LiteLLM file. Skipping it.");
+                    }
+                } else {
+                    warn!("Found a line with model_name but no closing quote, skipping it.");
+                }
+            } else {
+                warn!("Found a line with model_name but no opening quote, skipping it.");
+            }
+        } // Those lines that don't contain "model_name" are ignored.
+    }
+    if chatbots.is_empty() {
+        error!("No valid chatbots found in the LiteLLM file.");
+    }
+    chatbots
+}
 
 /// The default chatbot that will be used when the user doesn't specify one.
 /// It's always the first one in the list of available chatbots.
-pub static DEFAULTCHATBOT: AvailableChatbots = AVAILABLE_CHATBOTS[0];
+pub static DEFAULTCHATBOT: Lazy<AvailableChatbots> = Lazy::new(|| {
+    let first = AVAILABLE_CHATBOTS.first();
+    if let Some(chatbot) = first {
+        chatbot.clone()
+    } else {
+        error!("No default chatbot found. Please check the configuration.");
+        eprintln!("Error: No default chatbot found. Please check the configuration.");
+        std::process::exit(1); // This technically should never happen, but just in case.
+    }
+});
 
-#[derive(Debug, Clone, Copy)]
-pub enum AvailableChatbots {
-    OpenAI(OpenAIModels),
-    Ollama(OllamaModels),
-    Google(GoogleModels),
-}
+#[derive(Debug, Clone)]
+pub struct AvailableChatbots(pub String);
 
-// Implementing the conversion from the enum to a string
 impl From<AvailableChatbots> for String {
     fn from(val: AvailableChatbots) -> Self {
-        match val {
-            AvailableChatbots::OpenAI(model) => match model {
-                OpenAIModels::gpt_4o => "gpt-4o".to_string(),
-                OpenAIModels::gpt_4o_mini => "gpt-4o-mini".to_string(),
-                OpenAIModels::gpt_4_turbo => "gpt-4-turbo".to_string(),
-                OpenAIModels::gpt_4_1 => "gpt-4.1".to_string(),
-                OpenAIModels::gpt_4_1_mini => "gpt-4.1-mini".to_string(),
-                OpenAIModels::gpt_4_1_nano => "gpt-4.1-nano".to_string(),
-                OpenAIModels::gpt_5 => "gpt-5".to_string(),
-                OpenAIModels::gpt_5_mini => "gpt-5-mini".to_string(),
-                OpenAIModels::gpt_5_nano => "gpt-5-nano".to_string(),
-                OpenAIModels::o4_mini => "o4-mini".to_string(),
-                OpenAIModels::o3 => "o3".to_string(),
-            },
-            AvailableChatbots::Ollama(model) => match model {
-                OllamaModels::llama3_2_3B => "llama3.2".to_string(),
-                OllamaModels::llama3_1_70B => "llama3.1:70b".to_string(),
-                OllamaModels::llama3_1_8B => "llama3.1:8b".to_string(),
-                OllamaModels::llama3_groq_8B => "llama3-groq-tool-use".to_string(), // community model
-                OllamaModels::gemma2 => "gemma2".to_string(),
-                OllamaModels::qwen2_5_3B => "qwen2.5:3b".to_string(),
-                OllamaModels::qwen2_5_7B => "qwen2.5".to_string(),
-                OllamaModels::qwen2_5_7B_tool => "majx13/test".to_string(), // community model
-                OllamaModels::qwen2_5_32B => "qwen2.5:32b".to_string(), // 72 is just too large for us to handle efficiently.
-                OllamaModels::deepseek_r1_70b => "deepseek-r1:70b".to_string(), // For testing purposes.
-                OllamaModels::deepseek_r1_32b_tools => "deepseek-r1:32b".to_string(), // The Qwen distill; technically capable of tool calling.
-                OllamaModels::qwq => "qwq".to_string(), // Qwen but reasoning
-                OllamaModels::gpt_oss_20b => "gpt-oss:20b".to_string(),
-            },
-            AvailableChatbots::Google(model) => match model {
-                GoogleModels::gemini_1_5_flash => "gemini-1.5-flash".to_string(),
-            },
-        }
+        // We can just return the inner string, as it is already a String.
+        val.0
     }
 }
 
@@ -87,9 +84,9 @@ impl TryInto<AvailableChatbots> for String {
         // To be forwards compatible, instead of matching on the input string, we'll try out all the possibilities.
         // If any available chatbot to String matches the input string, we'll return that chatbot.
         // If none of them match, we'll return an error.
-        for chatbot in AVAILABLE_CHATBOTS {
-            if String::from(*chatbot) == self {
-                return Ok(*chatbot);
+        for chatbot in AVAILABLE_CHATBOTS.iter() {
+            if String::from(chatbot.clone()) == self {
+                return Ok(chatbot.clone());
             }
         }
         // No chatbot matched the input string, so we return an error.
@@ -98,124 +95,39 @@ impl TryInto<AvailableChatbots> for String {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum OpenAIModels {
-    #[allow(non_camel_case_types)] // Easier to read
-    gpt_4o,
-    #[allow(non_camel_case_types)]
-    gpt_4o_mini,
-    #[allow(non_camel_case_types)]
-    gpt_4_turbo,
-    #[allow(non_camel_case_types)]
-    o4_mini,
-    #[allow(non_camel_case_types)]
-    o3,
-    #[allow(non_camel_case_types)]
-    gpt_4_1,
-    #[allow(non_camel_case_types)]
-    gpt_4_1_mini,
-    #[allow(non_camel_case_types)]
-    gpt_4_1_nano,
-    #[allow(non_camel_case_types)]
-    gpt_5,
-    #[allow(non_camel_case_types)]
-    gpt_5_mini,
-    #[allow(non_camel_case_types)]
-    gpt_5_nano,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum OllamaModels {
-    #[allow(non_camel_case_types)]
-    llama3_2_3B,
-    #[allow(non_camel_case_types)]
-    llama3_1_70B,
-    #[allow(non_camel_case_types)]
-    llama3_1_8B,
-    #[allow(non_camel_case_types)]
-    gemma2,
-    #[allow(non_camel_case_types)]
-    qwen2_5_3B,
-    #[allow(non_camel_case_types)]
-    qwen2_5_7B,
-    #[allow(non_camel_case_types)]
-    qwen2_5_7B_tool,
-    #[allow(non_camel_case_types)]
-    qwen2_5_32B,
-    #[allow(non_camel_case_types)]
-    llama3_groq_8B,
-    #[allow(non_camel_case_types)]
-    deepseek_r1_70b,
-    #[allow(non_camel_case_types)]
-    deepseek_r1_32b_tools,
-    #[allow(non_camel_case_types)]
-    qwq,
-    #[allow(non_camel_case_types)]
-    gpt_oss_20b,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum GoogleModels {
-    #[allow(non_camel_case_types)]
-    gemini_1_5_flash,
-}
-
 // Characteristics: Some models have different ways to interact with the API (because the API is not properly defined).
 // These are just a few functions to properly record the differences between the models.
 
 /// Some models, most of the qwen family, use a response with no choice in the choice field to denote that the stream should be ended, if used through the async-openai API.
 /// If a model does this, it should return true, otherwise false.
-pub const fn model_ends_on_no_choice(model: AvailableChatbots) -> bool {
-    match model {
-        AvailableChatbots::Ollama(
-            OllamaModels::qwen2_5_3B
-            | OllamaModels::qwen2_5_7B
-            | OllamaModels::qwen2_5_7B_tool
-            | OllamaModels::qwen2_5_32B,
-        ) => true,
-        // | AvailableChatbots::Ollama(OllamaModels::qwq) => true, // Test this!
-        _ => false,
-    }
+///
+/// Technically, LiteLLM should fix this, but just to be sure, we will keep this function here.
+pub fn model_ends_on_no_choice(model: AvailableChatbots) -> bool {
+    matches!(model, AvailableChatbots(model_name) if model_name.starts_with("qwen2_5"))
 }
 
 /// Some models are capable of recieving Images and encoding them for them to understand.
 /// They can be given the gernerated image as a base64 string in the prompt.
-pub const fn model_supports_images(model: AvailableChatbots) -> bool {
+pub fn model_supports_images(model: AvailableChatbots) -> bool {
     match model {
-        AvailableChatbots::OpenAI(
-            OpenAIModels::gpt_5
-            | OpenAIModels::gpt_5_mini
-            | OpenAIModels::gpt_5_nano
-            | OpenAIModels::gpt_4o
-            | OpenAIModels::gpt_4o_mini
-            | OpenAIModels::gpt_4_1
-            | OpenAIModels::gpt_4_1_mini
-            | OpenAIModels::gpt_4_1_nano,
-        ) => true,
-        _ => false, // Update this when more models support images.
+        // The new system only identifies the models by their name, so we will just check the name.
+        AvailableChatbots(ref model_name)
+            if model_name.starts_with("gpt-4o")
+                || model_name.starts_with("gpt-5")
+                || model_name.starts_with("gpt-4.1") =>
+        {
+            true
+        }
+        _ => false,
     }
 }
 
 /// Some OpenAI Models are reasoning models and the parameters have different names.
-pub const fn model_is_reasoning(model: AvailableChatbots) -> bool {
-    matches!(
-        model,
-        AvailableChatbots::OpenAI(
-            OpenAIModels::o4_mini
-                | OpenAIModels::o3
-                | OpenAIModels::gpt_5
-                | OpenAIModels::gpt_5_mini
-                | OpenAIModels::gpt_5_nano
-        )
-    )
+pub fn model_is_reasoning(model: AvailableChatbots) -> bool {
+    model.0.starts_with("o3") || model.0.starts_with("o4") || model.0.starts_with("gpt-5")
 }
 
 /// The new GPT-5 models expect different prompting, so we'll need to change the prompt based on whether or not a model is GPT-5-like.
-pub const fn model_is_gpt_5(model: AvailableChatbots) -> bool {
-    matches!(
-        model,
-        AvailableChatbots::OpenAI(
-            OpenAIModels::gpt_5 | OpenAIModels::gpt_5_mini | OpenAIModels::gpt_5_nano,
-        )
-    )
+pub fn model_is_gpt_5(model: AvailableChatbots) -> bool {
+    model.0.starts_with("gpt-5")
 }

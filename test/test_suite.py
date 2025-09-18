@@ -278,7 +278,14 @@ def test_models_available():
 
 def test_qwen_code_interpreter():
     ''' Can the backend get a code response from Qwen? ''' # Since Version 1.7.1
-    response = generate_full_respone("Please use the code_interpreter tool to run `print(2938429834 * 234987234)`. Make sure to adhere to the JSON format!", chatbot="qwen2.5:3b")
+    response = generate_full_respone("Please use the code_interpreter tool to run `print(2938429834 * 234987234)`.", chatbot="qwen3:4b")
+    # The code output should now contain the result of the multiplication
+    assert any("690493498994739156" in i for i in response.codeoutput_variants)
+
+def test_qwen_code_interpreter_nothink():
+    ''' Can the backend get a code response from a non-reasoning Qwen model? ''' # Since Version 1.10.2
+    # The Protocol is slightly different, so we need to test it separately.
+    response = generate_full_respone("Please use the code_interpreter tool to run `print(2938429834 * 234987234)`.", chatbot="qwen2.5:3b")
     # The code output should now contain the result of the multiplication
     assert any("690493498994739156" in i for i in response.codeoutput_variants)
 
@@ -392,7 +399,7 @@ def test_user_vision():
     ''' Can the LLM see the output that it generated? ''' # Since Version 1.10.0
 
     # The LLM should be able to see the image that the code it wrote generated.
-    response = generate_full_respone("You should have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates, save the image somehwere or write any code except for the plotting of the X! Look at the generated image instead.", chatbot="gpt-4.1-mini")
+    response = generate_full_respone("You have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates, save the image somehwere or write any code except for the plotting of the X! Look at the generated image instead.", chatbot="gpt-4.1")
 
     # print(response) # Debug
 
