@@ -5,7 +5,8 @@ use tracing::{debug, error, info, trace};
 use crate::{
     auth::{ALLOW_GUESTS, AUTH_KEY},
     chatbot::{
-        self, is_ollama_running, stream_response::STREAM_STOP_CONTENT, types::StreamVariant,
+        self, is_lite_llm_running, stream_response::STREAM_STOP_CONTENT, types::StreamVariant,
+        LITE_LLM_ADDRESS,
     },
     static_serve,
     tool_calls::route_call::print_and_clear_tool_logs,
@@ -149,13 +150,15 @@ pub async fn run_runtime_checks() {
         "The code interpreter is robust enough and behaves like a Jupyter notebook in all tests."
     );
 
-    // Finally, check whether ollama is running.
-    if is_ollama_running().await {
-        info!("Ollama is running and available.");
-        println!("Ollama is running and available.");
+    check_available_chatbots();
+
+    // Finally, check whether the LiteLLM Proxy is running.
+    if is_lite_llm_running().await {
+        info!("LiteLLM is running and available.");
+        println!("LiteLLM is running and available.");
     } else {
-        info!("Ollama is either not running or not available, some LLMs might not work.");
-        println!("Ollama is either not running or not available, some LLMs might not work.");
+        info!("LiteLLM is either not running or not available, some LLMs might not work. Address: {} (Defaults to http://litellm:4000)", *LITE_LLM_ADDRESS);
+        println!("LiteLLM is either not running or not available, some LLMs might not work. Address: {} (Defaults to http://litellm:4000)", *LITE_LLM_ADDRESS);
     }
 
     // To make sure not to confuse the backend, clear the tool logger.
@@ -483,6 +486,22 @@ async fn check_eval_exec() {
             "test".to_string()
         )]
     );
+}
+
+/// Checks that the list of AvailableChatbots is correctly initialized
+fn check_available_chatbots() {
+    // This is a simple check to see if the list of available chatbots is not empty.
+    // If it is empty, the server should not start.
+    if chatbot::available_chatbots::AVAILABLE_CHATBOTS.is_empty() {
+        error!("No available chatbots found. Please check the configuration.");
+        eprintln!("Error: No available chatbots found. Please check the configuration.");
+        std::process::exit(1);
+    } else {
+        info!(
+            "Available chatbots: {:?}",
+            chatbot::available_chatbots::AVAILABLE_CHATBOTS
+        );
+    }
 }
 
 /// Tests whether or not a plot is correctly extracted from the code interpreter.
