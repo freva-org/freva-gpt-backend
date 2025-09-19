@@ -106,7 +106,7 @@ pub async fn search_threads(req: HttpRequest) -> impl Responder {
     };
 
     match result {
-        Ok(threads) => HttpResponse::Ok().json(threads),
+        Ok(threads_and_num) => HttpResponse::Ok().json(threads_and_num),
         Err(e) => {
             warn!("Failed to query threads: {:?}", e);
             HttpResponse::InternalServerError().body("Failed to query threads.")

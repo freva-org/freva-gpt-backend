@@ -303,7 +303,7 @@ pub async fn query_by_variant(
     num_threads: u32,
     page: u32,
     database: Database,
-) -> Result<Vec<MongoDBThread>, HttpResponse> {
+) -> Result<(Vec<MongoDBThread>, u64), HttpResponse> {
     // The variant is checked on the call side, but it's inside the content array, so we need to use $elemMatch inside the doc!.
 
     // // To implement some simplified version of fuzzy search, we'll use word-based fuzzy search
@@ -335,7 +335,7 @@ pub async fn query_by_topic(
     num_threads: u32,
     page: u32,
     database: Database,
-) -> Result<Vec<MongoDBThread>, HttpResponse> {
+) -> Result<(Vec<MongoDBThread>, u64), HttpResponse> {
     // It's a plain topic, so we just insert a regex filter for the topic.
     let filter = doc! {
         "user_id": user_id,
@@ -355,10 +355,10 @@ async fn query_by_mongodb_filter(
     num_threads: u32,
     page: u32,
     database: Database,
-) -> Result<Vec<MongoDBThread>, HttpResponse> {
+) -> Result<(Vec<MongoDBThread>, u64), HttpResponse> {
     let cursor = database
         .collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME)
-        .find(filter)
+        .find(filter.clone())
         .sort(doc! {
             "date": -1
         })
@@ -380,7 +380,21 @@ async fn query_by_mongodb_filter(
         threads.push(thread);
     }
 
-    Ok(threads)
+    // We also want to know how many threads there are in total for this query.
+    let total_num = database
+        .collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME)
+        .count_documents(filter)
+        .await;
+
+    let total_num = match total_num {
+        Ok(count) => count,
+        Err(e) => {
+            warn!("Failed to count documents: {:?}", e);
+            0
+        }
+    };
+
+    Ok((threads, total_num))
 }
 
 /// Constructs a MongoDB database connection using the Vault URL.

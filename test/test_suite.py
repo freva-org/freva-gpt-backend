@@ -426,6 +426,10 @@ def test_query_database():
     # We can't test this in a useful way, so we'll just check that everything is in the right format.
     assert response is not None
     assert isinstance(response, list)
+    assert len(response) == 2 # First is the content, second is the total number of results
+    assert response[1] >= len(response[0])
+    response = response[0] # Check the content
+    assert isinstance(response, list)
     for i in response:
         assert "thread_id" in i
         assert "user_id" in i
