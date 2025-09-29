@@ -4,7 +4,7 @@ services:
     build:
       context: .
       dockerfile: dockerfiles/chatbot-backend/Dockerfile
-      cgroup_manager: cgroupfs # TODO: This is giving some trouble in development, is it really needed?
+      cgroup_manager: cgroupfs # Note: This requires Podman, docker is allergic to this option.
     hostname: freva-gpt2-backend-instance-${INSTANCE_NAME}
     ports:
       - "${TARGET_PORT:-8502}:${BACKEND_PORT:-8502}" # If either is unset, the default value will be used.
