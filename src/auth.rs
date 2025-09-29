@@ -29,7 +29,12 @@ pub async fn authorize_or_fail_fn(
 
     // Read from the variable `qstring`
     match (
-        qstring.get("auth_key"),
+        get_first_matching_field(
+            qstring,
+            headers,
+            &["auth_key", "x-auth-key", "x-freva-auth-key"],
+            false,
+        ),
         headers
             .get("Authorization")
             .or_else(|| headers.get("x-freva-user-token")),
@@ -60,16 +65,18 @@ pub async fn authorize_or_fail_fn(
             // I missed a single line two months ago: the username check is not done against the vault,
             // But rather a seperate endpoint, which is specified in the "x-freva-rest-url" header.
 
-            let rest_url = headers
-                .get("x-freva-rest-url")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_owned());
+            let rest_url = get_first_matching_field(
+                qstring,
+                headers,
+                &["x-freva-rest-url", "freva_rest_url"],
+                true,
+            );
 
             // We can only do the token check if the rest URL is present.
             let token_check = if let Some(rest_url) = rest_url {
                 // If the rest URL is present, we'll check the token against it.
                 debug!("Rest URL found in headers: {}", rest_url);
-                get_username_from_token(token, &rest_url).await
+                get_username_from_token(token, rest_url).await
             } else {
                 // If the rest URL is not present, we'll return a 400.
                 warn!("No rest URL found in headers, cannot check token.");
@@ -346,4 +353,34 @@ pub fn is_guest(username: &str) -> bool {
     // If it doesn't match any of the above patterns, it's a guest.
     debug!("Username '{}' is considered a guest.", username);
     true
+}
+
+/// Given a qstring and headers, as well as a list of fields to check against,
+/// returns the first field from the qstring or headers that matches one of the fields in the list.
+/// If none is found, returns None.
+pub fn get_first_matching_field<'a>(
+    qstring: &'a QString,
+    headers: &'a HeaderMap,
+    fields: &'a [&'a str],
+    prefer_headers: bool,
+) -> Option<&'a str> {
+    // First find the first match in the headers
+    let header_result: Option<&'a str> = {
+        headers.iter().find_map(|(key, value)| {
+            if fields.contains(&key.as_str()) {
+                value.to_str().ok()
+            } else {
+                None
+            }
+        })
+    };
+
+    let qstring_result: Option<&'a str> = { fields.iter().find_map(|&field| qstring.get(field)) };
+
+    // Now, return the result based on the preference
+    if prefer_headers {
+        header_result.or(qstring_result)
+    } else {
+        qstring_result.or(header_result)
+    }
 }

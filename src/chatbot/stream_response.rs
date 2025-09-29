@@ -18,7 +18,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    auth::{is_guest, ALLOW_FALLBACK_OLD_AUTH},
+    auth::{get_first_matching_field, is_guest, ALLOW_FALLBACK_OLD_AUTH},
     chatbot::{
         available_chatbots::{
             model_ends_on_no_choice, model_is_gpt_5, model_is_reasoning, model_supports_images,
@@ -84,7 +84,12 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID and input from the request's query parameters.
-    let (thread_id, create_new) = match qstring.get("thread_id") {
+    let (thread_id, create_new) = match get_first_matching_field(
+        &qstring,
+        headers,
+        &["thread_id", "x-thread-id", "thread-id"],
+        false,
+    ) {
         None | Some("") => {
             // If the thread ID is empty, we'll create a new thread.
             debug!("Creating a new thread.");
@@ -142,30 +147,13 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         return HttpResponse::Unauthorized().body("You are not allowed to use the chatbot as a guest. Please log in with a Levante account.");
     }
 
-    let header_input = headers.get("input");
-    let input = match qstring.get("input") {
+    let input = match get_first_matching_field(&qstring, headers, &["input", "x-input"], false) {
         None | Some("") => {
-            // The input may instead be inside the header.
-            if let Some(header_input) = header_input {
-                debug!(
-                    "Using header input because parameter input is empty: {:?}",
-                    header_input
-                );
-                // If the header is not empty, we'll use it as the input.
-                match header_input.to_str() {
-                    Ok(input) => input.to_string(),
-                    Err(e) => {
-                        warn!("Error converting header input to string: {:?}", e);
-                        return HttpResponse::UnprocessableEntity().body("Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.");
-                    }
-                }
-            } else {
-                // If the input is not found (neither in header nor parameters), we'll return a 422
-                warn!("The User requested a stream without an input.");
-                return HttpResponse::UnprocessableEntity().body(
+            // If the input is not found (neither in header nor parameters), we'll return a 422
+            warn!("The User requested a stream without an input.");
+            return HttpResponse::UnprocessableEntity().body(
                     "Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.",
                 );
-            }
         }
         Some(input) => input.to_string(),
     };
@@ -173,9 +161,18 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     debug!("Thread ID: {}, Input: {}", thread_id, input);
 
     // First try to get the vault_url from the headers, if it is not set, we'll have to tell the user that we now need it.
-    let maybe_vault_url = headers
-        .get("x-freva-vault-url")
-        .and_then(|h| h.to_str().ok());
+    let maybe_vault_url = get_first_matching_field(
+        &qstring,
+        headers,
+        &[
+            "x-freva-vault-url",
+            "x-vault-url",
+            "vault-url",
+            "vault_url",
+            "freva_vault_url",
+        ],
+        true,
+    );
 
     let Some(vault_url) = maybe_vault_url else {
         warn!("The User requested a stream without a vault URL.");
@@ -209,30 +206,22 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     // We also require the freva_config_path to be set. From the frontend, it's called "freva_config".
     // It can also be send via headers, there it is called "X-Freva-ConfigPath".
-    let freva_config_path = match qstring
-        .get("freva_config")
-        .or_else(|| qstring.get("freva-config"))
-    {
+    let freva_config_path = match get_first_matching_field(
+        &qstring,
+        headers,
+        &[
+            "freva_config",
+            "freva-config",
+            "x-freva-config",
+            "x-freva-configpath",
+        ],
+        false,
+    ) {
         // allow both freva_config and freva-config
         None | Some("") => {
-            // If the freva_config is not found in the parameters, we'll check the headers.
-            if let Some(header_val) = headers.get("X-Freva-ConfigPath") {
-                if let Ok(header_val) = header_val.to_str() {
-                    debug!(
-                        "Using header freva_config because parameter freva_config is empty: {:?}",
-                        header_val
-                    );
-                    header_val.to_string()
-                } else {
-                    warn!("The User requested a stream without a freva_config path being set.");
-                    // FIXME: remove this temporary fix
-                    "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
-                }
-            } else {
-                warn!("The User requested a stream without a freva_config path being set.");
-                // FIXME: remove this temporary fix
-                "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
-            }
+            warn!("The User requested a stream without a freva_config path being set.");
+            // FIXME: remove this temporary fix
+            "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
         }
         Some(freva_config_path) => freva_config_path.to_string(),
     };
@@ -243,7 +232,12 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     }
 
     // Set chatbot to the one the user requested or the default one.
-    let chatbot = match qstring.get("chatbot") {
+    let chatbot = match get_first_matching_field(
+        &qstring,
+        headers,
+        &["chatbot", "x-chatbot"],
+        false,
+    ) {
         None | Some("") => {
             debug!("Using default chatbot as user didn't supply one.");
             DEFAULTCHATBOT.clone()

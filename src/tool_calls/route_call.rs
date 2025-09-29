@@ -156,7 +156,7 @@ pub fn print_and_clear_tool_logs(
             }
 
             // Unlock the file.
-            if let Err(e) = file.unlock() {
+            if let Err(e) = fs2::FileExt::unlock(&file) {
                 warn!("Failed to unlock the tool logger file: {}", e);
                 warn!("The content of the tool logger file might not be cleared and the file might remain locked.");
             }

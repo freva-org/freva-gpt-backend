@@ -4,6 +4,8 @@ use actix_web::{HttpRequest, HttpResponse, Responder};
 use documented::docs_const;
 use tracing::{debug, trace, warn};
 
+use crate::auth::get_first_matching_field;
+
 use super::{types::ConversationState, ACTIVE_CONVERSATIONS};
 
 // TODO: guarentee panic safety
@@ -37,7 +39,12 @@ pub async fn stop(req: HttpRequest) -> impl Responder {
     let _maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID from the request's query parameters.
-    let thread_id = match qstring.get("thread_id") {
+    let thread_id = match get_first_matching_field(
+        &qstring,
+        headers,
+        &["thread_id", "x-thread-id", "thread-id"],
+        false,
+    ) {
         None | Some("") => {
             // If the thread ID is not found, we'll return a 422
             warn!("The User requested a stop without a thread ID.");

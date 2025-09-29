@@ -3,7 +3,7 @@ use documented::docs_const;
 use tracing::{debug, warn};
 
 use crate::{
-    auth::ALLOW_FALLBACK_OLD_AUTH,
+    auth::{get_first_matching_field, ALLOW_FALLBACK_OLD_AUTH},
     chatbot::mongodb_storage::{get_database, read_threads},
 };
 
@@ -52,9 +52,18 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
     debug!("User ID: {}", user_id);
 
     // We first need to check whether we have a vault URL to connect to the database from.
-    let maybe_vault_url = headers
-        .get("x-freva-vault-url")
-        .and_then(|h| h.to_str().ok());
+    let maybe_vault_url = get_first_matching_field(
+        &qstring,
+        headers,
+        &[
+            "x-freva-vault-url",
+            "x-vault-url",
+            "vault-url",
+            "vault_url",
+            "freva_vault_url",
+        ],
+        true,
+    );
 
     let Some(vault_url) = maybe_vault_url else {
         warn!("The User requested a stream without a vault URL.");
