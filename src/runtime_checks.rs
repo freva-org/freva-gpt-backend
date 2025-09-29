@@ -120,8 +120,11 @@ pub async fn run_runtime_checks() {
 
     // Also check that required directories exist.
     if check_directory("/app/logs")
-        & check_directory("/app/threads")
+        // & check_directory("/app/threads") // Threads are typically not used, in favor of MongoDB.
         & check_directory("/app/python_pickles")
+        & check_directory("/app/rw_dir")
+        & check_directory("/app/target")
+    // The code interpreter calls itself currently, so the target directory needs to be readable.
     {
         println!("All required directories exist and are readable.");
         info!("All required directories exist and are readable.");
@@ -341,9 +344,17 @@ pub async fn check_soft_crash() {
     );
 }
 
+#[cfg(target_os = "linux")]
 /// Simple helper function that checks whether the given string is a path to a directory we can read from.
 pub fn check_directory(path: &str) -> bool {
     std::fs::read_dir(path).is_ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+/// Simple helper function that checks whether the given string is a path to a directory we can read from.
+pub fn check_directory(_path: &str) -> bool {
+    println!("Directory checks are only implemented for Linux (Docker), skipping.");
+    true
 }
 
 /// Checks that the code interpreter can catch syntax errors

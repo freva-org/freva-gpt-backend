@@ -207,7 +207,7 @@ pub async fn read_threads(user_id: &str, database: Database) -> Vec<MongoDBThrea
             while let Ok(Some(inner)) = inner.try_next().await {
                 thread_vec.push(inner);
             }
-            // Is the order correct? TODO!
+
             thread_vec
         }
         Err(e) => {

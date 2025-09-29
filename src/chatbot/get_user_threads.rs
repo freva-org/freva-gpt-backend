@@ -8,22 +8,22 @@ use crate::{
 };
 
 /// # getuserthreads
-/// Takes in a user_id and returns the latest 10 threads of the user.
+/// Takes in a vault_url and returns the latest 10 threads of the user. Requires Authentication.
 ///
-/// The user should ideally authenticate themselves using the OpenID Connect token.
-/// Alternatively, the user_id can be passed in as a query parameter.
-/// This might be removed in the future.
+/// Supports the fallback authentication that is disabled by default by sending user_id.
 ///
 /// If the user cannot be authenticated, an Unauthorized response is returned.
 ///
 /// If the user_id is not given or cannot be derived from the OID token, a BadRequest response is returned.
+///
+/// If the database cannot be connected to, a ServiceUnavailable response is returned.
 #[docs_const]
 pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
     let qstring = qstring::QString::from(req.query_string());
     let headers = req.headers();
 
     debug!("Query string: {:?}", qstring);
-    debug!("Headers: {:?}", headers);
+    // debug!("Headers: {:?}", headers);
 
     // First try to authorize the user.
     let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
@@ -71,7 +71,6 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
             .body("Vault URL not found. Please provide a non-empty vault URL in the headers.");
     };
 
-    // If we don't have a vault URL, we'll automatically fall back to the local (testing) database.
     let database = match get_database(vault_url).await {
         Ok(db) => db,
         Err(e) => {

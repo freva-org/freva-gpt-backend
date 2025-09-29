@@ -9,10 +9,13 @@ use once_cell::sync::Lazy;
 use strum::VariantNames;
 use tracing::{debug, trace};
 
-use crate::chatbot::{
-    available_chatbots_endpoint::AVAILABLE_CHATBOTS_ENDPOINT_DOCS, get_thread::GET_THREAD_DOCS,
-    get_user_threads::GET_USER_THREADS_DOCS, stop::STOP_DOCS,
-    stream_response::STREAM_RESPONSE_DOCS, types::StreamVariant,
+use crate::{
+    auth::AUTHORIZE_OR_FAIL_FN_DOCS,
+    chatbot::{
+        available_chatbots_endpoint::AVAILABLE_CHATBOTS_ENDPOINT_DOCS, get_thread::GET_THREAD_DOCS,
+        get_user_threads::GET_USER_THREADS_DOCS, stop::STOP_DOCS,
+        stream_response::STREAM_RESPONSE_DOCS, types::StreamVariant,
+    },
 };
 
 /// The valid methods for an endpoint.
@@ -162,6 +165,8 @@ pub async fn not_found() -> impl Responder {
 }
 
 const STREAMVARIANTS_DOCS: &str = StreamVariant::DOCS;
+
+const AUTHENTICATION_EXPLANATION: &str = AUTHORIZE_OR_FAIL_FN_DOCS;
 // The other docs come from the other modules, directly above the functions.
 const ALL_DOCS: &str = concatcp!(
     "\n\n",
@@ -178,8 +183,15 @@ const ALL_DOCS: &str = concatcp!(
     STOP_DOCS,
     "\n\n",
     AVAILABLE_CHATBOTS_ENDPOINT_DOCS,
+    "\n\n",
 );
-pub const DOCS: &str = concatcp!("Version: ", VERSION, STREAMVARIANTS_DOCS, ALL_DOCS);
+pub const DOCS: &str = concatcp!(
+    "Version: ",
+    VERSION,
+    STREAMVARIANTS_DOCS,
+    ALL_DOCS,
+    AUTHENTICATION_EXPLANATION
+);
 
 /// # Docs
 /// Returns the documentation for the API.

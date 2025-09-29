@@ -17,6 +17,20 @@ use tracing::{debug, error, info, trace, warn};
 
 pub static ALLOW_FALLBACK_OLD_AUTH: bool = false; // Whether or not the old auth system should be used as a fallback.
 
+/// # Authentication
+///
+/// Tries to authorize the user based on the content of the query string and headers. Returns whether or not the user was authorized,
+/// and if they were, their username, if possible.
+///
+/// Requires:
+/// - Authentication header with a valid OpenID Connect token (Bearer token), via "Authorization" or "x-freva-user-token" header
+/// - Freva Rest URL in the "freva_rest_url" or "x-freva-rest-url" header (The systemuser endpoint will be used to check the token)
+///
+/// The fallback authentication (using "auth_key", which then needs to match the AUTH_KEY in the backend) is disabled by default.
+/// It also wouldn't return a username and will be removed in the future.
+///
+/// If the Authentication header isn't valid UTF-8 or in the "Bearer " format, an UnprocessableEntity response is returned.
+#[documented::docs_const]
 pub async fn authorize_or_fail_fn(
     qstring: &QString,
     headers: &HeaderMap,
@@ -27,7 +41,6 @@ pub async fn authorize_or_fail_fn(
             .body("No auth key found in the environment; Authorization failed."));
     };
 
-    // Read from the variable `qstring`
     match (
         get_first_matching_field(
             qstring,

@@ -45,9 +45,12 @@ use crate::{
 use super::{available_chatbots::AvailableChatbots, handle_active_conversations::generate_id};
 
 /// # Stream Response
-/// Takes in a thread_id, an input, a path to the freva_config file path, an auth_key, the user_id and a chatbot and returns a stream of StreamVariants and their content.
-/// All parameters can be sent via query parameters, but input, freva_config (as X-Freva-ConfigPath) and auth_key (In Authorization bearer format) are also accepted as headers.
+/// Takes in a thread_id, an input, a path to the freva_config file path, a URL to the vault and a chatbot and returns a stream of StreamVariants and their content. Requires Authentication.
 /// If the Authorization with header token via OpenIDConnect succeeds, that username is used.
+/// All parameters can be sent via query parameters or headers (for example X-Freva-ConfigPath, X-freva-Vault-URL and auth_key in Authorization bearer format).
+///
+/// A fallback authentication that is disabled by default can be used by sending user_id and auth_key.
+/// This will be removed in the future.
 ///
 /// The thread_id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
 /// If it's empty or not given, a new thread is created.
@@ -62,14 +65,19 @@ use super::{available_chatbots::AvailableChatbots, handle_active_conversations::
 /// The stream always ends with a StreamEnd event, unless a server error occurs.
 ///
 /// A usual stream consists mostly of Assistant messages many times a second. This is to give the impression of a real-time conversation.
+/// Because code execution might lead to a long period of silence, Heartbeat events (ServerHint) are sent every five seconds.
 ///
-/// If the input is not given, a BadRequest response is returned.
+/// If the authorization fails, an Unauthorized response is returned.
+/// If the authorization succeeds but the user could not determined (or the fallback is active and no user_id is given), an UnprocessableEntity response is returned.
+/// If the authorization succeeds, but the user is considered a guest, an Unauthorized response is returned.
 ///
-/// If the auth_key is not given or does not match the one on the backend, an Unauthorized response is returned.
+/// If the input is not given, an UnprocessableEntity response is returned.
 ///
-/// If the thread_id is blank but does not point to an existing thread, an InternalServerError response is returned.
+/// If the vault URL is not given, an UnprocessableEntity response is returned.
 ///
 /// If the thread_id is already being streamed, a Conflict response is returned.
+///
+/// If the chatbot is not valid, an UnprocessableEntity response is returned.
 ///
 /// If the stream fails due to something else on the backend, an InternalServerError response is returned.
 #[docs_const]

@@ -11,16 +11,16 @@ use super::{types::ConversationState, ACTIVE_CONVERSATIONS};
 // TODO: guarentee panic safety
 
 /// # Stop
-/// Stops the conversation with the given thread ID as soon as possible.
+/// Stops the conversation with the given thread ID as soon as possible. Requires Authentication.
 ///
-/// Takes in a `thread_id` and the `auth_key`.
+/// Takes in a `thread_id`.
 /// The thread_id identifies the conversation to stop.
-/// The auth_key needs to match the one on the backend for the request to be authorized.
-/// As with the other endpoints too, an Authorization header with an OpenID Connect token is also accepted.
 ///
-/// If the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.
+/// If the thread id is not given, an UnprocessableEntity response is returned.
 ///
-/// If the thread id is not given, a BadRequest response is returned.
+/// If the thread could not be found, a NotFound response is returned.
+///
+/// If the thread was not running, a Conflict response is returned.
 ///
 /// If there is an error stopping the conversation, an InternalServerError response is returned.
 #[docs_const]
