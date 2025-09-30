@@ -1,4 +1,7 @@
-use std::env;
+use std::{
+    env,
+    sync::{Arc, Mutex},
+};
 
 use actix_web::HttpResponse;
 use futures::TryStreamExt;
@@ -217,43 +220,101 @@ pub async fn read_threads(user_id: &str, database: Database) -> Vec<MongoDBThrea
     }
 }
 
+// Statically holds a list of Client connections, one per vault URL.
+// This is to avoid creating a new connection for each request, which is expensive and can also lead to
+// nonlinearity (und thus inconsistency) because mongodb's consistency is eventual and each request is modeled as a separate client.
+static MONGOCLIENTPOOL: Lazy<Arc<Mutex<Vec<(String, mongodb::Client)>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(Vec::new())));
+// Note that officially, client pools are not recommended by mongodb as the client itself already does connection pooling.
+// However, in our case, we can have multiple vault URLs, so we need different clients for each vault URL.
+
 /// Constructs a MongoDB database connection using the Vault URL.
 pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
     let mongodb_uri = get_mongodb_uri(vault_url).await?;
 
-    // We have a URI to connect to, so we can create a MongoDB client.
-    let client = match mongodb::Client::with_uri_str(&mongodb_uri).await {
-        Ok(client) => {
-            debug!("Successfully connected to MongoDB at {}", mongodb_uri);
-            client
+    // First check if we already have a client for this URI.
+    let maybe_client = {
+        match MONGOCLIENTPOOL.lock() {
+            Ok(guard) => {
+                if let Some((_, client)) = guard.iter().find(|(url, _)| url == &mongodb_uri) {
+                    debug!("Reusing existing MongoDB client for {}", mongodb_uri);
+                    Ok(client.clone())
+                } else {
+                    Err(())
+                }
+            }
+            Err(mut e) => {
+                error!(
+                    "Error locking the MongoDB client pool mutex: {:?}; will try to create a new client anyway.",
+                    e
+                );
+                // Also recover from poisoning by setting to empty list.
+                **e.get_mut() = vec![]; // Delete all Clients, we don't know if they are valid anymore.
+                                        // As they are Arcs, they will be dropped when the last reference is gone. (Or leaked when the panic doesn't drop them.)
+                MONGOCLIENTPOOL.clear_poison();
+                Err(())
+            }
         }
-        Err(e) => {
-            // Using warn! here is far too noisy as each request will trigger it.
-            info!("Failed to connect to MongoDB: {:?}; trying again with stripped options. (Freva doesn't adhere to the mongoDB connection string format entirely.)", e);
-            // At the very end are options, that SHOULD be only after a slash, but Freva doesn't adhere to that.
-            // So we strip the options and try again.
-            if let Some(question_mark_index) = mongodb_uri.rfind('?') {
-                // Strip the options from the URI.
-                let stripped_uri = &mongodb_uri[..question_mark_index];
-                // debug!("Stripped MongoDB URI: {}", stripped_uri);
-                match mongodb::Client::with_uri_str(stripped_uri).await {
-                    Ok(client) => {
-                        // debug!("Successfully connected to MongoDB at {}", stripped_uri);
-                        client
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Failed to connect to MongoDB even after stripping options: {:?}",
-                            e
+    };
+
+    // We have a URI to connect to, so we can create a MongoDB client.
+    // If we have a client already, we can reuse it, but we should test it first.
+
+    let (client, is_new) = match maybe_client {
+        Ok(client) => (client, false),
+        Err(()) => {
+            // The guard could be locked, but there is no client for this URI.
+            debug!("Creating new MongoDB client for {}", mongodb_uri);
+            let new_client = match mongodb::Client::with_uri_str(&mongodb_uri).await {
+                Ok(client) => {
+                    debug!("Successfully connected to MongoDB at {}", mongodb_uri);
+                    client
+                }
+                Err(e) => {
+                    // Using warn! here is far too noisy as each request will trigger it.
+                    info!("Failed to connect to MongoDB: {:?}; trying again with stripped options. (Freva doesn't adhere to the mongoDB connection string format entirely.)", e);
+                    // At the very end are options, that SHOULD be only after a slash, but Freva doesn't adhere to that.
+                    // So we strip the options and try again.
+                    if let Some(question_mark_index) = mongodb_uri.rfind('?') {
+                        // Strip the options from the URI.
+                        let stripped_uri = &mongodb_uri[..question_mark_index];
+                        // debug!("Stripped MongoDB URI: {}", stripped_uri);
+                        match mongodb::Client::with_uri_str(stripped_uri).await {
+                            Ok(client) => {
+                                // debug!("Successfully connected to MongoDB at {}", stripped_uri);
+                                client
+                            }
+                            Err(e) => {
+                                warn!(
+                                        "Failed to connect to MongoDB even after stripping options: {:?}",
+                                        e
+                                    );
+                                return Err(HttpResponse::ServiceUnavailable()
+                                    .body("Failed to connect to MongoDB after stripping options"));
+                            }
+                        }
+                    } else {
+                        warn!("No question mark found in MongoDB URI, cannot strip options.");
+                        return Err(
+                            HttpResponse::ServiceUnavailable().body("Failed to connect to MongoDB")
                         );
-                        return Err(HttpResponse::ServiceUnavailable()
-                            .body("Failed to connect to MongoDB after stripping options"));
                     }
                 }
-            } else {
-                warn!("No question mark found in MongoDB URI, cannot strip options.");
-                return Err(HttpResponse::ServiceUnavailable().body("Failed to connect to MongoDB"));
-            }
+            };
+            // We have a new client, so we need to store it in the pool, which we should always be able to lock, as we just cleared it if it was poisoned.
+            match MONGOCLIENTPOOL.lock() {
+                Ok(mut guard) => {
+                    guard.push((mongodb_uri.clone(), new_client.clone()));
+                    debug!("Stored new MongoDB client for {} in pool", mongodb_uri);
+                }
+                Err(e) => {
+                    error!(
+                        "Error locking the MongoDB client pool mutex: {:?}; will not store the new client. (This should not happen, as we cleared the poison flag earlier.)",
+                        e
+                    );
+                }
+            };
+            (new_client, true)
         }
     };
 
@@ -266,6 +327,25 @@ pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
         Err(e) => {
             // We treat this as a warning, because it might be that the MongoDB server is not running.
             error!("Failed to make sure the MongoDB is running: {:?}", e);
+
+            // Additionally, if the client came from the pool, we should remove it, as it is likely not valid anymore.
+            if !is_new {
+                match MONGOCLIENTPOOL.lock() {
+                    Ok(mut guard) => {
+                        guard.retain(|(url, _)| url != &mongodb_uri);
+                        debug!(
+                            "Removed invalid MongoDB client for {} from pool",
+                            mongodb_uri
+                        );
+                    }
+                    Err(e) => {
+                        error!(
+                            "Error locking the MongoDB client pool mutex: {:?}; cannot remove invalid client. (This should not happen, as we cleared the poison flag earlier.)",
+                            e
+                        );
+                    }
+                }
+            }
             return Err(HttpResponse::ServiceUnavailable()
                 .body("MongoDB is not running or cannot be reached"));
         }
