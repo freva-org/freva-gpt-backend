@@ -18,7 +18,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    auth::{get_first_matching_field, is_guest, ALLOW_FALLBACK_OLD_AUTH},
+    auth::{get_first_matching_field, is_guest},
     chatbot::{
         available_chatbots::{
             model_ends_on_no_choice, model_is_gpt_5, model_is_reasoning, model_supports_images,
@@ -49,8 +49,8 @@ use super::{available_chatbots::AvailableChatbots, handle_active_conversations::
 /// If the Authorization with header token via OpenIDConnect succeeds, that username is used.
 /// All parameters can be sent via query parameters or headers (for example X-Freva-ConfigPath, X-freva-Vault-URL and auth_key in Authorization bearer format).
 ///
-/// A fallback authentication that is disabled by default can be used by sending user_id and auth_key.
-/// This will be removed in the future.
+/// Note that sending an auth_key that matches with the environment variable is currently disabled, but will be re-enabled in the future.
+/// Please consider sending it already, as it will be required in the future.
 ///
 /// The thread_id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
 /// If it's empty or not given, a new thread is created.
@@ -68,7 +68,7 @@ use super::{available_chatbots::AvailableChatbots, handle_active_conversations::
 /// Because code execution might lead to a long period of silence, Heartbeat events (ServerHint) are sent every five seconds.
 ///
 /// If the authorization fails, an Unauthorized response is returned.
-/// If the authorization succeeds but the user could not determined (or the fallback is active and no user_id is given), an UnprocessableEntity response is returned.
+/// If the authorization succeeds but the user could not determined, an UnprocessableEntity response is returned.
 /// If the authorization succeeds, but the user is considered a guest, an Unauthorized response is returned.
 ///
 /// If the input is not given, an UnprocessableEntity response is returned.
@@ -89,7 +89,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     // trace!("Headers: {:?}", headers);
 
     // First try to authorize the user.
-    let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
+    let user_id = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID and input from the request's query parameters.
     let (thread_id, create_new) = match get_first_matching_field(
@@ -104,45 +104,6 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
             (new_conversation_id(), true)
         }
         Some(thread_id) => (thread_id.to_string(), false),
-    };
-
-    // Only allow setting the user_id if the ALLOW_FALLBACK_OLD_AUTH is enabled.
-    let user_id = match maybe_username {
-        Some(username) => {
-            // If the user is authenticated, we'll use their username as the user_id.
-            debug!(
-                "User is authenticated, using their username as user_id: {}",
-                username
-            );
-            username
-        }
-        None => {
-            if ALLOW_FALLBACK_OLD_AUTH {
-                match qstring.get("user_id") {
-                    None | Some("") => {
-                        // If the user ID is not found, we'll return a 400
-                        warn!("The User requested a stream without a user_id.");
-                        // For convenience, we'll also return the list of recieved parameters.
-                        let query_parameter_keys = qstring
-                            .to_pairs()
-                            .iter()
-                            .map(|(key, _)| *key)
-                            .collect::<Vec<_>>()
-                            .join(", ");
-
-                        return HttpResponse::UnprocessableEntity().body(
-                        "User ID not found. Please provide a non-empty user_id in the query parameters.\nHint: The following query parameters were received: ".to_string() + &query_parameter_keys,
-                    );
-                    }
-                    Some(user_id) => user_id.to_string(),
-                }
-            } else {
-                // Fallback not allowed, return useful error message.
-                warn!("The User requested a stream without them being authenticated; no user_id found");
-                return HttpResponse::UnprocessableEntity()
-                    .body("Could not determine User_id. Please authenticate and try again.");
-            }
-        }
     };
 
     // Martin doesn't want the guests to be able to use the chatbot, so we'll check if the user is considered a guest.

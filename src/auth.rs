@@ -13,9 +13,12 @@ use reqwest::Client;
 /// Very simple macro for the API points to call at the beginning to make sure that a request is authorized.
 /// If it isn't, it automatically returns the correct response.
 /// If a username was found in the token check, it will be returned.
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
-pub static ALLOW_FALLBACK_OLD_AUTH: bool = false; // Whether or not the old auth system should be used as a fallback.
+pub static REQUIRE_AUTH_KEY: bool = false; // Whether or not the auth key needs to also be sent.
+                                           // Note: if the auth key is not sent, an attacked might construct a request against any instance using a mock setup,
+                                           // similar to how the testing suite does the fixture. This could lead to people using the backend, and specifically
+                                           // the OpenAI key, without authorization.
 
 /// # Authentication
 ///
@@ -26,15 +29,15 @@ pub static ALLOW_FALLBACK_OLD_AUTH: bool = false; // Whether or not the old auth
 /// - Authentication header with a valid OpenID Connect token (Bearer token), via "Authorization" or "x-freva-user-token" header
 /// - Freva Rest URL in the "freva_rest_url" or "x-freva-rest-url" header (The systemuser endpoint will be used to check the token)
 ///
-/// The fallback authentication (using "auth_key", which then needs to match the AUTH_KEY in the backend) is disabled by default.
-/// It also wouldn't return a username and will be removed in the future.
+/// There is also an auth_key that has to match the one in the environment, but this is turned off by default.
+/// Sending the auth_key is still recommended, as this switch will be turned on in the near future to improve security.
 ///
 /// If the Authentication header isn't valid UTF-8 or in the "Bearer " format, an UnprocessableEntity response is returned.
 #[documented::docs_const]
 pub async fn authorize_or_fail_fn(
     qstring: &QString,
     headers: &HeaderMap,
-) -> Result<Option<String>, HttpResponse> {
+) -> Result<String, HttpResponse> {
     let Some(auth_key) = crate::auth::AUTH_KEY.get() else {
         error!("No key found in the environment. Sending 500.");
         return Err(HttpResponse::InternalServerError()
@@ -53,9 +56,6 @@ pub async fn authorize_or_fail_fn(
             .or_else(|| headers.get("x-freva-user-token")),
     ) {
         (maybe_key, Some(header_val)) => {
-            // The user (maybe) sent both an auth_key in the query string and an Authorization header.
-            // The header takes priority, but we'll emit a warning if they don't match.
-
             // The header can be any value, we only allow String.
             let auth_string: String = match header_val.to_str() {
                 Ok(header_val) => header_val.to_string(),
@@ -65,6 +65,7 @@ pub async fn authorize_or_fail_fn(
                         .body("Authorization header is not a valid UTF-8 string."));
                 }
             };
+
             // debug!("Authorization header: {}", auth_string); // This can contain sensitive information, so don't log it.
             debug!("Query string auth_key: {:?}", maybe_key);
             // The Authentication header is a Bearer token, so we need to extract the token from it.
@@ -100,71 +101,47 @@ pub async fn authorize_or_fail_fn(
             // Depending on whether the token was valid or not, check the query string token.
             match token_check {
                 Ok(username) => {
-                    debug!("Token check successful, returning username: {}", username);
-                    Ok(Some(username))
+                    debug!("Token check successful, found username: {}", username);
+                    if REQUIRE_AUTH_KEY {
+                        if let Some(key) = maybe_key {
+                            if key != auth_key {
+                                warn!("Auth key does not match. Sending 401.");
+                                Err(HttpResponse::Unauthorized().body("Auth key does not match."))
+                            } else {
+                                debug!("Auth key matches, sending success.");
+                                Ok(username)
+                            }
+                        } else {
+                            warn!("No auth key provided in the request. Sending 401.");
+                            Err(HttpResponse::Unauthorized()
+                                .body("No auth key provided in the request."))
+                        }
+                    } else {
+                        // No auth key required, just log it.
+                        trace!("No auth key required, skipping check.");
+                        Ok(username)
+                    }
                 }
                 Err(tokencheck_error) => {
-                    // Depending on whether or not we want to allow the old auth system,
-                    // we'll either return the error or check the query string token.
-                    if !ALLOW_FALLBACK_OLD_AUTH {
-                        // If we don't allow the old auth system, we'll return the error.
-                        warn!(
-                            "Authorization header is not valid. Sending error: {:?}",
-                            tokencheck_error
-                        );
-                        return Err(tokencheck_error);
-                    }
-                    info!("Token check failed, checking query string auth_key.");
-                    if let Some(query_token) = maybe_key {
-                        // If the query string token is present, we'll check whether it equals the token.
-
-                        // If both don't match, we'll return a 401.
-                        if query_token != auth_key {
-                            warn!(
-                                "Authorization header and query string auth_key do not authorize. Sending error: {:?}", tokencheck_error
-                            );
-                            return Err(tokencheck_error);
-                        }
-                        // Else, the query string token is valid. This will be removed in the future.
-                        debug!("Query string matches auth_key, authenticating without username.");
-                        Ok(None)
-                    } else {
-                        // If the query string token is not present, we've also run out of authentication options.
-
-                        warn!("Authorization header is not valid and no query string auth_key provided. Sending error: {:?}", tokencheck_error);
-                        Err(tokencheck_error)
-                    }
+                    // If the token check failed, we need to send the error.
+                    warn!(
+                        "Authorization header is not valid. Sending error: {:?}",
+                        tokencheck_error
+                    );
+                    Err(tokencheck_error)
                 }
             }
         }
-        (Some(key), None) => {
-            // Again, maybe fall back. Because the new auth header wasn't provided, this must fail.
-            if !ALLOW_FALLBACK_OLD_AUTH {
-                warn!("No Authorization header found. Sending 401.");
-                return Err(HttpResponse::Unauthorized()
-                    .body("No Authorization header found. Please use the Bearer token format."));
-            }
-
-            // If the key is not the same as the one in the environment, we'll return a 401.
-            if key != auth_key {
-                warn!("Unauthorized request.");
-                return Err(HttpResponse::Unauthorized().body("Unauthorized request."));
-            }
-            // Otherwise, it just worked.
-            debug!("Authorized request, no username.");
-            Ok(None)
+        (Some(_), None) => {
+            warn!("No Authorization header found. Sending 401.");
+            Err(HttpResponse::Unauthorized()
+                .body("No Authorization header found. Please use the Bearer token format."))
         }
         (None, None) => {
             // If the key is not found, we'll return a 401.
             warn!("No key provided in the request.");
-            if ALLOW_FALLBACK_OLD_AUTH {
-                Err(HttpResponse::Unauthorized().body(
-                    "No key provided in the request. Please set the auth_key in the query parameters.",
-                ))
-            } else {
-                Err(HttpResponse::Unauthorized()
-                    .body("Some necessary field weren't found in the request, please make sure to use the nginx proxy. If this is the first time logging in, check whether the nginx proxy and sets the right headers."))
-            }
+
+            Err(HttpResponse::Unauthorized().body("Some necessary field weren't found in the request, please make sure to use the nginx proxy. If this is the first time logging in, check whether the nginx proxy and sets the right headers."))
         }
     }
 }

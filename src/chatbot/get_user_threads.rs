@@ -3,18 +3,16 @@ use documented::docs_const;
 use tracing::{debug, warn};
 
 use crate::{
-    auth::{get_first_matching_field, ALLOW_FALLBACK_OLD_AUTH},
+    auth::get_first_matching_field,
     chatbot::mongodb_storage::{get_database, read_threads},
 };
 
 /// # getuserthreads
 /// Takes in a vault_url and returns the latest 10 threads of the user. Requires Authentication.
 ///
-/// Supports the fallback authentication that is disabled by default by sending user_id.
+/// If the vault_url is missing or empty, an UnprocessableEntity response is returned.
 ///
 /// If the user cannot be authenticated, an Unauthorized response is returned.
-///
-/// If the user_id is not given or cannot be derived from the OID token, a BadRequest response is returned.
 ///
 /// If the database cannot be connected to, a ServiceUnavailable response is returned.
 #[docs_const]
@@ -26,28 +24,7 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
     // debug!("Headers: {:?}", headers);
 
     // First try to authorize the user.
-    let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
-    let user_id = match maybe_username {
-        Some(user_id) => user_id,
-        None => {
-            // Also try to get the user_id from the query parameters, if allowed.
-            if ALLOW_FALLBACK_OLD_AUTH {
-                match qstring.get("user_id") {
-                    Some(user_id) => user_id.to_string(),
-                    None => {
-                        // If the user ID is not found, we'll return a 422
-                        return HttpResponse::UnprocessableEntity().body(
-                            "User ID not found. Please provide a user_id in the query parameters.",
-                        );
-                    }
-                }
-            } else {
-                return HttpResponse::UnprocessableEntity().body(
-                    "Could not determine User ID. Please authenticate using OpenID Connect.",
-                );
-            }
-        }
-    };
+    let user_id = crate::auth::authorize_or_fail!(qstring, headers);
 
     debug!("User ID: {}", user_id);
 
