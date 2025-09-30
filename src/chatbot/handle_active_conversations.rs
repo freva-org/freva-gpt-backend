@@ -27,22 +27,28 @@ pub fn new_conversation_id() -> String {
     let value = generate_id();
 
     // If this value is already in use, we'll just try again.
-    match ACTIVE_CONVERSATIONS.lock() {
+    let result = match ACTIVE_CONVERSATIONS.lock() {
         Ok(guard) => {
             // If we can lock the mutex, we can check if the value is already in use.
             if guard.iter().any(|x| x.id == value) {
                 warn!("Generated conversation ID is already in use, trying again.");
-                return new_conversation_id();
+                None
+            } else {
+                Some(value)
             }
-            value
         }
         Err(e) => {
             error!(
                 "Error locking the mutex, falling back to hoping the value is unique: {:?}",
                 e
             );
-            value
+            Some(value)
         }
+    };
+
+    match result {
+        Some(value) => value,
+        None => new_conversation_id(), // Try again
     }
 }
 
