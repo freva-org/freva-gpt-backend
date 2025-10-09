@@ -18,7 +18,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    auth::{is_guest, ALLOW_FALLBACK_OLD_AUTH},
+    auth::{get_first_matching_field, is_guest},
     chatbot::{
         available_chatbots::{
             model_ends_on_no_choice, model_is_gpt_5, model_is_reasoning, model_supports_images,
@@ -45,9 +45,12 @@ use crate::{
 use super::{available_chatbots::AvailableChatbots, handle_active_conversations::generate_id};
 
 /// # Stream Response
-/// Takes in a thread_id, an input, a path to the freva_config file path, an auth_key, the user_id and a chatbot and returns a stream of StreamVariants and their content.
-/// All parameters can be sent via query parameters, but input, freva_config (as X-Freva-ConfigPath) and auth_key (In Authorization bearer format) are also accepted as headers.
+/// Takes in a thread_id, an input, a path to the freva_config file path, a URL to the vault and a chatbot and returns a stream of StreamVariants and their content. Requires Authentication.
 /// If the Authorization with header token via OpenIDConnect succeeds, that username is used.
+/// All parameters can be sent via query parameters or headers (for example X-Freva-ConfigPath, X-freva-Vault-URL and auth_key in Authorization bearer format).
+///
+/// Note that sending an auth_key that matches with the environment variable is currently disabled, but will be re-enabled in the future.
+/// Please consider sending it already, as it will be required in the future.
 ///
 /// The thread_id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
 /// If it's empty or not given, a new thread is created.
@@ -62,14 +65,19 @@ use super::{available_chatbots::AvailableChatbots, handle_active_conversations::
 /// The stream always ends with a StreamEnd event, unless a server error occurs.
 ///
 /// A usual stream consists mostly of Assistant messages many times a second. This is to give the impression of a real-time conversation.
+/// Because code execution might lead to a long period of silence, Heartbeat events (ServerHint) are sent every five seconds.
 ///
-/// If the input is not given, a BadRequest response is returned.
+/// If the authorization fails, an Unauthorized response is returned.
+/// If the authorization succeeds but the user could not determined, an UnprocessableEntity response is returned.
+/// If the authorization succeeds, but the user is considered a guest, an Unauthorized response is returned.
 ///
-/// If the auth_key is not given or does not match the one on the backend, an Unauthorized response is returned.
+/// If the input is not given, an UnprocessableEntity response is returned.
 ///
-/// If the thread_id is blank but does not point to an existing thread, an InternalServerError response is returned.
+/// If the vault URL is not given, an UnprocessableEntity response is returned.
 ///
 /// If the thread_id is already being streamed, a Conflict response is returned.
+///
+/// If the chatbot is not valid, an UnprocessableEntity response is returned.
 ///
 /// If the stream fails due to something else on the backend, an InternalServerError response is returned.
 #[docs_const]
@@ -78,58 +86,24 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let headers = req.headers();
 
     trace!("Query string: {:?}", qstring);
-    trace!("Headers: {:?}", headers);
+    // trace!("Headers: {:?}", headers);
 
     // First try to authorize the user.
-    let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
+    let user_id = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID and input from the request's query parameters.
-    let (thread_id, create_new) = match qstring.get("thread_id") {
+    let (thread_id, create_new) = match get_first_matching_field(
+        &qstring,
+        headers,
+        &["thread_id", "x-thread-id", "thread-id"],
+        false,
+    ) {
         None | Some("") => {
             // If the thread ID is empty, we'll create a new thread.
             debug!("Creating a new thread.");
             (new_conversation_id(), true)
         }
         Some(thread_id) => (thread_id.to_string(), false),
-    };
-
-    // Only allow setting the user_id if the ALLOW_FALLBACK_OLD_AUTH is enabled.
-    let user_id = match maybe_username {
-        Some(username) => {
-            // If the user is authenticated, we'll use their username as the user_id.
-            debug!(
-                "User is authenticated, using their username as user_id: {}",
-                username
-            );
-            username
-        }
-        None => {
-            if ALLOW_FALLBACK_OLD_AUTH {
-                match qstring.get("user_id") {
-                    None | Some("") => {
-                        // If the user ID is not found, we'll return a 400
-                        warn!("The User requested a stream without a user_id.");
-                        // For convenience, we'll also return the list of recieved parameters.
-                        let query_parameter_keys = qstring
-                            .to_pairs()
-                            .iter()
-                            .map(|(key, _)| *key)
-                            .collect::<Vec<_>>()
-                            .join(", ");
-
-                        return HttpResponse::UnprocessableEntity().body(
-                        "User ID not found. Please provide a non-empty user_id in the query parameters.\nHint: The following query parameters were received: ".to_string() + &query_parameter_keys,
-                    );
-                    }
-                    Some(user_id) => user_id.to_string(),
-                }
-            } else {
-                // Fallback not allowed, return useful error message.
-                warn!("The User requested a stream without them being authenticated; no user_id found");
-                return HttpResponse::UnprocessableEntity()
-                    .body("Could not determine User_id. Please authenticate and try again.");
-            }
-        }
     };
 
     // Martin doesn't want the guests to be able to use the chatbot, so we'll check if the user is considered a guest.
@@ -142,30 +116,13 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         return HttpResponse::Unauthorized().body("You are not allowed to use the chatbot as a guest. Please log in with a Levante account.");
     }
 
-    let header_input = headers.get("input");
-    let input = match qstring.get("input") {
+    let input = match get_first_matching_field(&qstring, headers, &["input", "x-input"], false) {
         None | Some("") => {
-            // The input may instead be inside the header.
-            if let Some(header_input) = header_input {
-                debug!(
-                    "Using header input because parameter input is empty: {:?}",
-                    header_input
-                );
-                // If the header is not empty, we'll use it as the input.
-                match header_input.to_str() {
-                    Ok(input) => input.to_string(),
-                    Err(e) => {
-                        warn!("Error converting header input to string: {:?}", e);
-                        return HttpResponse::UnprocessableEntity().body("Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.");
-                    }
-                }
-            } else {
-                // If the input is not found (neither in header nor parameters), we'll return a 422
-                warn!("The User requested a stream without an input.");
-                return HttpResponse::UnprocessableEntity().body(
+            // If the input is not found (neither in header nor parameters), we'll return a 422
+            warn!("The User requested a stream without an input.");
+            return HttpResponse::UnprocessableEntity().body(
                     "Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.",
                 );
-            }
         }
         Some(input) => input.to_string(),
     };
@@ -173,9 +130,18 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     debug!("Thread ID: {}, Input: {}", thread_id, input);
 
     // First try to get the vault_url from the headers, if it is not set, we'll have to tell the user that we now need it.
-    let maybe_vault_url = headers
-        .get("x-freva-vault-url")
-        .and_then(|h| h.to_str().ok());
+    let maybe_vault_url = get_first_matching_field(
+        &qstring,
+        headers,
+        &[
+            "x-freva-vault-url",
+            "x-vault-url",
+            "vault-url",
+            "vault_url",
+            "freva_vault_url",
+        ],
+        true,
+    );
 
     let Some(vault_url) = maybe_vault_url else {
         warn!("The User requested a stream without a vault URL.");
@@ -209,30 +175,22 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     // We also require the freva_config_path to be set. From the frontend, it's called "freva_config".
     // It can also be send via headers, there it is called "X-Freva-ConfigPath".
-    let freva_config_path = match qstring
-        .get("freva_config")
-        .or_else(|| qstring.get("freva-config"))
-    {
+    let freva_config_path = match get_first_matching_field(
+        &qstring,
+        headers,
+        &[
+            "freva_config",
+            "freva-config",
+            "x-freva-config",
+            "x-freva-configpath",
+        ],
+        false,
+    ) {
         // allow both freva_config and freva-config
         None | Some("") => {
-            // If the freva_config is not found in the parameters, we'll check the headers.
-            if let Some(header_val) = headers.get("X-Freva-ConfigPath") {
-                if let Ok(header_val) = header_val.to_str() {
-                    debug!(
-                        "Using header freva_config because parameter freva_config is empty: {:?}",
-                        header_val
-                    );
-                    header_val.to_string()
-                } else {
-                    warn!("The User requested a stream without a freva_config path being set.");
-                    // FIXME: remove this temporary fix
-                    "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
-                }
-            } else {
-                warn!("The User requested a stream without a freva_config path being set.");
-                // FIXME: remove this temporary fix
-                "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
-            }
+            warn!("The User requested a stream without a freva_config path being set.");
+            // FIXME: remove this temporary fix
+            "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
         }
         Some(freva_config_path) => freva_config_path.to_string(),
     };
@@ -243,7 +201,12 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     }
 
     // Set chatbot to the one the user requested or the default one.
-    let chatbot = match qstring.get("chatbot") {
+    let chatbot = match get_first_matching_field(
+        &qstring,
+        headers,
+        &["chatbot", "x-chatbot"],
+        false,
+    ) {
         None | Some("") => {
             debug!("Using default chatbot as user didn't supply one.");
             DEFAULTCHATBOT.clone()

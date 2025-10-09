@@ -44,7 +44,7 @@ RUN echo "conda activate env" >> ~/.bashrc
 RUN pip install uv
 
 # All packages that were previously installed with conda and can be installed with uv because they are on PYPI.
-RUN source activate env && uv pip install freva-client dill numpy matplotlib pandas xarray xesmf scipy netcdf4 cartopy contourpy geopy aiohttp requests scikit-learn geopandas healpy easygems astropy
+RUN source activate env && uv pip install freva-client>=2509.2.0 dill numpy matplotlib pandas xarray xesmf scipy netcdf4 cartopy contourpy geopy aiohttp requests scikit-learn geopandas healpy easygems astropy
 
 # These libraries cannot be installed by uv, so we use conda.
 RUN conda install --yes -c conda-forge -n env pytorch
@@ -89,6 +89,8 @@ COPY Cargo.toml /app/Cargo.toml
 
 # Copy over the secrets file to have access to the openai account and so that the backend is configured correctly
 COPY .env /app/.env
+# Also copy over the environemnt example file to have a reference
+COPY .env.example /app/.env.example
 
 # The litellm also needs to be copied over to the backend so that the list of chatbots can be extracted
 COPY litellm_config.yaml /app/litellm_config.yaml

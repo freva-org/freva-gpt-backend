@@ -27,22 +27,28 @@ pub fn new_conversation_id() -> String {
     let value = generate_id();
 
     // If this value is already in use, we'll just try again.
-    match ACTIVE_CONVERSATIONS.lock() {
+    let result = match ACTIVE_CONVERSATIONS.lock() {
         Ok(guard) => {
             // If we can lock the mutex, we can check if the value is already in use.
             if guard.iter().any(|x| x.id == value) {
                 warn!("Generated conversation ID is already in use, trying again.");
-                return new_conversation_id();
+                None
+            } else {
+                Some(value)
             }
-            value
         }
         Err(e) => {
             error!(
                 "Error locking the mutex, falling back to hoping the value is unique: {:?}",
                 e
             );
-            value
+            Some(value)
         }
+    };
+
+    match result {
+        Some(value) => value,
+        None => new_conversation_id(), // Try again
     }
 }
 
@@ -93,15 +99,14 @@ pub async fn conversation_state(thread_id: &str, database: Database) -> Option<C
             //DEBUG
             // println!("Number of active conversations: {}", guard.len());
             // If we can lock the mutex, we can check if the value is already in use.
-            let return_val =
-                if let Some(conversation) = guard.iter_mut().find(|x| x.id == thread_id) {
-                    // If we find the conversation, we'll check if it's stopped.
-                    Some(conversation.state.clone())
-                } else {
-                    // If the conversation is not found, we'll return false.
-                    warn!("Conversation with id: {} not found.", thread_id);
-                    None
-                };
+            let return_val = if let Some(conversation) = guard.iter().find(|x| x.id == thread_id) {
+                // If we find the conversation, we'll check if it's stopped.
+                Some(conversation.state.clone())
+            } else {
+                // If the conversation is not found, we'll return false.
+                warn!("Conversation with id: {} not found.", thread_id);
+                None
+            };
             // Before returning, we'll clean up stale conversations.
             to_save = Some(cleanup_conversations(&mut guard));
             return_val

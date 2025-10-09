@@ -51,6 +51,11 @@ pub async fn run_runtime_checks() {
         debug!("System information: {:?}", guard.0);
     }
 
+    // We can also check whether all expected environment variables are actually set.
+    // Dotenvy set them in the main function already, so we check the .env.example file against std::env::var
+    // We can just include the file as a string and parse it line by line.
+    check_env_variables();
+
     // We'll also initialize the authentication here so it's available for the entire server, from the very start.
     print!("Checking the authentication string... ");
     flush_stdout_stderr();
@@ -120,8 +125,11 @@ pub async fn run_runtime_checks() {
 
     // Also check that required directories exist.
     if check_directory("/app/logs")
-        & check_directory("/app/threads")
+        // & check_directory("/app/threads") // Threads are typically not used, in favor of MongoDB.
         & check_directory("/app/python_pickles")
+        & check_directory("/app/rw_dir")
+        & check_directory("/app/target")
+    // The code interpreter calls itself currently, so the target directory needs to be readable.
     {
         println!("All required directories exist and are readable.");
         info!("All required directories exist and are readable.");
@@ -341,9 +349,17 @@ pub async fn check_soft_crash() {
     );
 }
 
+#[cfg(target_os = "linux")]
 /// Simple helper function that checks whether the given string is a path to a directory we can read from.
 pub fn check_directory(path: &str) -> bool {
     std::fs::read_dir(path).is_ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+/// Simple helper function that checks whether the given string is a path to a directory we can read from.
+pub fn check_directory(_path: &str) -> bool {
+    println!("Directory checks are only implemented for Linux (Docker), skipping.");
+    true
 }
 
 /// Checks that the code interpreter can catch syntax errors
@@ -616,4 +632,37 @@ async fn check_indentation() {
         _ => panic!("Expected a CodeOutput variant, instead got {:?}", output[0]),
     };
     assert_eq!(inner, "larger");
+}
+
+fn check_env_variables() {
+    // Include the .env.example file as a string.
+    let env_example = include_str!("../.env.example");
+    // Parse the file line by line.
+    for line in env_example.lines() {
+        // Ignore comments and empty lines.
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // Split the line into key and value.
+        let parts: Vec<&str> = line.splitn(2, '=').collect();
+        if parts.len() != 2 {
+            continue;
+        }
+        let key = parts[0].trim();
+        // Check if the environment variable is set.
+        match std::env::var(key) {
+            Ok(value) => {
+                debug!("Environment variable {key} is set to {value}");
+            }
+            Err(std::env::VarError::NotPresent) => {
+                error!("Environment variable {key} is not set, but expected (Check .env.example). Please set it in the .env file or environment.");
+                eprintln!("Error: Environment variable {key} is not set, but expected (Check .env.example). Please set it in the .env file or environment.");
+            }
+            Err(e) => {
+                error!("Error reading environment variable {key}: {:?}", e);
+                eprintln!("Error reading environment variable {key}: {e:?}");
+            }
+        }
+    }
 }

@@ -4,8 +4,7 @@ use tracing::trace;
 
 /// # Available Chatbots
 ///
-/// Statically returns the list of available chatbots as JSON.
-/// Requires the auth key to be correct or an Authentication header with OpenIDConnect to be present.
+/// Statically returns the list of available chatbots as JSON. Requires Authentication.
 ///
 /// The String representations of the chatbots can then be used at the '/streamresponse' endpoint
 /// to start a conversation with a specific chatbot. If no chatbot is specified, the first one
