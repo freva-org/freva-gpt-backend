@@ -1177,7 +1177,7 @@ dependencies = [
 
 [[package]]
 name = "freva-gpt2-backend"
-version = "1.10.4"
+version = "1.10.5"
 dependencies = [
  "actix-web",
  "async-lazy",
