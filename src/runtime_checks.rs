@@ -5,7 +5,8 @@ use tracing::{debug, error, info, trace};
 use crate::{
     auth::{ALLOW_GUESTS, AUTH_KEY},
     chatbot::{
-        self, is_ollama_running, stream_response::STREAM_STOP_CONTENT, types::StreamVariant,
+        self, is_lite_llm_running, stream_response::STREAM_STOP_CONTENT, types::StreamVariant,
+        LITE_LLM_ADDRESS,
     },
     static_serve,
     tool_calls::route_call::print_and_clear_tool_logs,
@@ -32,6 +33,12 @@ pub async fn run_runtime_checks() {
     // To make sure that this is caught early, we'll just test it here.
     let entire_prompt_json = chatbot::prompting::get_entire_prompt_json("testing", "testing");
     trace!("Starting messages JSON: {:?}", entire_prompt_json);
+    let entire_prompt_json_gpt_5 =
+        chatbot::prompting::get_entire_prompt_json_gpt_5("testing", "testing");
+    trace!(
+        "Starting messages JSON for GPT-5: {:?}",
+        entire_prompt_json_gpt_5
+    );
 
     trace!("Ping Response: {:?}", static_serve::RESPONSE_STRING);
 
@@ -43,6 +50,11 @@ pub async fn run_runtime_checks() {
         let guard = chatbot::heartbeat::SYSINFO.read().await;
         debug!("System information: {:?}", guard.0);
     }
+
+    // We can also check whether all expected environment variables are actually set.
+    // Dotenvy set them in the main function already, so we check the .env.example file against std::env::var
+    // We can just include the file as a string and parse it line by line.
+    check_env_variables();
 
     // We'll also initialize the authentication here so it's available for the entire server, from the very start.
     print!("Checking the authentication string... ");
@@ -113,8 +125,11 @@ pub async fn run_runtime_checks() {
 
     // Also check that required directories exist.
     if check_directory("/app/logs")
-        & check_directory("/app/threads")
+        // & check_directory("/app/threads") // Threads are typically not used, in favor of MongoDB.
         & check_directory("/app/python_pickles")
+        & check_directory("/app/rw_dir")
+        & check_directory("/app/target")
+    // The code interpreter calls itself currently, so the target directory needs to be readable.
     {
         println!("All required directories exist and are readable.");
         info!("All required directories exist and are readable.");
@@ -137,18 +152,21 @@ pub async fn run_runtime_checks() {
     check_plot_extraction_false_negative().await;
     check_plot_extraction_false_positive().await;
     check_plot_extraction_close().await;
+    check_indentation().await;
     println!("Success!");
     info!(
         "The code interpreter is robust enough and behaves like a Jupyter notebook in all tests."
     );
 
-    // Finally, check whether ollama is running.
-    if is_ollama_running().await {
-        info!("Ollama is running and available.");
-        println!("Ollama is running and available.");
+    check_available_chatbots();
+
+    // Finally, check whether the LiteLLM Proxy is running.
+    if is_lite_llm_running().await {
+        info!("LiteLLM is running and available.");
+        println!("LiteLLM is running and available.");
     } else {
-        info!("Ollama is either not running or not available, some LLMs might not work.");
-        println!("Ollama is either not running or not available, some LLMs might not work.");
+        info!("LiteLLM is either not running or not available, some LLMs might not work. Address: {} (Defaults to http://litellm:4000)", *LITE_LLM_ADDRESS);
+        println!("LiteLLM is either not running or not available, some LLMs might not work. Address: {} (Defaults to http://litellm:4000)", *LITE_LLM_ADDRESS);
     }
 
     // To make sure not to confuse the backend, clear the tool logger.
@@ -331,9 +349,17 @@ pub async fn check_soft_crash() {
     );
 }
 
+#[cfg(target_os = "linux")]
 /// Simple helper function that checks whether the given string is a path to a directory we can read from.
 pub fn check_directory(path: &str) -> bool {
     std::fs::read_dir(path).is_ok()
+}
+
+#[cfg(not(target_os = "linux"))]
+/// Simple helper function that checks whether the given string is a path to a directory we can read from.
+pub fn check_directory(_path: &str) -> bool {
+    println!("Directory checks are only implemented for Linux (Docker), skipping.");
+    true
 }
 
 /// Checks that the code interpreter can catch syntax errors
@@ -478,6 +504,22 @@ async fn check_eval_exec() {
     );
 }
 
+/// Checks that the list of AvailableChatbots is correctly initialized
+fn check_available_chatbots() {
+    // This is a simple check to see if the list of available chatbots is not empty.
+    // If it is empty, the server should not start.
+    if chatbot::available_chatbots::AVAILABLE_CHATBOTS.is_empty() {
+        error!("No available chatbots found. Please check the configuration.");
+        eprintln!("Error: No available chatbots found. Please check the configuration.");
+        std::process::exit(1);
+    } else {
+        info!(
+            "Available chatbots: {:?}",
+            chatbot::available_chatbots::AVAILABLE_CHATBOTS
+        );
+    }
+}
+
 /// Tests whether or not a plot is correctly extracted from the code interpreter.
 async fn check_plot_extraction() {
     let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
@@ -568,4 +610,59 @@ async fn check_plot_extraction_close() {
     // The plot should be extracted and returned as a string.
     assert!(matches!(output[0], StreamVariant::CodeOutput(ref inner, _) if inner.is_empty()));
     assert!(matches!(output[1], StreamVariant::Image(_)));
+}
+
+/// Tests whether or not the code interpreter can handle indentation on the last line.
+async fn check_indentation() {
+    let output = crate::tool_calls::code_interpreter::prepare_execution::start_code_interpeter(
+        Some(
+            r#"{"code": "a=3\nif a < 2:\n\tprint('smaller')\nelse:\n\tprint('larger')"}"#
+                .to_string(),
+        ),
+        "test".to_string(),
+        None,
+        "testing".to_string(),
+    )
+    .await;
+    assert_eq!(output.len(), 1);
+    // The output should contain the results of the second branch.
+    // assert!(matches!(output[0], StreamVariant::CodeOutput(ref inner, _) if inner == "larger"));
+    let inner = match &output[0] {
+        StreamVariant::CodeOutput(inner, _) => inner,
+        _ => panic!("Expected a CodeOutput variant, instead got {:?}", output[0]),
+    };
+    assert_eq!(inner, "larger");
+}
+
+fn check_env_variables() {
+    // Include the .env.example file as a string.
+    let env_example = include_str!("../.env.example");
+    // Parse the file line by line.
+    for line in env_example.lines() {
+        // Ignore comments and empty lines.
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // Split the line into key and value.
+        let parts: Vec<&str> = line.splitn(2, '=').collect();
+        if parts.len() != 2 {
+            continue;
+        }
+        let key = parts[0].trim();
+        // Check if the environment variable is set.
+        match std::env::var(key) {
+            Ok(value) => {
+                debug!("Environment variable {key} is set to {value}");
+            }
+            Err(std::env::VarError::NotPresent) => {
+                error!("Environment variable {key} is not set, but expected (Check .env.example). Please set it in the .env file or environment.");
+                eprintln!("Error: Environment variable {key} is not set, but expected (Check .env.example). Please set it in the .env file or environment.");
+            }
+            Err(e) => {
+                error!("Error reading environment variable {key}: {:?}", e);
+                eprintln!("Error reading environment variable {key}: {e:?}");
+            }
+        }
+    }
 }

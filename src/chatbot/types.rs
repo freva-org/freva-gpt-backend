@@ -1,7 +1,7 @@
 use core::fmt;
 
 use async_openai::types::{
-    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage, ChatCompletionRequestMessageContentPartImage, ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall, ImageUrl
+    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage, ChatCompletionRequestMessageContentPartImage, ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall, ImageDetail, ImageUrl
 };
 use documented::Documented;
 use serde::{Deserialize, Serialize};
@@ -47,9 +47,11 @@ pub struct ActiveConversation {
 /// `{"variant": "Code", "content": "{\"code\":\"LLM Code here\"}"`
 ///
 /// CodeOutput: The output of the code that was executed, as a String. Also not formatted.
+/// Contains tracebacks if the code itself threw an exception and also hints to the line where the exception occured.
 ///
 /// Image: An image that was generated during the conversation, as a String. The image is Base64 encoded.
 /// An example of this would be a matplotlib plot. The image format should always be PNG.
+/// LLMs that support vision will be given the image to look at.
 ///
 /// ServerError: An error that occured on the server(backend) side, as a String. Contains the error message.
 /// The client should realize that this error occured and handle it accordingly; ServerErrors should immeadiately be followed by a StreamEnd.
@@ -58,12 +60,14 @@ pub struct ActiveConversation {
 /// These are often for the rate limits, but can also be for other things, i.E. if the API is down or a tool call took too long.
 ///
 /// CodeError: The Code from the LLM could not be executed or there was some other error while setting up the code execution.
+/// A successful code execution that itself threw an exception will not result in a CodeError, but in a CodeOutput containing the traceback.
 ///
 /// StreamEnd: The Stream ended. Contains a reason as a String. This is always the last message of a stream.
 /// If the last message is not a StreamEnd but the stream ended, it's an error from the server side and needs to be fixed.
 ///
 /// ServerHint: The Server hints something to the client. This is primarily used for giving the thread_id, but also for warnings.
-/// The Content is in JSON format, with the key being the hint and the value being the content. Currently, only the keys "thread_id" and "warning" are used.
+/// The Content is in JSON format, with the key being the hint and the value being the content. Mainly, the keys "thread_id" and "warning" are used,
+/// but the heartbeat during code execution may also contain "memory", "total_memory", "cpu_usage" and "cpu_last_minute", as well as "process_cpu" and "process_memory".
 /// An example for a ServerHint packet would be `{"variant": "ServerHint", "content": "{\"thread_id\":\"1234\"}"}`.
 /// That means that the content needs to be parsed as JSON to get the actual content.
 #[derive(Debug, Serialize, Deserialize, Clone, Documented, PartialEq, Eq, strum::VariantNames)]
@@ -473,23 +477,30 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>, send_images: bool) -> Vec
                     if let Some(buffer) = assistant_message_buffer.clone() {
                         all_oai_messages.push(ChatCompletionRequestMessage::Assistant(
                             ChatCompletionRequestAssistantMessage {
-                                ..buffer //TODO: This looks weird?
+                                ..buffer
                             },
                         ));
                         assistant_message_buffer = None; // Clear the buffer before sending the image.
                     }
                     // The image needs to be sent as a user message, because that's the protocol for some reason. 
 
+                    let url = "data:image/png;base64,".to_string() + &base64_encoded_image; // Should always be a PNG.
+                    trace!("Sending Image to LLM: {}", url);
+
                     let image_message = ChatCompletionRequestMessage::User(
                         ChatCompletionRequestUserMessage {
                             name: Some("frevaGPT".to_string()),
                             content: async_openai::types::ChatCompletionRequestUserMessageContent::Array(
                                 vec![
-
+                                    async_openai::types::ChatCompletionRequestUserMessageContentPart::Text(
+                                        async_openai::types::ChatCompletionRequestMessageContentPartText {
+                                            text: "Here is the image returned by the Code Interpreter.".to_string(),
+                                        }
+                                    ),
                                     async_openai::types::ChatCompletionRequestUserMessageContentPart::ImageUrl(ChatCompletionRequestMessageContentPartImage{
                                         image_url: ImageUrl {
-                                            url: "data:image/png;base64,".to_string() + &base64_encoded_image, // Should always be a PNG. 
-                                            ..Default::default()
+                                            url,
+                                            detail: Some(ImageDetail::High),
                                         }
                                     }),
                                     ]

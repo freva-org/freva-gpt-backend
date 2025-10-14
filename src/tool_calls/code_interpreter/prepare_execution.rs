@@ -361,7 +361,10 @@ fn post_process(code: String, user_id: String, thread_id: String) -> String {
         ("pd.", "import pandas as pd\n"),
         ("ccrs.", "import cartopy.crs as ccrs\n"),
         ("cartopy.", "import cartopy\n"),
-        ("cfeature", "import cartopy.feature as cfeature\n"),
+        ("cfeature.", "import cartopy.feature as cfeature\n"),
+        ("egh.", "import easygems.healpix as egh\n"),
+        ("hp.", "import healpy as hp\n"),
+        ("cm.", "import matplotlib.cm as cm\n"),
     ];
 
     for (detect, add) in &libraries {

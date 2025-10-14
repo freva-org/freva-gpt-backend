@@ -149,7 +149,13 @@ pub fn extract_variants_from_string(content: &str) -> Vec<StreamVariant> {
     let lines = content.lines();
     let mut res = Vec::new();
     for line in lines {
-        // First try to use json to deserialize the line.
+        // For organisational purposes, some lines might be comments (or empty), so we need to skip those.
+        if line.trim().is_empty() || line.starts_with("//") {
+            trace!("Skipping empty or comment line: {}", line);
+            continue;
+        }
+
+        // If the line should be parsed, try to use json to deserialize the line.
         match serde_json::from_str(line) {
             Ok(variant) => {
                 trace!("Successfully deserialized line: {:?}", variant);
