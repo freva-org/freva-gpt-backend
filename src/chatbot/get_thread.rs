@@ -3,22 +3,21 @@ use documented::docs_const;
 use qstring::QString;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::chatbot::{mongodb::mongodb_storage::get_database, types::StreamVariant};
+use crate::{
+    auth::get_first_matching_field,
+    chatbot::{mongodb::mongodb_storage::get_database, types::StreamVariant},
+};
 
 use super::storage_router::read_thread;
 
 /// # Get Thread
-/// Returns the content of a thread as a Json of List of Strings.
+/// Returns the content of a thread as a Json of List of Strings. Requires Authentication.
 ///
-/// As arguments, it takes in a `thread_id` and an `auth_key`.
+/// As arguments, it takes in a `thread_id`.
 ///
 /// The thread id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
 ///
-/// The auth key needs to match the one on the backend for the request to be authorized.
-/// To get the auth key, the user needs to contact the backend administrator.
-/// Authentication can also occur using a OpenID Connect token, which is then checked against the OpenID Connect provider of freva.
-///
-/// If OpenIDConnect authentication fails and the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.
+/// If authentication fails an Unauthorized response is returned.
 ///
 /// If the thread id is not given, a BadRequest response is returned.
 ///
@@ -34,12 +33,26 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
     let _maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
 
     // First try to get the Vault URL from the headers.
-    let maybe_vault_url = headers
-        .get("x-freva-vault-url")
-        .and_then(|h| h.to_str().ok());
+    let maybe_vault_url = get_first_matching_field(
+        &qstring,
+        headers,
+        &[
+            "x-freva-vault-url",
+            "x-vault-url",
+            "vault-url",
+            "vault_url",
+            "freva_vault_url",
+        ],
+        true,
+    );
 
     // Try to get the thread ID from the request's query parameters.
-    let thread_id = match qstring.get("thread_id") {
+    let thread_id = match get_first_matching_field(
+        &qstring,
+        headers,
+        &["thread_id", "x-thread-id", "thread-id"],
+        false,
+    ) {
         None | Some("") => {
             // If the thread ID is not found, we'll return a 422
             warn!("The User requested a thread without a thread ID.");

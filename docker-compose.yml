@@ -4,7 +4,7 @@ services:
     build:
       context: .
       dockerfile: dockerfiles/chatbot-backend/Dockerfile
-      cgroup_manager: cgroupfs # TODO: This is giving some trouble in development, is it really needed?
+      cgroup_manager: cgroupfs # Note: This requires Podman, docker is allergic to this option.
     hostname: freva-gpt2-backend-instance-${INSTANCE_NAME}
     ports:
       - "${TARGET_PORT:-8502}:${BACKEND_PORT:-8502}" # If either is unset, the default value will be used.
@@ -14,7 +14,7 @@ services:
       - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/threads:/app/threads
       - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/target:/app/target
       - /home/b/b380001/freva-gpt2-backend/testdata:/data/inputFiles # Deprecated, once used for test data before freva support was added. Now used for debugging.
-      - /container/da/freva-gpt-backend-links/${INSTANCE_NAME}/python_pickles:/app/python_pickles
+      - /scratch/b/b380001/freva-gpt/python_pickles:/app/python_pickles
       - /scratch/b/b380001/freva-gpt/rw_dir/:/app/rw_dir # All instances share the rw_dir for accessing the data the LLM generated.
     networks:
       - freva-gpt
@@ -26,6 +26,22 @@ services:
           "-f",
           "http://localhost:${TARGET_PORT:-8502}/api/chatbot/help",
         ]
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    hostname: litellm-instance-${INSTANCE_NAME}
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml # Mount the local litellm_config.yaml file to the container
+    command:
+      - "--config=/app/config.yaml"
+    # ports:
+    #   - 4000:4000
+    # DO NOT open the litellm port to the outside; instead, configure the backend to connect to the container directly. See the example config.
+    env_file:
+      - .env # Load local .env file
+    networks:
+      - freva-gpt
+    healthcheck:
+      test: "curl http://localhost:4000/health/readiness"
   ollama: # Ollama is only for the backend and not accessible from the outside. Port 11434 is not exposed.
     image: ollama/ollama
     hostname: ollama-instance-${INSTANCE_NAME}

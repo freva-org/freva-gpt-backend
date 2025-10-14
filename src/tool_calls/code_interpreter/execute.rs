@@ -12,7 +12,7 @@ use tracing::{debug, info, trace, warn};
 /// REQUIRES: The code has passed the safety checks.
 pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, String> {
     trace!("Preparing python interpreter for code execution.");
-    pyo3::prepare_freethreaded_python();
+    Python::initialize();
     // Fixed: Martin told me that the "global" interpreter lock, is, in fact, not global, but per process.
     // Because I moved the execution to another process to prevent catastrophic crashes, nothing should be able to interfere with the GIL.
 
@@ -63,7 +63,7 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
         .join("\n");
 
     trace!("Starting GIL block.");
-    let output = Python::with_gil(|py| {
+    let output = Python::attach(|py| {
         // We need a PyDict to store the local and global variables for the call.
         let locals = match try_read_locals(py, thread_id.clone()) {
             Some(locals) => locals,

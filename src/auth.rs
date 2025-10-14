@@ -13,31 +13,49 @@ use reqwest::Client;
 /// Very simple macro for the API points to call at the beginning to make sure that a request is authorized.
 /// If it isn't, it automatically returns the correct response.
 /// If a username was found in the token check, it will be returned.
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
-pub static ALLOW_FALLBACK_OLD_AUTH: bool = false; // Whether or not the old auth system should be used as a fallback.
+pub static REQUIRE_AUTH_KEY: bool = false; // Whether or not the auth key needs to also be sent.
+                                           // Note: if the auth key is not sent, an attacked might construct a request against any instance using a mock setup,
+                                           // similar to how the testing suite does the fixture. This could lead to people using the backend, and specifically
+                                           // the OpenAI key, without authorization.
 
+/// # Authentication
+///
+/// Tries to authorize the user based on the content of the query string and headers. Returns whether or not the user was authorized,
+/// and if they were, their username, if possible.
+///
+/// Requires:
+/// - Authentication header with a valid OpenID Connect token (Bearer token), via "Authorization" or "x-freva-user-token" header
+/// - Freva Rest URL in the "freva_rest_url" or "x-freva-rest-url" header (The systemuser endpoint will be used to check the token)
+///
+/// There is also an auth_key that has to match the one in the environment, but this is turned off by default.
+/// Sending the auth_key is still recommended, as this switch will be turned on in the near future to improve security.
+///
+/// If the Authentication header isn't valid UTF-8 or in the "Bearer " format, an UnprocessableEntity response is returned.
+#[documented::docs_const]
 pub async fn authorize_or_fail_fn(
     qstring: &QString,
     headers: &HeaderMap,
-) -> Result<Option<String>, HttpResponse> {
+) -> Result<String, HttpResponse> {
     let Some(auth_key) = crate::auth::AUTH_KEY.get() else {
         error!("No key found in the environment. Sending 500.");
         return Err(HttpResponse::InternalServerError()
             .body("No auth key found in the environment; Authorization failed."));
     };
 
-    // Read from the variable `qstring`
     match (
-        qstring.get("auth_key"),
+        get_first_matching_field(
+            qstring,
+            headers,
+            &["auth_key", "x-auth-key", "x-freva-auth-key"],
+            false,
+        ),
         headers
             .get("Authorization")
             .or_else(|| headers.get("x-freva-user-token")),
     ) {
         (maybe_key, Some(header_val)) => {
-            // The user (maybe) sent both an auth_key in the query string and an Authorization header.
-            // The header takes priority, but we'll emit a warning if they don't match.
-
             // The header can be any value, we only allow String.
             let auth_string: String = match header_val.to_str() {
                 Ok(header_val) => header_val.to_string(),
@@ -47,7 +65,8 @@ pub async fn authorize_or_fail_fn(
                         .body("Authorization header is not a valid UTF-8 string."));
                 }
             };
-            debug!("Authorization header: {}", auth_string);
+
+            // debug!("Authorization header: {}", auth_string); // This can contain sensitive information, so don't log it.
             debug!("Query string auth_key: {:?}", maybe_key);
             // The Authentication header is a Bearer token, so we need to extract the token from it.
             let Some(token) = auth_string.strip_prefix("Bearer ") else {
@@ -60,16 +79,18 @@ pub async fn authorize_or_fail_fn(
             // I missed a single line two months ago: the username check is not done against the vault,
             // But rather a seperate endpoint, which is specified in the "x-freva-rest-url" header.
 
-            let rest_url = headers
-                .get("x-freva-rest-url")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_owned());
+            let rest_url = get_first_matching_field(
+                qstring,
+                headers,
+                &["x-freva-rest-url", "freva_rest_url"],
+                true,
+            );
 
             // We can only do the token check if the rest URL is present.
             let token_check = if let Some(rest_url) = rest_url {
                 // If the rest URL is present, we'll check the token against it.
                 debug!("Rest URL found in headers: {}", rest_url);
-                get_username_from_token(token, &rest_url).await
+                get_username_from_token(token, rest_url).await
             } else {
                 // If the rest URL is not present, we'll return a 400.
                 warn!("No rest URL found in headers, cannot check token.");
@@ -80,71 +101,47 @@ pub async fn authorize_or_fail_fn(
             // Depending on whether the token was valid or not, check the query string token.
             match token_check {
                 Ok(username) => {
-                    debug!("Token check successful, returning username: {}", username);
-                    Ok(Some(username))
+                    debug!("Token check successful, found username: {}", username);
+                    if REQUIRE_AUTH_KEY {
+                        if let Some(key) = maybe_key {
+                            if key != auth_key {
+                                warn!("Auth key does not match. Sending 401.");
+                                Err(HttpResponse::Unauthorized().body("Auth key does not match."))
+                            } else {
+                                debug!("Auth key matches, sending success.");
+                                Ok(username)
+                            }
+                        } else {
+                            warn!("No auth key provided in the request. Sending 401.");
+                            Err(HttpResponse::Unauthorized()
+                                .body("No auth key provided in the request."))
+                        }
+                    } else {
+                        // No auth key required, just log it.
+                        trace!("No auth key required, skipping check.");
+                        Ok(username)
+                    }
                 }
                 Err(tokencheck_error) => {
-                    // Depending on whether or not we want to allow the old auth system,
-                    // we'll either return the error or check the query string token.
-                    if !ALLOW_FALLBACK_OLD_AUTH {
-                        // If we don't allow the old auth system, we'll return the error.
-                        warn!(
-                            "Authorization header is not valid. Sending error: {:?}",
-                            tokencheck_error
-                        );
-                        return Err(tokencheck_error);
-                    }
-                    info!("Token check failed, checking query string auth_key.");
-                    if let Some(query_token) = maybe_key {
-                        // If the query string token is present, we'll check whether it equals the token.
-
-                        // If both don't match, we'll return a 401.
-                        if query_token != auth_key {
-                            warn!(
-                                "Authorization header and query string auth_key do not authorize. Sending error: {:?}", tokencheck_error
-                            );
-                            return Err(tokencheck_error);
-                        }
-                        // Else, the query string token is valid. This will be removed in the future.
-                        debug!("Query string matches auth_key, authenticating without username.");
-                        Ok(None)
-                    } else {
-                        // If the query string token is not present, we've also run out of authentication options.
-
-                        warn!("Authorization header is not valid and no query string auth_key provided. Sending error: {:?}", tokencheck_error);
-                        Err(tokencheck_error)
-                    }
+                    // If the token check failed, we need to send the error.
+                    warn!(
+                        "Authorization header is not valid. Sending error: {:?}",
+                        tokencheck_error
+                    );
+                    Err(tokencheck_error)
                 }
             }
         }
-        (Some(key), None) => {
-            // Again, maybe fall back. Because the new auth header wasn't provided, this must fail.
-            if !ALLOW_FALLBACK_OLD_AUTH {
-                warn!("No Authorization header found. Sending 401.");
-                return Err(HttpResponse::Unauthorized()
-                    .body("No Authorization header found. Please use the Bearer token format."));
-            }
-
-            // If the key is not the same as the one in the environment, we'll return a 401.
-            if key != auth_key {
-                warn!("Unauthorized request.");
-                return Err(HttpResponse::Unauthorized().body("Unauthorized request."));
-            }
-            // Otherwise, it just worked.
-            debug!("Authorized request, no username.");
-            Ok(None)
+        (Some(_), None) => {
+            warn!("No Authorization header found. Sending 401.");
+            Err(HttpResponse::Unauthorized()
+                .body("No Authorization header found. Please use the Bearer token format."))
         }
         (None, None) => {
             // If the key is not found, we'll return a 401.
             warn!("No key provided in the request.");
-            if ALLOW_FALLBACK_OLD_AUTH {
-                Err(HttpResponse::Unauthorized().body(
-                    "No key provided in the request. Please set the auth_key in the query parameters.",
-                ))
-            } else {
-                Err(HttpResponse::Unauthorized()
-                    .body("Some necessary field weren't found in the request, please make sure to use the nginx proxy. If this is the first time logging in, check whether the nginx proxy and sets the right headers."))
-            }
+
+            Err(HttpResponse::Unauthorized().body("Some necessary field weren't found in the request, please make sure to use the nginx proxy. If this is the first time logging in, check whether the nginx proxy and sets the right headers."))
         }
     }
 }
@@ -153,7 +150,7 @@ static REQWEST_CLIENT: Lazy<Client> = Lazy::new(reqwest::Client::new);
 
 /// Recives a token, checks it against the URL provided in the header and returns the username.
 async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, HttpResponse> {
-    debug!("Checking token: {}", token);
+    // debug!("Checking token: {}", token);
     debug!("Using rest URL: {}", rest_url);
 
     // If the URL is set, we'll send a GET request to it with the token in the header.
@@ -244,7 +241,7 @@ async fn get_username_from_token(token: &str, rest_url: &str) -> Result<String, 
 /// Receives the vault URL and returns the URL to the `MongoDB` database to use.
 pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
     // The vault URL will be contained in the answer to the request to the vault. (No endpoint or authentication needed.)
-    debug!("Getting MongoDB URL from vault: {}", vault_url);
+    // debug!("Getting MongoDB URL from vault: {}", vault_url);
     let response = REQWEST_CLIENT.get(vault_url).send().await;
 
     // Extract the result or fail
@@ -253,7 +250,7 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
             if res.status().is_success() {
                 // If the response is successful, we'll return the MongoDB URL.
                 let content = res.text().await;
-                debug!("Response from vault: {:?}", content);
+                // debug!("Response from vault: {:?}", content);
                 let content = match content {
                     Ok(text) => text.trim().to_owned(),
                     Err(e) => {
@@ -262,7 +259,7 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
                             .body("Error reading response text from vault."));
                     }
                 };
-                debug!("Vault response: {}", content);
+                // debug!("Vault response: {}", content);
                 content
             } else {
                 // If the response is not successful, we'll return a 502.
@@ -301,7 +298,7 @@ pub async fn get_mongodb_uri(vault_url: &str) -> Result<String, HttpResponse> {
             return Err(HttpResponse::BadGateway().body("Vault response was malformed."));
         }
     };
-    debug!("MongoDB URL: {}", mongodb_url);
+    // debug!("MongoDB URL: {}", mongodb_url);
     Ok(mongodb_url)
 }
 
@@ -346,4 +343,34 @@ pub fn is_guest(username: &str) -> bool {
     // If it doesn't match any of the above patterns, it's a guest.
     debug!("Username '{}' is considered a guest.", username);
     true
+}
+
+/// Given a qstring and headers, as well as a list of fields to check against,
+/// returns the first field from the qstring or headers that matches one of the fields in the list.
+/// If none is found, returns None.
+pub fn get_first_matching_field<'a>(
+    qstring: &'a QString,
+    headers: &'a HeaderMap,
+    fields: &'a [&'a str],
+    prefer_headers: bool,
+) -> Option<&'a str> {
+    // First find the first match in the headers
+    let header_result: Option<&'a str> = {
+        headers.iter().find_map(|(key, value)| {
+            if fields.contains(&key.as_str()) {
+                value.to_str().ok()
+            } else {
+                None
+            }
+        })
+    };
+
+    let qstring_result: Option<&'a str> = { fields.iter().find_map(|&field| qstring.get(field)) };
+
+    // Now, return the result based on the preference
+    if prefer_headers {
+        header_result.or(qstring_result)
+    } else {
+        qstring_result.or(header_result)
+    }
 }

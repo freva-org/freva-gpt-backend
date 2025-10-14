@@ -22,14 +22,7 @@ pub async fn set_thread_topic(req: HttpRequest) -> impl Responder {
 
     // First try to authorize the user
 
-    let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
-
-    // Requires the user to be known
-    // This will fail if the old authentication system is used.
-    let Some(user_id) = maybe_username else {
-        warn!("Unauthorized user tried to set thread topic");
-        return actix_web::HttpResponse::Unauthorized().body("Unauthorized; Username not found");
-    };
+    let user_id = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Retrieve the arguments to the request
     let thread_id = qstring

@@ -20,12 +20,7 @@ pub async fn search_threads(req: HttpRequest) -> impl Responder {
     debug!("Headers: {:?}", headers);
 
     // In order to search threads, the user needs to be authenticated.
-    let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
-
-    let Some(user_id) = maybe_username else {
-        warn!("Failed to authenticate user");
-        return HttpResponse::Unauthorized().body("Could not authenticate, missing user ID.");
-    };
+    let user_id = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Now the query
     let query = qstring
