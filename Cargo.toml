@@ -13,7 +13,7 @@ categories = ["science", "science::geo", "web-programming::http-server"]
 [dependencies]
 actix-web = "4.11.0"
 # async-openai = { git = "https://github.com/SeseMueller/async-openai", version = "0.27.2" }
-async-openai = {version = "0.28.3" }
+async-openai = {version = "0.30.0" }
 async-trait = "0.1.88"
 base64 = "0.22.1"
 clap = { version = "4.5.39", features = ["derive", "cargo"] }

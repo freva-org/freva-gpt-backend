@@ -6,7 +6,8 @@ use async_openai::types::{
     FunctionCall,
 };
 use documented::Documented;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::Error};
+use serde_json::Value;
 use tracing::{debug, error, trace, warn};
 
 #[derive(Debug, Clone)]
@@ -77,8 +78,9 @@ pub enum StreamVariant {
     User(String),
     /// The Output of the Assistant, as a String or Strindelta. Often Markdown.
     Assistant(String),
-    /// Code the Assistant generated, as a String or Stringdelta, as well as the ID of the Tool Call the Code belongs to. Python, no formatting.
-    Code(String, String),
+    /// Tool call the Assistant generated, formerly only Code. String or Stringdelta, as well as the ID of the Tool Call it belongs to, together with the name of the tool. The code_interpreter tool is currently the only one implemented.
+    #[serde(deserialize_with = "deserialize_code_variant")]
+    Code(String, String, String),
     /// The Output of the Code, as a String, verbatim, and the ID of the Tool Call it belongs to.
     CodeOutput(String, String),
     /// An image that was generated during the streaming
@@ -103,7 +105,7 @@ impl fmt::Display for StreamVariant {
             Self::Prompt(s) => format!("Prompt:{s}"),
             Self::User(s) => format!("User:{s}"),
             Self::Assistant(s) => format!("Assistant:{s}"),
-            Self::Code(s, id) => format!("Code:{s}:{id}"),
+            Self::Code(s, id, name) => format!("{name}:{s}:{id}"),
             Self::CodeOutput(s, id) => format!("CodeOutput:{s}:{id}"),
             Self::Image(s) => format!("Image:{s}"),
             Self::ServerError(s) => format!("ServerError:{s}"),
@@ -123,7 +125,7 @@ pub type Conversation = Vec<StreamVariant>;
 pub enum ConversionError {
     VariantHide(&'static str), // Some variants are only for the backend, so they should not be converted.
     ParseError(&'static str),  // An error occured during parsing the prompt.
-    CodeCall(String, String),  // A Code Call was found, which needs to be handled differently.
+    CodeCall(String, String, String),  // A Code Call was found, which needs to be handled differently.
 }
 
 /// A helper function to convert the `StreamVariant` to a `ChatCompletionRequestMessage`.
@@ -178,7 +180,7 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     ..Default::default()
                 },
             )]),
-            Self::Code(s, id) => Err(ConversionError::CodeCall(s, id)),
+            Self::Code(s, id, name) => Err(ConversionError::CodeCall(s, id, name)),
             Self::CodeOutput(s, id) => Ok(vec![ChatCompletionRequestMessage::Tool(
                 async_openai::types::ChatCompletionRequestToolMessage {
                     tool_call_id: id,
@@ -199,7 +201,7 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
             Self::StreamEnd(_) => Err(ConversionError::VariantHide("StreamEnd variants are only for use on the server side, not for the LLM.")),
             Self::ServerHint(s) => {
                 // The content is JSON, we check whether it's valid and that its key is either "thread_id" or "warning".
-                let hint: serde_json::Value = match serde_json::from_str(&s) {
+                let hint: Value = match serde_json::from_str(&s) {
                     Ok(h) => h,
                     Err(e) => {
                         warn!("Error parsing ServerHint content, ignoring and passing value to client blindly: {:?}", e);
@@ -207,7 +209,7 @@ impl TryInto<Vec<ChatCompletionRequestMessage>> for StreamVariant {
                     }
                 };
                 // We expect the hint to be of type object
-                if let serde_json::Value::Object(hint) = hint {
+                if let Value::Object(hint) = hint {
                     if hint.keys().next().is_none() {
                         warn!("ServerHint content is empty! Passing to the client nonetheless.");
                         return Err(ConversionError::ParseError("ServerHint content is empty."));
@@ -351,11 +353,11 @@ impl TryFrom<ChatCompletionRequestMessage> for StreamVariant {
                 };
 
                 match content.tool_call_id.as_str() {
-                    "Code Interpreter" | "Code Interpreter Output" => {
+                    "Code Interpreter" | "Code Interpreter Output" | "code_interpreter" | "code_interpreter_output" => {
                         // We also need to check whether the tool_call_id is Code Interpreter or Code Interpreter Output.
                         match content.tool_call_id.as_str() {
-                            "Code Interpreter" => Ok(Self::Code(text, content.tool_call_id)),
-                            "Code Interpreter Output" => {
+                            "Code Interpreter" | "code_interpreter" => Ok(Self::Code(text, content.tool_call_id, "code_interpreter".to_string())),
+                            "Code Interpreter Output" | "code_interpreter_output" => {
                                 Ok(Self::CodeOutput(text, content.tool_call_id))
                             }
                             _ => Err("Unknown Tool Call ID."), // This is impossible
@@ -432,13 +434,13 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>) -> Vec<ChatCompletionRequ
                     }
                 }
             }
-            Err(ConversionError::CodeCall(content, id)) => {
+            Err(ConversionError::CodeCall(content, id, name)) => {
                 // We need to use the Code Call to update the content of the buffer, or initialize it.
                 let tool_call = ChatCompletionMessageToolCall {
                     id,
                     r#type: ChatCompletionToolType::Function,
                     function: FunctionCall {
-                        name: "code_interpreter".to_string(),
+                        name,
                         arguments: content,
                     },
                 };
@@ -490,7 +492,40 @@ pub fn unescape_string(s: &str) -> String {
     s.replace("\\\"", "\"")
         .replace("\\\\", "\\")
         .replace("\\n", "\n")
+
 }
+
+// Custom deserializer for the Code variant of StreamVariant, as all old threads have the old format with only two fields.
+// If no third field is found, we set the tool name to "code_interpreter".
+fn deserialize_code_variant<'de, D>(deserializer: D) -> Result<(String, String, String), D::Error> where D: serde::Deserializer<'de> {
+
+    let list = Value::deserialize(deserializer)?;
+    // The list should be an array of length 2 or 3.
+    let output: (String, String, String) =  if let Value::Array(arr) = list {
+        if arr.len() == 2 {
+            if let (Value::String(s1), Value::String(s2)) = (&arr[0], &arr[1]) {
+                // // Old format, we set the tool name (index 2) to "code_interpreter".
+                (s1.clone(), s2.clone(), "code_interpreter".to_string())
+            } else {
+                return Err(Error::custom(format!("Expected two strings in Code variant array, got :{:?} and {:?}.", arr[0], arr[1])));
+            }
+        } else if arr.len() == 3 {
+            if let (Value::String(s1), Value::String(s2), Value::String(s3)) = (&arr[0], &arr[1], &arr[2]) {
+                (s1.clone(), s2.clone(), s3.clone())
+            } else {
+                return Err(Error::custom(format!("Expected three strings in Code variant array, got {} elements.", arr.len())));
+            }
+        } else {
+            return Err(Error::custom(format!("Expected array of length 2 or 3 in Code variant, got {} elements.", arr.len())));
+        }
+    } else {
+        return Err(Error::custom(format!("Expected array in Code variant, got {list} instead.")));
+    };
+
+    Ok(output)
+}
+
+
 
 #[cfg(test)]
 mod tests {
@@ -507,7 +542,7 @@ mod tests {
             StreamVariant::ServerHint("{\"thread_id\": \"wLRFKFPcDgRJdZwSFBF82LWulvAaS5MR\"}".to_string()),            
             StreamVariant::User("plot a cirlce".to_string()),
             StreamVariant::Assistant("To plot a circle, we can use the `matplotlib` library to create a simple visualization. Let's create a plot with a circle centered at the origin (0, 0) with a specified radius. I'll use a radius of 1 for this example.\n\nLet's proceed with the code to generate this plot.".to_string()),
-            StreamVariant::Code("{\n    \"code\": \"import matplotlib.pyplot as plt\\nimport numpy as np\\n\\n# Create a new figure\\nplt.figure(figsize=(6, 6))\\n\\n# Parameters for the circle\\nradius = 1\\nangle = np.linspace(0, 2 * np.pi, 100)  # 100 points around the circle\\n\\n# Circle coordinates\\nx = radius * np.cos(angle)\\ny = radius * np.sin(angle)\\n\\n# Plot the circle\\nplt.plot(x, y, label='Circle with radius 1', color='blue')\\nplt.xlim(-1.5, 1.5)\\nplt.ylim(-1.5, 1.5)\\nplt.gca().set_aspect('equal')  # Aspect ratio equal\\nplt.title('Plot of a Circle')\\nplt.xlabel('X-axis')\\nplt.ylabel('Y-axis')\\nplt.axhline(0, color='grey', lw=0.5, ls='--')  # Add x-axis\\nplt.axvline(0, color='grey', lw=0.5, ls='--')  # Add y-axis\\nplt.legend()\\nplt.grid()\\nplt.show()  \\n\"\n    }".to_string(), "call_13RrNWNbaziDd34bvPXpdrMV".to_string()),
+            StreamVariant::Code("{\n    \"code\": \"import matplotlib.pyplot as plt\\nimport numpy as np\\n\\n# Create a new figure\\nplt.figure(figsize=(6, 6))\\n\\n# Parameters for the circle\\nradius = 1\\nangle = np.linspace(0, 2 * np.pi, 100)  # 100 points around the circle\\n\\n# Circle coordinates\\nx = radius * np.cos(angle)\\ny = radius * np.sin(angle)\\n\\n# Plot the circle\\nplt.plot(x, y, label='Circle with radius 1', color='blue')\\nplt.xlim(-1.5, 1.5)\\nplt.ylim(-1.5, 1.5)\\nplt.gca().set_aspect('equal')  # Aspect ratio equal\\nplt.title('Plot of a Circle')\\nplt.xlabel('X-axis')\\nplt.ylabel('Y-axis')\\nplt.axhline(0, color='grey', lw=0.5, ls='--')  # Add x-axis\\nplt.axvline(0, color='grey', lw=0.5, ls='--')  # Add y-axis\\nplt.legend()\\nplt.grid()\\nplt.show()  \\n\"\n    }".to_string(), "call_13RrNWNbaziDd34bvPXpdrMV".to_string(), "code_interpreter".to_string()),
             StreamVariant::CodeOutput("<module 'matplotlib.pyplot' from '/opt/conda/envs/env/lib/python3.12/site-packages/matplotlib/pyplot.py'>:call_13RrNWNbaziDd34bvPXpdrMV".to_string(), "call_13RrNWNbaziDd34bvPXpdrMV".to_string()),
             StreamVariant::Image("JUST A BASE64 STRING".to_string()),
             StreamVariant::Assistant("The plot above displays a circle centered at the origin (0, 0) with a radius of 1. The axes are set to be equal, ensuring that the circle appears proportional. \n\nIf you want to plot a circle with different parameters or need further visualizations, just let me know!".to_string()),

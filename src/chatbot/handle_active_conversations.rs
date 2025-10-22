@@ -189,16 +189,18 @@ async fn save_conversation(conversation: ActiveConversation, database: Database)
 fn concat_variants(input: Vec<StreamVariant>) -> Vec<StreamVariant> {
     let mut output = Vec::new();
     let mut assistant_buffer = String::new();
-    let mut code_buffer = (String::new(), String::new()); // content; id
+    let mut code_buffer = (String::new(), String::new(), String::new()); // content; id; name
 
     for variant in input {
         match variant {
             StreamVariant::Assistant(message) => {
                 assistant_buffer.push_str(&message);
             }
-            StreamVariant::Code(message, id) => {
+            StreamVariant::Code(message, id, name) => {
+                // We don't expect two tool calls to be right after one another, so we won't recheck the id or name.
                 code_buffer.0.push_str(&message);
                 code_buffer.1 = id;
+                code_buffer.2 = name;
             }
             _ => {
                 // If it's not an assistant or code message, we'll push the buffers to the output.
@@ -210,9 +212,11 @@ fn concat_variants(input: Vec<StreamVariant>) -> Vec<StreamVariant> {
                     output.push(StreamVariant::Code(
                         code_buffer.0.clone(),
                         code_buffer.1.clone(),
+                        code_buffer.2.clone(),
                     ));
                     code_buffer.0.clear();
                     code_buffer.1.clear();
+                    code_buffer.2.clear();
                 }
                 output.push(variant);
             }
@@ -226,7 +230,11 @@ fn concat_variants(input: Vec<StreamVariant>) -> Vec<StreamVariant> {
         output.push(StreamVariant::Assistant(assistant_buffer));
     }
     if !code_buffer.0.is_empty() {
-        output.push(StreamVariant::Code(code_buffer.0, code_buffer.1));
+        output.push(StreamVariant::Code(
+            code_buffer.0,
+            code_buffer.1,
+            code_buffer.2,
+        ));
     }
 
     output

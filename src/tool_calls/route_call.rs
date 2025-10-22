@@ -72,7 +72,7 @@ pub async fn route_call(
                     // Even if the function name is recognized, many other things can go wrong.
                     warn!("The chatbot tried to call a function with the name '{func_name}' but it failed: {}", e);
                     let answer = vec![StreamVariant::CodeOutput(
-                        format!("The function '{func_name}' failed: {}", e),
+                        format!("The function '{func_name}' failed: {e}"),
                         id,
                     )];
                     sender.send(answer).await
