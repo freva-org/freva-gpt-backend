@@ -1,14 +1,16 @@
 use actix_web::{HttpRequest, HttpResponse, Responder};
 use documented::docs_const;
-use tracing::{debug, warn};
+use tracing::{debug, trace, warn};
 
 use crate::{
     auth::get_first_matching_field,
-    chatbot::mongodb_storage::{get_database, read_threads},
+    chatbot::mongodb::mongodb_storage::{get_database, read_threads_and_num},
 };
 
 /// # getuserthreads
-/// Takes in a vault_url and returns the latest 10 threads of the user. Requires Authentication.
+/// Takes in a vault_url and returns the latest n threads of the user. Requires Authentication.
+/// n is an optional parameter that defaults to 10.
+/// if a page number (0-based) is passed, it instead paginates and uses that page number
 ///
 /// If the vault_url is missing or empty, an UnprocessableEntity response is returned.
 ///
@@ -56,8 +58,26 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
         }
     };
 
-    // Retrieve the latest 10 threads of the user from the database.
-    let threads = read_threads(&user_id, database).await;
+    // Try to get n from the qstring
+    let n = match get_first_matching_field(
+        &qstring,
+        headers,
+        &["num_threads", "num-threads", "n_threads", "n-threads", "n"],
+        false,
+    ) {
+        Some(n) => {
+            debug!("Parsed num_threads: {}", n);
+            n.parse::<u32>().unwrap_or(10)
+        }
+        None => 10,
+    };
+    trace!("Final num_threads: {}", n);
+
+    let page = get_first_matching_field(&qstring, headers, &["page"], false)
+        .and_then(|p| p.parse::<u32>().ok());
+
+    // Retrieve the latest n threads of the user from the database.
+    let threads = read_threads_and_num(&user_id, database, n, page).await;
 
     debug!("Threads: {:?}", threads);
     HttpResponse::Ok()

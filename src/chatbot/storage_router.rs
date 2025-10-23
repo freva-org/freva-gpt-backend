@@ -1,5 +1,7 @@
 use mongodb::Database;
 
+use crate::chatbot::mongodb::mongodb_storage;
+
 use super::types::Conversation;
 
 #[allow(dead_code)] // Only one variant of this enum is ever used, so this shuts up the warning
@@ -24,7 +26,7 @@ pub async fn append_thread(
             super::thread_storage::append_thread(thread_id, content);
         }
         AvailableStorages::MongoDB => {
-            super::mongodb_storage::append_thread(thread_id, user_id, content, database).await;
+            mongodb_storage::append_thread(thread_id, user_id, content, database).await;
         }
     }
 }
@@ -37,9 +39,7 @@ pub async fn read_thread(
     match STORAGE {
         AvailableStorages::Disk => super::thread_storage::read_thread(thread_id),
         AvailableStorages::MongoDB => {
-            // super::mongodb_storage::read_thread(thread_id)
-            // .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Thread not found"))
-            match super::mongodb_storage::read_thread(thread_id, database).await {
+            match mongodb_storage::read_thread(thread_id, database).await {
                 Some(thread) => Ok(thread.content),
                 None => Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,

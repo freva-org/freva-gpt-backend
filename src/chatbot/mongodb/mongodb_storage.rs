@@ -5,7 +5,10 @@ use std::{
 
 use actix_web::HttpResponse;
 use futures::TryStreamExt;
-use mongodb::{bson::doc, Database};
+use mongodb::{
+    bson::{doc, Document},
+    Database,
+};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, trace, warn};
@@ -16,7 +19,7 @@ use crate::{
 };
 
 /// Stores and loads threads from the mongoDB
-use super::types::Conversation;
+use crate::chatbot::types::Conversation;
 
 // Note: Bianca needs the user_id, thread_id, date and "topic" of a thread for the frontend, so that will be the four contents beside the main content.
 /// The content of a thread in the mongoDB database.
@@ -185,8 +188,14 @@ pub async fn read_thread(thread_id: &str, database: Database) -> Option<MongoDBT
     }
 }
 
-/// Recieves a user_id and returns the last 10 threads of the user.
-pub async fn read_threads(user_id: &str, database: Database) -> Vec<MongoDBThread> {
+/// Recieves a user_id and returns the last n threads of the user as well as the number of threads that user has.
+/// Supports naive pagination.
+pub async fn read_threads_and_num(
+    user_id: &str,
+    database: Database,
+    n: u32,
+    page: Option<u32>,
+) -> (Vec<MongoDBThread>, u64) {
     debug!("Will load threads for user {}", user_id);
 
     // Query the database by user_id.
@@ -195,29 +204,200 @@ pub async fn read_threads(user_id: &str, database: Database) -> Vec<MongoDBThrea
         .find(doc! {
             "user_id": user_id
         })
-        .limit(-10) // Don't do 10 requests, do a single one for all 10.
+        .limit(-std::convert::Into::<i64>::into(n)) // Don't do n requests, do a single one for all n.
         .sort(doc! {
             "date": -1
         })
+        .skip(page.unwrap_or(0) as u64 * n as u64) // Skip to the correct page
         .await;
+
+    // TODO: skip+limit is an antipattern for a good reason; this basically needs to look through the entire database because of the skip.
+    // Maybe (depending on the inner workings of MongoDB), using a Single Field Index with the user_id as key might improve performance.
+    // Additionally, using aggregation pipelines could help with performance much more, but I am not sure how they work, and the examples don't make sense to me.
+    // If we get some performance problems, I'll look into it again.
+
+    // Additionally, we need to ask the database how many threads the user has in total.
+    let total_threads = database
+        .collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME)
+        .count_documents(doc! {
+            "user_id": user_id
+        })
+        .await;
+
+    let total_threads = match total_threads {
+        Ok(count) => count,
+        Err(e) => {
+            warn!(
+                "Failed to count documents for user {}: {:?}; assuming 0",
+                user_id, e
+            );
+            0
+        }
+    };
 
     match result {
         Ok(mut inner) => {
             debug!("Loaded threads from database.");
-            // The logic for collecting the theads is a bit tricky.
+            // The logic for collecting the threads is a bit tricky.
             let mut thread_vec = Vec::new();
-            // inner.collect::<Vec<MongoDBThread>>().await.unwrap_or_default().into()
+
             while let Ok(Some(inner)) = inner.try_next().await {
                 thread_vec.push(inner);
             }
 
-            thread_vec
+            (thread_vec, total_threads)
         }
         Err(e) => {
             info!("Failed to load threads: {:?}; expecting it to not exist", e);
-            vec![]
+            (vec![], 0)
         }
     }
+}
+
+/// Updates the topic of a given thread of a specific user
+pub async fn update_topic(
+    thread_id: &str,
+    user_id: &str,
+    new_topic: &str,
+    database: Database,
+) -> Result<(), HttpResponse> {
+    debug!(
+        "Will update topic of thread {} for user {}",
+        thread_id, user_id
+    );
+
+    let result = database
+        .collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME)
+        .update_one(
+            doc! {
+                "thread_id": thread_id,
+                "user_id": user_id
+            },
+            doc! {
+                "$set": {
+                    "topic": new_topic,
+                }
+            },
+        )
+        .await;
+
+    match result {
+        Ok(update_result) => {
+            debug!("Updated topic of thread in database.");
+            trace!("Update result: {:?}", update_result);
+            Ok(())
+        }
+        Err(e) => {
+            warn!(
+                "Failed to update topic of thread in database: {:?}; cannot update topic!",
+                e
+            );
+            Err(HttpResponse::InternalServerError().body("Failed to update topic"))
+        }
+    }
+}
+
+/// Searches the database for threads from a specific user based on the variants that occur in it, i.E if a search searches ("user", "ERA6"),
+/// It searches for all threads that include a variant of user that contains ERA6.
+pub async fn query_by_variant(
+    user_id: &str,
+    variant: &str,
+    query: &str,
+    num_threads: u32,
+    page: u32,
+    database: Database,
+) -> Result<(Vec<MongoDBThread>, u64), HttpResponse> {
+    // The variant is checked on the call side, but it's inside the content array, so we need to use $elemMatch inside the doc!.
+
+    // // To implement some simplified version of fuzzy search, we'll use word-based fuzzy search
+    // let words = query.split_ascii_whitespace();
+    // let query = words
+    //     .map(|word| format!("{word}.*"))
+    //     .collect::<Vec<_>>()
+    //     .join("");
+    // // We'll disable fuzzy search for now, it can be enabled on request.
+
+    let filter = doc! {
+        "user_id": user_id,
+        "content": {
+            "$elemMatch": {
+                "variant": variant,
+                "text": { "$regex": query, "$options": "i" }
+            }
+        }
+    };
+
+    query_by_mongodb_filter(filter, num_threads, page, database).await
+}
+
+/// Searches the database for threads from a specific user with topics that contain a given query.
+/// Supports limiting the number of returned threads and pagination.
+pub async fn query_by_topic(
+    user_id: &str,
+    query: &str,
+    num_threads: u32,
+    page: u32,
+    database: Database,
+) -> Result<(Vec<MongoDBThread>, u64), HttpResponse> {
+    // It's a plain topic, so we just insert a regex filter for the topic.
+    let filter = doc! {
+        "user_id": user_id,
+        "topic": { "$regex": query, "$options": "i" }
+    };
+
+    debug!(
+        "Searching for threads for user {} with query {}",
+        user_id, query
+    );
+
+    query_by_mongodb_filter(filter, num_threads, page, database).await
+}
+
+async fn query_by_mongodb_filter(
+    filter: Document,
+    num_threads: u32,
+    page: u32,
+    database: Database,
+) -> Result<(Vec<MongoDBThread>, u64), HttpResponse> {
+    let cursor = database
+        .collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME)
+        .find(filter.clone())
+        .sort(doc! {
+            "date": -1
+        })
+        .skip(page as u64 * num_threads as u64)
+        .limit(-(num_threads as i64))
+        .await;
+
+    let mut cursor = match cursor {
+        Ok(cursor) => cursor,
+        Err(e) => {
+            warn!("Failed to execute query: {:?}", e);
+            return Err(HttpResponse::InternalServerError().body("Failed to execute query"));
+        }
+    };
+
+    let mut threads = Vec::new();
+
+    while let Ok(Some(thread)) = cursor.try_next().await {
+        threads.push(thread);
+    }
+
+    // We also want to know how many threads there are in total for this query.
+    let total_num = database
+        .collection::<MongoDBThread>(&MONGODB_COLLECTION_NAME)
+        .count_documents(filter)
+        .await;
+
+    let total_num = match total_num {
+        Ok(count) => count,
+        Err(e) => {
+            warn!("Failed to count documents: {:?}", e);
+            0
+        }
+    };
+
+    Ok((threads, total_num))
 }
 
 // Statically holds a list of Client connections, one per vault URL.
