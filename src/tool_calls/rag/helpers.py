@@ -9,9 +9,9 @@ from pymongo.operations import SearchIndexModel
 
 
 # Configure logging
-def configure_logger():
+def configure_logger(log_level=logging.INFO) -> logging.Logger:
     logging.basicConfig(
-        level=logging.INFO,
+        level=log_level,
         stream=sys.stderr,
         format='[%(asctime)s] %(levelname)s in %(module)s: %(message)s'
     )
@@ -89,7 +89,7 @@ def is_doc_in_db(doc, db):
     return db.count_documents({"file_hash": doc_hash}) > 0
 
 
-def get_new_or_changed_documents(documents, db):
+def get_new_or_changes_documents(documents, db):
     new_docs = []
     for doc in documents:
         # Check if document already embedded
