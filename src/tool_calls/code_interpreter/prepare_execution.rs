@@ -226,7 +226,7 @@ struct CodeInterpreterArguments {
 }
 
 /// The function that is called when the program is started and the code_interpreter argument is passed.
-pub fn run_code_interpeter(arguments: String) -> ! {
+pub fn run_code_interpreter(arguments: String) -> ! {
     // We'll first initialize the logger.
     let logger = setup_logging(); // can't drop the logger, because we need it to be alive for the whole program.
     debug!(
@@ -289,8 +289,11 @@ async fn retrieve_previous_code_interpreter_imports_and_images(
     this_conversation.extend(past_conversation);
 
     let mut imports = Vec::<String>::new();
-    for variant in this_conversation.clone() {
-        if let StreamVariant::Code(code, _) = variant {
+    for variant in this_conversation {
+        if let StreamVariant::Code(code, _, name) = variant {
+            if name != "code_interpreter" {
+                continue; // We only want code interpreter imports.
+            }
             // Split the code into lines and only take the lines that start with "import" or start with "from" AND contain "import".
             // Start the split at the first occurence of "\":\"" to avoid splitting the code itself and to include the first line.
             let rest_code = code.split_once("\":\"").unwrap_or_default().1; // If it doesn't work, use the empty string.

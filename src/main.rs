@@ -7,7 +7,7 @@ use std::time::Duration;
 use actix_web::{services, web, App, HttpServer};
 use clap::Parser;
 use dotenvy::dotenv;
-use tool_calls::code_interpreter::prepare_execution::run_code_interpeter;
+use tool_calls::code_interpreter::prepare_execution::run_code_interpreter;
 use tracing::{debug, error, info};
 
 mod auth; // for basic authentication
@@ -25,7 +25,7 @@ async fn main() -> std::io::Result<()> {
 
     // If we are in code_interpreter mode, run the code interpreter and have it exit without starting the server.
     if let Some(code) = &args.code_interpreter {
-        run_code_interpeter(code.clone());
+        run_code_interpreter(code.clone());
     }
 
     print!("Setting up the logger... ");

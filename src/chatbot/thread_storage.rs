@@ -172,7 +172,22 @@ pub fn extract_variants_from_string(content: &str) -> Vec<StreamVariant> {
                 ("Assistant", s) => StreamVariant::Assistant(unescape_string(s)),
                 ("Code", s) => {
                     if let Some((content, id)) = split_colon_at_end(&unescape_string(s)) {
-                        StreamVariant::Code((*content).to_string(), (*id).to_string())
+                        // If there is still a colon, we can split it again.
+                        match split_colon_at_end(content) {
+                            Some((code_content, name)) => StreamVariant::Code(
+                                (*code_content).to_string(),
+                                (*id).to_string(),
+                                (*name).to_string(),
+                            ),
+                            None => {
+                                // Old variant, fall back to "code_interpreter" as name.
+                                StreamVariant::Code(
+                                    (*content).to_string(),
+                                    (*id).to_string(),
+                                    "code_interpreter".to_string(),
+                                )
+                            }
+                        }
                     } else {
                         warn!("Error splitting Code variant, skipping.");
                         continue;
@@ -226,7 +241,7 @@ pub fn cleanup_conversation(content: &mut Conversation) {
     let mut active_code_id = None; // The ID of the current code variant.
     while i < content.len() {
         match &content[i] {
-            StreamVariant::Code(_, id) => {
+            StreamVariant::Code(_, id, _) => {
                 active_code_id = Some(id.clone());
             }
             StreamVariant::CodeOutput(_, _) => {

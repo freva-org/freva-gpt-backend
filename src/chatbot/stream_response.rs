@@ -976,7 +976,20 @@ async fn oai_stream_to_variants(
                                     }
                                 }
 
-                                vec![StreamVariant::Code(arguments, tool_id.clone())]
+                                let fallback_tool_name = match tool_name {
+                                    Some(name) => name.clone(),
+                                    None => {
+                                        warn!("Tool call expected name, but not found in response. Fallback to 'code_interpreter' as tool name.");
+                                        debug!("Response: {:?}", response);
+                                        "code_interpreter".to_string()
+                                    }
+                                };
+
+                                vec![StreamVariant::Code(
+                                    arguments,
+                                    tool_id.clone(),
+                                    fallback_tool_name,
+                                )]
                             } else {
                                 warn!(
                                     "Tool call expected function, but not found in response: {:?}",
@@ -1014,7 +1027,15 @@ async fn oai_stream_to_variants(
                     }
                     StreamEvents::LiveToolCall => {
                         // The tool call is still running, so we'll just send an empty event.
-                        vec![StreamVariant::Code(String::new(), String::new())] // Just empty ID because it is necessary.
+                        vec![StreamVariant::Code(
+                            String::new(),
+                            String::new(),
+                            match tool_name.as_ref() {
+                                Some(name) => name.to_string(),
+                                None => "code_interpreter".to_string(),
+                            },
+                        )]
+                        // Just empty ID because it is necessary.
                     }
                 }
             } else {
@@ -1076,7 +1097,7 @@ async fn oai_stream_to_variants(
                         // We know it's the code interpreter and can send it as a delta.
                         trace!("Tool call: {:?} with arguments: {:?}", name, arguments);
                         vec![
-                            StreamVariant::Code(arguments, generate_id()),
+                            StreamVariant::Code(arguments, generate_id(), name),
                             StreamVariant::StreamEnd("Ollama Stream ended".to_string()), // We still need to end the stream, because the tool call is done.
                         ]
                     }
