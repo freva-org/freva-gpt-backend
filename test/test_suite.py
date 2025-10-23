@@ -62,12 +62,15 @@ class StreamResult:
     assistant_variants: list  = field(default_factory=list)
     image_variants: list = field(default_factory=list)
     server_hint_variants: list  = field(default_factory=list)
+    parsed_list: list = field(default_factory=list) # Full list of variants, with combined fragments.
     thread_id: str | None = None
 
     def extract_variants(self):
         if self.json_response:
             # The stream can stream multiple Assistant or Code fragments one after the other, in order to get good UX, but that means that multiple fragments that form a single variant can be streamed one after the other.
             # So, for convenience, we'll combine consecutive fragments that form a single variant into a single variant, if that variant is Assistant or Code. 
+
+            full_list = [] # Full list of variants, with combined fragments.
 
             running_code = None # None or tuple of (code, code_id) (which is the content of the fragment)
             running_assistant = None # None or string (which is the content of the fragment)
@@ -77,9 +80,11 @@ class StreamResult:
 
                 if variant != "Code" and running_code:
                     self.code_variants.append(running_code)
+                    full_list.append({"variant": "Code", "content": running_code})
                     running_code = None
                 if variant != "Assistant" and running_assistant:
                     self.assistant_variants.append(running_assistant)
+                    full_list.append({"variant": "Assistant", "content": running_assistant})
                     running_assistant = None
 
                 if variant == "Code":
@@ -94,14 +99,30 @@ class StreamResult:
                         running_assistant = content
                 elif variant == "CodeOutput":
                     self.codeoutput_variants.append(content[0])
+                    full_list.append({"variant": variant, "content": content[0]})
                 elif variant == "Image":
                     self.image_variants.append(content)
+                    full_list.append({"variant": variant, "content": content})
                 elif variant == "ServerHint":
                     self.server_hint_variants.append(content)
+                    full_list.append({"variant": variant, "content": content})
+                elif variant == "User" or variant == "OpenAIError" or variant == "CodeError" or variant == "StreamEnd":
+                    full_list.append({"variant": variant, "content": content})
+                else:
+                    pytest.warn(f"Unknown variant {variant} found in response!")
 
+            # If there is still a running code or assistant, add it to the list.
+            # But this shouldn't really happen, every stream should be ended with a StreamEnd variant.
+            if running_code:
+                self.code_variants.append(running_code)
+                full_list.append(("Code", running_code))
+            if running_assistant:
+                self.assistant_variants.append(running_assistant) 
+                full_list.append(("Assistant", running_assistant))
 
+            self.parsed_list = full_list
 
-            self.thread_id = json.loads(self.json_response[0]["content"])["thread_id"]
+            self.thread_id = json.loads(self.server_hint_variants[0])["thread_id"]
             print("Debug: thread_id: " + (self.thread_id or "None")) # Alway print the thread_id for debugging, so that when a test fails, we know which thread_id to look at.
 
     def has_error_variants(self):
@@ -508,7 +529,6 @@ def test_non_alphanumeric_user_id():
         # Reset the user ID to the default value, so that the other tests can run without issues.
         global_user_id = "testing"
         
-
 def test_edit_input():
     ''' Can the backend handle edits to the user input? ''' # Since Version 1.10.3
     # For the EVE demonstration, we want the capability to edit a past user input.
@@ -544,65 +564,28 @@ def test_edit_input():
     # The first and third variants should be User, and the second and fourth variants should be Assistant.
     assert retrived_thread[0]["variant"] == retrived_thread[2]["variant"] == "User", "The first and third variants of the thread with the edited response should be User, but they are not."
     assert retrived_thread[1]["variant"] == retrived_thread[3]["variant"] == "Assistant", "The second and fourth variants of the thread with the edited response should be Assistant, but they are not."
+
+    # Recently, the protocol for the edit functionality changed slightly, so that the previous variants, before the edit point are also sent. 
+    # This makes it easier for the frontend to display the thread correctly. But now the test case above has changed, so we'll add some additional checks.
+    # NOTE: the user variant is NOT sent from the backend, so the entire thread EXPECT the edited user input will be sent. 
+    # The Serverhint variant will be where the edit is indicated.
+
+    # We'll not use the thread from the database, but rather the one from the response, to make sure that the response is correct.
+    retrived_thread = [ i for i in response3.parsed_list if i["variant"] in ["User", "Assistant"] ]
+
+    print("retrived_thread of response: ", retrived_thread)
+
+    # There should be 3 variants in total, where the first is User, the second is Assistant, and the third is Assistant.
+
+    assert len(retrived_thread) == 3, "The edited response should have 3 variants, but it has " + str(len(retrived_thread)) + ". Instead, it has the following variants: " + str(retrived_thread)
     
+    assert retrived_thread[0]["variant"] == "User", "The first variant of the thread with the edited response should be User, but it is " + retrived_thread[0]["variant"] + "."
+    assert retrived_thread[1]["variant"] == "Assistant", "The second variant of the thread with the edited response should be Assistant, but it is " + retrived_thread[1]["variant"] + "."
+    assert retrived_thread[2]["variant"] == "Assistant", "The third variant of the thread with the edited response should be Assistant, but it is " + retrived_thread[2]["variant"] + "."
 
-def test_edit_input_with_code():
-    ''' If the frontend sends an edit request with code, does the backend handle it correctly? ''' # Since Version 1.10.3
-    # Because the backend has python pickles to store the variables, it should be able to handle edits with code.
-    
-    # We'll do the same setup as in previous tests for persistant; so one request to set a variable, a test request to check the variable, and then an edit request to change the variable.
-    response1 = generate_full_response("Please assign the value 42 to the variable x in the code_interpreter tool. After that, call the tool with the code \"print(x, flush=True)\", without assigning x again. It's a test for the presistance of data.", chatbot="gpt-4o-mini")
-    # The code output should now contain 42
-    assert any("42" in i for i in response1.codeoutput_variants)
-    assert len(response1.code_variants) == 2, "The code variants should contain two variants, one for the assignment of x and one for the print statement."
-
-    response2 = generate_full_response("Now print the value of x without assigning it again.", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
-    # The code output should now contain 42
-    assert any("42" in i for i in response2.codeoutput_variants)
-    assert all("x=" not in i for i in response2.code_variants), "The code variants should not contain the assignment of x, as it was already assigned in the first request."
-
-    # Now we can edit the second request to the same input, but in a different thread, to test whether the value of x is still stored.
-    response3 = generate_full_response("Now print the value of x without assigning it again.", chatbot="gpt-4o-mini", thread_id=response1.thread_id, edit_at=["User", "Code", "CodeOutput", "Code", "CodeOutput"])
-    # The code output should now contain 42 again, as the value of x should still be stored.
-    assert any("42" in i for i in response3.codeoutput_variants), "The code output should contain 42, as the value of x should still be stored, but it does not. Instead, it returned: " + ", ".join(response3.codeoutput_variants) 
-    assert all("x=" not in i for i in response3.code_variants), "The code variants should not contain the assignment of x, as it was already assigned in the first request and should still be stored. Instead, it returned: " + ", ".join(response3.code_variants)
-    
-
-def test_edit_input():
-    ''' Can the backend handle edits to the user input? ''' # Since Version 1.10.3
-    # For the EVE demonstration, we want the capability to edit a past user input.
-    # This is a test for whether the backend can handle that.
-    response1 = generate_full_response("Hi, I'm Sebastian! Who are you?", chatbot="gpt-4o-mini") # Give it my name, to later test whether it remembers it.
-    # The response content doesn't matter yet.
-    response2 = generate_full_response("Nice to meet you! I've heard about the DKRZ and am a student of the university of Hamburg. Where is the DKRZ located?", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
-    
-    # Now we can edit the second request to run the test. 
-    # The LLM should have remembered my name, but not the fact that I am a student of the university of Hamburg.
-    response3 = generate_full_response("Thank you. This is a test for the functionality to edit existing requests. What do you know about me?", chatbot="gpt-4o-mini", thread_id=response1.thread_id, edit_at=["User", "Assistant"])
-    # The response should contain my name, but not the fact that I am a student of the university of Hamburg.
-    assert "sebastian" in "".join(response3.assistant_variants).lower(), "Assistant did not remember my name! Instead, it returned: " + ", ".join(response3.assistant_variants)
-    assert "student" not in "".join(response3.assistant_variants).lower(), "Assistant remembered the fact that I am a student of the university of Hamburg, but it should not have"
-    assert "university of hamburg" not in "".join(response3.assistant_variants).lower(), "Assistant remembered the fact that I am a student of the university of Hamburg, but it should not have"
-
-    # Additionally, the new response needs to have a different thread_id, so we can test that.
-    assert response3.thread_id != response1.thread_id, "The thread_id of the edited response is the same as the original response! It should be different, so that the frontend can handle it correctly."
-
-    # And that new thread_id should also be stored in the database, so we can test that.
-    # We know what it should contain.
-    retrived_thread = get_thread_by_id(response3.thread_id)
-    assert retrived_thread, "The thread with the edited response was not found in the database! It should have been stored, so that the frontend can handle it correctly."
-    print("retrived_thread: ", retrived_thread)
-    
-    # There may be some other variants in the thread still, so we only keep those that are User or Assistant.
-    retrived_thread = [i for i in retrived_thread if i["variant"] in ["User", "Assistant"]]
-    # Now we can check the length of the thread.
-    # There should be 4 variants in total, the first and third should be User, and the second and fourth should be Assistant.
-    # The first variant is the User input, the second variant is the Assistant response, the third variant is the User edit, and the fourth variant is the Assistant response to the edit.
-
-    assert len(retrived_thread) == 4, "The thread with the edited response should have 4 variants, but it has " + str(len(retrived_thread)) + "."
-    # The first and third variants should be User, and the second and fourth variants should be Assistant.
-    assert retrived_thread[0]["variant"] == retrived_thread[2]["variant"] == "User", "The first and third variants of the thread with the edited response should be User, but they are not."
-    assert retrived_thread[1]["variant"] == retrived_thread[3]["variant"] == "Assistant", "The second and fourth variants of the thread with the edited response should be Assistant, but they are not."
+    # Additionally, the content of the user variant is known and should be checked.
+    assert retrived_thread[0]["content"] == "Hi, I'm Sebastian! Who are you?", "The content of the first variant of the thread with the edited response is not correct! It should be \"Hi, I'm Sebastian! Who are you?\", but it is \"" + retrived_thread[0]["content"] + "\"."
+    # The content of the second and third variants is not known, so we won't check them. 
     
 
 def test_edit_input_with_code():

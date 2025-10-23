@@ -229,6 +229,10 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     // The user may want to edit an existing thread, so we need to retrieve the potential existing varints from the qstring.
     let past_variants_from_frontend = qstring.get("chatvariants");
 
+    // For the same use case, also maybe record the starting variants, which we might need to send to the client.
+    // (The frontend should get the entire thread, not just the new stuff.)
+    let mut starting_variants: Option<Vec<StreamVariant>> = None;
+
     let messages = if create_new {
         // The thread should not be new if there are past variants from the frontend.
         if past_variants_from_frontend.is_some() {
@@ -313,6 +317,21 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
                     user_id.clone(),
                 );
 
+                // We also need to send them to the stream, so we'll save them to starting_variants.
+                // However, in this case, the user gets the past variants in the same stream as the actual stream,
+                // So there is no delimiter. The frontend would be able to handle that, but as per the protocol, consecutive assistant variants are to be joined.
+                // So if the past variants end with an assistant message, and the new stream starts with an assistant message, they should be joined, which would confuse the user.
+                // This is why a single ServerHint with the new thread_id is sent before the past variants.
+                // (If an edit is done, the Serverhint with the thread_id is not sent at the very start, but between the past variants and the new stream.)
+                let server_hint =
+                    StreamVariant::ServerHint(format!("{{\"thread_id\": \"{thread_id}\"}}"));
+                // let new_content_and_server_hint = std::iter::once(server_hint)
+                //     .chain(new_content.clone().into_iter())
+                //     .collect();
+                let mut new_content_and_server_hint = new_content.clone();
+                new_content_and_server_hint.push(server_hint);
+                starting_variants = Some(new_content_and_server_hint);
+
                 new_content
             }
         };
@@ -360,6 +379,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         chatbot,
         user_id,
         database,
+        starting_variants,
     )
     .await
 }
@@ -423,6 +443,7 @@ async fn create_and_stream(
     chatbot: AvailableChatbots,
     user_id: String,
     database: Database,
+    starting_variants: Option<Vec<StreamVariant>>,
 ) -> actix_web::HttpResponse {
     let open_ai_stream = match LITE_LLM_CLIENT.chat().create_stream(request).await {
         Ok(stream) => stream.fuse(), // Fuse the stream so calling next() will return None after the stream ends instead of blocking.
@@ -433,17 +454,27 @@ async fn create_and_stream(
         }
     };
 
+    // If the starting_variants is Some, they will contain the new thread_id already.
+    let should_hint_thread_id = starting_variants.is_none();
+
+    // The variant_queue of the unfold state requires a VecDeque, but we have an Option<Vec<StreamVariant>> of variants to send if the user edited their input
+    // (They get the previous content to make sure they actually see it).
+    let variant_queue = match starting_variants {
+        None => VecDeque::new(),
+        Some(variants) => variants.into(),
+    };
+
     trace!("Stream created!");
     let out_stream = stream::unfold(
         (
             open_ai_stream, // the stream from the OpenAI client
             thread_id,
-            false,           // whether the stream should stop
-            true,            // whether the stream should hint the thread_id
-            VecDeque::new(), // the queue of variants to send
-            None,            // The tool name, if it was called
-            String::new(),   // the tool arguments,
-            String::new(),   // the tool id
+            false,                 // whether the stream should stop
+            should_hint_thread_id, // whether the stream should hint the thread_id
+            variant_queue,         // the queue of variants to send
+            None,                  // The tool name, if it was called
+            String::new(),         // the tool arguments,
+            String::new(),         // the tool id
             Cell::new(None), // the content of a llama tool call (See https://github.com/ollama/ollama/issues/5796 for why this needs to be done manually)
             None::<(mpsc::Receiver<Vec<StreamVariant>>, JoinHandle<()>)>, // the reciever for the tool call and the join handle for the tool call
         ),
