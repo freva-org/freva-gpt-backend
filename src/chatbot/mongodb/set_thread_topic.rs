@@ -2,7 +2,10 @@ use actix_web::{HttpRequest, Responder};
 use documented::docs_const;
 use tracing::{debug, trace, warn};
 
-use crate::chatbot::mongodb::mongodb_storage::{get_database, update_topic};
+use crate::{
+    auth::get_first_matching_field,
+    chatbot::mongodb::mongodb_storage::{get_database, update_topic},
+};
 
 /// # set_thread_topic
 /// Takes in the thread ID and the new topic
@@ -25,19 +28,14 @@ pub async fn set_thread_topic(req: HttpRequest) -> impl Responder {
     let user_id = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Retrieve the arguments to the request
-    let thread_id = qstring
-        .get("thread_id")
-        .or_else(|| headers.get("thread_id").and_then(|h| h.to_str().ok()))
-        .unwrap_or_default();
-    let new_topic = qstring
-        .get("topic")
-        .or_else(|| qstring.get("new_topic"))
-        .or_else(|| {
-            headers
-                .get("topic")
-                .and_then(|h| h.to_str().ok())
-                .or_else(|| headers.get("new_topic").and_then(|h| h.to_str().ok()))
-        });
+    let thread_id = get_first_matching_field(
+        &qstring,
+        headers,
+        &["thread_id", "thread-id", "x-thread-id"],
+        false,
+    )
+    .unwrap_or_default();
+    let new_topic = get_first_matching_field(&qstring, headers, &["topic", "new_topic"], false);
 
     let Some(new_topic) = new_topic else {
         warn!("User tried to set thread topic without providing a new topic");

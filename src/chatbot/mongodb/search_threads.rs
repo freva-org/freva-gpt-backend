@@ -2,7 +2,10 @@ use actix_web::{HttpRequest, HttpResponse, Responder};
 use documented::docs_const;
 use tracing::{debug, warn};
 
-use crate::chatbot::mongodb::mongodb_storage::{get_database, query_by_topic, query_by_variant};
+use crate::{
+    auth::get_first_matching_field,
+    chatbot::mongodb::mongodb_storage::{get_database, query_by_topic, query_by_variant},
+};
 
 /// Searches the threads in the database by a given user ID.
 /// Supports specifying how many results should be used and pagination.
@@ -23,9 +26,12 @@ pub async fn search_threads(req: HttpRequest) -> impl Responder {
     let user_id = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Now the query
-    let query = qstring
-        .get("query")
-        .or_else(|| headers.get("query").and_then(|h| h.to_str().ok()));
+    let query = get_first_matching_field(
+        &qstring,
+        headers,
+        &["query", "search", "search_query", "search-query", "q"],
+        false,
+    );
 
     let Some(query) = query else {
         warn!("Failed to get query");
@@ -61,15 +67,23 @@ pub async fn search_threads(req: HttpRequest) -> impl Responder {
         }
     };
 
-    // Get the num_threads and page
-    let num_threads = qstring
-        .get("num_threads")
-        .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(10);
-    let page = qstring
-        .get("page")
-        .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(0);
+    let num_threads = match get_first_matching_field(
+        &qstring,
+        headers,
+        &["num_threads", "num-threads", "n_threads", "n-threads", "n"],
+        false,
+    ) {
+        Some(n) => {
+            debug!("Parsed num_threads: {}", n);
+            n.parse::<u32>().unwrap_or(10)
+        }
+        None => 10,
+    };
+
+    let page = match get_first_matching_field(&qstring, headers, &["page"], false) {
+        Some(p) => p.parse::<u32>().unwrap_or(0),
+        None => 0,
+    };
 
     // We need to get the database before we can query.
     let maybe_vault_url = headers

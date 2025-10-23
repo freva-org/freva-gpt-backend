@@ -226,8 +226,13 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         thread_id, input
     );
 
-    // The user may want to edit an existing thread, so we need to retrieve the potential existing varints from the qstring.
-    let past_variants_from_frontend = qstring.get("chatvariants");
+    // The user may want to edit an existing thread, so we need to retrieve the potential existing variants from the qstring.
+    let past_variants_from_frontend = get_first_matching_field(
+        &qstring,
+        headers,
+        &["chatvariants", "chat_variants", "edit", "edit_variants"],
+        false,
+    );
 
     // For the same use case, also maybe record the starting variants, which we might need to send to the client.
     // (The frontend should get the entire thread, not just the new stuff.)
