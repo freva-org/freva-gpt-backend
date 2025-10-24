@@ -2,6 +2,7 @@ use std::ffi::CString;
 use std::io::Write;
 
 use base64::Engine;
+use pyo3::exceptions::PyBaseException;
 use pyo3::types::{PyDict, PyTuple};
 use pyo3::{prelude::*, types::PyList};
 use tracing::{debug, info, trace, warn};
@@ -408,6 +409,11 @@ fn try_read_locals(py: Python, thread_id: Option<String>) -> Option<Bound<PyDict
     let thread_id = thread_id?; // Unwrap the thread_id.
     let pickleable_path = format!("python_pickles/{thread_id}.pickle");
 
+    debug!(
+        "Trying to read locals from pickle file: {}",
+        pickleable_path
+    );
+
     // Check if pickled files exist
     if !std::path::Path::new(&pickleable_path).exists() {
         return None;
@@ -419,6 +425,8 @@ fn try_read_locals(py: Python, thread_id: Option<String>) -> Option<Bound<PyDict
 
 loaded_vars = []
 
+maybe_error = None
+
 # Load picklable variables
 with open('{pickleable_path}', 'rb') as f:
     # We load all variables from the file.
@@ -429,6 +437,11 @@ with open('{pickleable_path}', 'rb') as f:
             loaded_vars.append(var)
         except EOFError:
             break # We reached the end of the file, so we can stop loading variables.
+        except TypeError as e:
+            # Cartopy has a weird bug with deepcopy, so we need to catch this error: https://github.com/SciTools/cartopy/issues/2571
+            # Note that, because the loading itself fails, dill doesn't advance the file pointer, so we cannot just continue loading.
+            maybe_error = e
+            break
 
 # Now, if there is not exactly one variable, we assume that they are all locals.
 if len(loaded_vars) == 1:
@@ -445,9 +458,34 @@ else:
     .expect("Constant CString failed conversion");
     let temp_locals = PyDict::new(py);
 
+    debug!("Running code to load locals from pickle file.");
+
     // Run the code; if it doesn't work, we'll just return None.
-    py.run(&code, Some(&PyDict::new(py)), Some(&temp_locals))
-        .ok()?;
+    match py.run(&code, Some(&PyDict::new(py)), Some(&temp_locals)) {
+        Ok(()) => {
+            trace!("Successfully loaded locals from pickle file.");
+        }
+        Err(e) => {
+            warn!("Error loading locals from pickle file: {:?}", e);
+            debug!("Formatted error: {}", format_pyerr(&e, py));
+            return None;
+        }
+    }
+
+    debug!("Extracting loaded_vars from temporary locals.");
+
+    // Check if it ended with an error and report that.
+    match temp_locals.get_item("maybe_error").ok().flatten() {
+        Some(e) => {
+            // Sadly, PyErr cannot be type checked (???), so we'll just print the string representation.
+            let err_str = e.to_string();
+            warn!("Error loading some variables from pickle file: {}", err_str);
+            debug!("Continuing with found locals, ignoring the error.");
+        }
+        None => {
+            // No error, continue.
+        }
+    }
 
     // Now we have the loaded_vars in the locals.
     // We have to load that into the locals in rust, so we can use it.
@@ -469,6 +507,12 @@ else:
 fn save_to_pickle_file(py: Python, locals: &Bound<PyDict>, thread_id: &str) {
     trace!("Saving the locals to a pickle file.");
 
+    // Debug: print all the locals
+    let keys = locals.keys();
+    for k in keys {
+        trace!("Local variable before pickling: {:?}", k);
+    }
+
     // We want to save the result of databrowser searches, but they are unpickleable.
     // By default, they contain metadata besides the result, which can be useful.
     // I couldn't find a way to keep the metadata, but the results can simply be extracted by running it through a list().
@@ -479,6 +523,7 @@ fn save_to_pickle_file(py: Python, locals: &Bound<PyDict>, thread_id: &str) {
         r"import dill # like pickle, but can handle >2GB variables
 from types import ModuleType
 import freva_client
+import inspect
 
 local_items = locals().copy()
 pickleable_vars = {{}}
@@ -494,6 +539,14 @@ for key, value in local_items.items():
             # We cannot store it as a databrowser result, but we can store it as a list
             pickleable_vars[key] = list(value)
             continue # We don't want to store it twice
+
+        # Avoid pickling matplotlib objects (Axes, Figure, etc.)
+        mod = inspect.getmodule(value.__class__)
+        if 'matplotlib' in str(mod): # Convert to string for substring check
+            # mark as unpickleable so we skip dumping it
+            unpickleable_vars[key] = [None, value]
+            continue
+        
         dill.dumps(value)
         pickleable_vars[key] = value
     except Exception as e:
