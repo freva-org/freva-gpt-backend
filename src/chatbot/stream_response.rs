@@ -18,21 +18,26 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    auth::is_guest,
+    auth::{get_first_matching_field, is_guest},
     chatbot::{
         available_chatbots::{
-            model_ends_on_no_choice, model_supports_images, OpenAIModels, DEFAULTCHATBOT,
+            model_ends_on_no_choice, model_is_gpt_5, model_is_reasoning, model_supports_images,
+            DEFAULTCHATBOT,
         },
+        filter_variants::filter_variants,
         handle_active_conversations::{
             add_to_conversation, conversation_state, end_conversation, get_conversation,
-            new_conversation_id, save_and_remove_conversation,
+            new_conversation_id, save_and_remove_conversation, switch_to_new_thread_id,
         },
         heartbeat::heartbeat_content,
-        mongodb_storage::get_database,
-        prompting::{get_entire_prompt, get_entire_prompt_json},
-        select_client,
+        mongodb::mongodb_storage::get_database,
+        prompting::{
+            get_entire_prompt, get_entire_prompt_gpt_5, get_entire_prompt_json,
+            get_entire_prompt_json_gpt_5,
+        },
         storage_router::read_thread,
         types::{help_convert_sv_ccrm, ConversationState, StreamVariant},
+        LITE_LLM_CLIENT,
     },
     logging::{silence_logger, undo_silence_logger},
     tool_calls::{all_tools, code_interpreter::verify_can_access, route_call::route_call},
@@ -41,9 +46,12 @@ use crate::{
 use super::{available_chatbots::AvailableChatbots, handle_active_conversations::generate_id};
 
 /// # Stream Response
-/// Takes in a thread_id, an input, a path to the freva_config file path, an auth_key, the user_id and a chatbot and returns a stream of StreamVariants and their content.
-/// All parameters can be sent via query parameters, but input, freva_config (as X-Freva-ConfigPath) and auth_key (In Authorization bearer format) are also accepted as headers.
+/// Takes in a thread_id, an input, a path to the freva_config file path, a URL to the vault and a chatbot and returns a stream of StreamVariants and their content. Requires Authentication.
 /// If the Authorization with header token via OpenIDConnect succeeds, that username is used.
+/// All parameters can be sent via query parameters or headers (for example X-Freva-ConfigPath, X-freva-Vault-URL and auth_key in Authorization bearer format).
+///
+/// Note that sending an auth_key that matches with the environment variable is currently disabled, but will be re-enabled in the future.
+/// Please consider sending it already, as it will be required in the future.
 ///
 /// The thread_id is the unique identifier for the thread, given to the client when the stream started in a ServerHint variant.
 /// If it's empty or not given, a new thread is created.
@@ -58,14 +66,19 @@ use super::{available_chatbots::AvailableChatbots, handle_active_conversations::
 /// The stream always ends with a StreamEnd event, unless a server error occurs.
 ///
 /// A usual stream consists mostly of Assistant messages many times a second. This is to give the impression of a real-time conversation.
+/// Because code execution might lead to a long period of silence, Heartbeat events (ServerHint) are sent every five seconds.
 ///
-/// If the input is not given, a BadRequest response is returned.
+/// If the authorization fails, an Unauthorized response is returned.
+/// If the authorization succeeds but the user could not determined, an UnprocessableEntity response is returned.
+/// If the authorization succeeds, but the user is considered a guest, an Unauthorized response is returned.
 ///
-/// If the auth_key is not given or does not match the one on the backend, an Unauthorized response is returned.
+/// If the input is not given, an UnprocessableEntity response is returned.
 ///
-/// If the thread_id is blank but does not point to an existing thread, an InternalServerError response is returned.
+/// If the vault URL is not given, an UnprocessableEntity response is returned.
 ///
 /// If the thread_id is already being streamed, a Conflict response is returned.
+///
+/// If the chatbot is not valid, an UnprocessableEntity response is returned.
 ///
 /// If the stream fails due to something else on the backend, an InternalServerError response is returned.
 #[docs_const]
@@ -74,52 +87,24 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     let headers = req.headers();
 
     trace!("Query string: {:?}", qstring);
-    trace!("Headers: {:?}", headers);
+    // trace!("Headers: {:?}", headers);
 
     // First try to authorize the user.
-    let maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
+    let user_id = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID and input from the request's query parameters.
-    let (thread_id, create_new) = match qstring.get("thread_id") {
+    let (mut thread_id, create_new) = match get_first_matching_field(
+        &qstring,
+        headers,
+        &["thread_id", "x-thread-id", "thread-id"],
+        false,
+    ) {
         None | Some("") => {
             // If the thread ID is empty, we'll create a new thread.
             debug!("Creating a new thread.");
             (new_conversation_id(), true)
         }
         Some(thread_id) => (thread_id.to_string(), false),
-    };
-
-    // New in Version 1.9.1: require the user_id to be set.
-    // Later, proper authentication will take over.
-    let user_id = match maybe_username {
-        Some(username) => {
-            // If the user is authenticated, we'll use their username as the user_id.
-            debug!(
-                "User is authenticated, using their username as user_id: {}",
-                username
-            );
-            username
-        }
-        None => {
-            match qstring.get("user_id") {
-                None | Some("") => {
-                    // If the user ID is not found, we'll return a 400
-                    warn!("The User requested a stream without a user_id.");
-                    // For convenience, we'll also return the list of recieved parameters.
-                    let query_parameter_keys = qstring
-                        .to_pairs()
-                        .iter()
-                        .map(|(key, _)| *key)
-                        .collect::<Vec<_>>()
-                        .join(", ");
-
-                    return HttpResponse::UnprocessableEntity().body(
-                        "User ID not found. Please provide a non-empty user_id in the query parameters.\nHint: The following query parameters were received: ".to_string() + &query_parameter_keys,
-                    );
-                }
-                Some(user_id) => user_id.to_string(),
-            }
-        }
     };
 
     // Martin doesn't want the guests to be able to use the chatbot, so we'll check if the user is considered a guest.
@@ -132,30 +117,13 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         return HttpResponse::Unauthorized().body("You are not allowed to use the chatbot as a guest. Please log in with a Levante account.");
     }
 
-    let header_input = headers.get("input");
-    let input = match qstring.get("input") {
+    let input = match get_first_matching_field(&qstring, headers, &["input", "x-input"], false) {
         None | Some("") => {
-            // The input may instead be inside the header.
-            if let Some(header_input) = header_input {
-                debug!(
-                    "Using header input because parameter input is empty: {:?}",
-                    header_input
-                );
-                // If the header is not empty, we'll use it as the input.
-                match header_input.to_str() {
-                    Ok(input) => input.to_string(),
-                    Err(e) => {
-                        warn!("Error converting header input to string: {:?}", e);
-                        return HttpResponse::UnprocessableEntity().body("Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.");
-                    }
-                }
-            } else {
-                // If the input is not found (neither in header nor parameters), we'll return a 422
-                warn!("The User requested a stream without an input.");
-                return HttpResponse::UnprocessableEntity().body(
+            // If the input is not found (neither in header nor parameters), we'll return a 422
+            warn!("The User requested a stream without an input.");
+            return HttpResponse::UnprocessableEntity().body(
                     "Input not found. Please provide a non-empty input in the query parameters or the headers, of type String.",
                 );
-            }
         }
         Some(input) => input.to_string(),
     };
@@ -163,9 +131,18 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     debug!("Thread ID: {}, Input: {}", thread_id, input);
 
     // First try to get the vault_url from the headers, if it is not set, we'll have to tell the user that we now need it.
-    let maybe_vault_url = headers
-        .get("x-freva-vault-url")
-        .and_then(|h| h.to_str().ok());
+    let maybe_vault_url = get_first_matching_field(
+        &qstring,
+        headers,
+        &[
+            "x-freva-vault-url",
+            "x-vault-url",
+            "vault-url",
+            "vault_url",
+            "freva_vault_url",
+        ],
+        true,
+    );
 
     let Some(vault_url) = maybe_vault_url else {
         warn!("The User requested a stream without a vault URL.");
@@ -199,30 +176,22 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
 
     // We also require the freva_config_path to be set. From the frontend, it's called "freva_config".
     // It can also be send via headers, there it is called "X-Freva-ConfigPath".
-    let freva_config_path = match qstring
-        .get("freva_config")
-        .or_else(|| qstring.get("freva-config"))
-    {
+    let freva_config_path = match get_first_matching_field(
+        &qstring,
+        headers,
+        &[
+            "freva_config",
+            "freva-config",
+            "x-freva-config",
+            "x-freva-configpath",
+        ],
+        false,
+    ) {
         // allow both freva_config and freva-config
         None | Some("") => {
-            // If the freva_config is not found in the parameters, we'll check the headers.
-            if let Some(header_val) = headers.get("X-Freva-ConfigPath") {
-                if let Ok(header_val) = header_val.to_str() {
-                    debug!(
-                        "Using header freva_config because parameter freva_config is empty: {:?}",
-                        header_val
-                    );
-                    header_val.to_string()
-                } else {
-                    warn!("The User requested a stream without a freva_config path being set.");
-                    // FIXME: remove this temporary fix
-                    "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
-                }
-            } else {
-                warn!("The User requested a stream without a freva_config path being set.");
-                // FIXME: remove this temporary fix
-                "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
-            }
+            warn!("The User requested a stream without a freva_config path being set.");
+            // FIXME: remove this temporary fix
+            "/work/ch1187/clint/nextgems/freva/evaluation_system.conf".to_string()
         }
         Some(freva_config_path) => freva_config_path.to_string(),
     };
@@ -233,15 +202,20 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     }
 
     // Set chatbot to the one the user requested or the default one.
-    let chatbot = match qstring.get("chatbot") {
+    let chatbot = match get_first_matching_field(
+        &qstring,
+        headers,
+        &["chatbot", "x-chatbot"],
+        false,
+    ) {
         None | Some("") => {
             debug!("Using default chatbot as user didn't supply one.");
-            DEFAULTCHATBOT
+            DEFAULTCHATBOT.clone()
         }
-        Some(chatbot) => match String::try_into(chatbot.to_owned()) {
+        Some(chatbot) => match String::try_into((*chatbot).to_owned()) {
             Ok(chatbot) => chatbot,
-            Err(e) => {
-                warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", e);
+            Err(()) => {
+                warn!("Error converting chatbot to string, user requested chatbot that is not available: {:?}", chatbot);
                 return HttpResponse::UnprocessableEntity().body("Chatbot not found. Consult the /availablechatbots endpoint for available chatbots.");
             }
         },
@@ -252,15 +226,41 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         thread_id, input
     );
 
+    // The user may want to edit an existing thread, so we need to retrieve the potential existing variants from the qstring.
+    let past_variants_from_frontend = get_first_matching_field(
+        &qstring,
+        headers,
+        &["chatvariants", "chat_variants", "edit", "edit_variants"],
+        false,
+    );
+
+    // For the same use case, also maybe record the starting variants, which we might need to send to the client.
+    // (The frontend should get the entire thread, not just the new stuff.)
+    let mut starting_variants: Option<Vec<StreamVariant>> = None;
+
     let messages = if create_new {
+        // The thread should not be new if there are past variants from the frontend.
+        if past_variants_from_frontend.is_some() {
+            warn!("The User requested a new thread, but also provided past variants. The expected protocol between frontend and backend is likely mismatched. The past variants will be ignored.");
+        }
+
         // If the thread is new, we'll start with the base messages and the user's input.
-        let mut base_message: Vec<ChatCompletionRequestMessage> =
-            get_entire_prompt(&user_id, &thread_id);
+        let mut base_message: Vec<ChatCompletionRequestMessage> = if model_is_gpt_5(chatbot.clone())
+        {
+            get_entire_prompt_gpt_5(&user_id, &thread_id)
+        } else {
+            get_entire_prompt(&user_id, &thread_id)
+        };
 
         trace!("Adding base message to stream.");
 
-        let entire_prompt = get_entire_prompt_json(&user_id, &thread_id);
+        let entire_prompt = if model_is_gpt_5(chatbot.clone()) {
+            get_entire_prompt_json_gpt_5(&user_id, &thread_id)
+        } else {
+            get_entire_prompt_json(&user_id, &thread_id)
+        };
 
+        // We need to also store the prompt, which we do in JSON to avoid conversion issues here.
         let starting_prompt = StreamVariant::Prompt(entire_prompt);
         add_to_conversation(
             &thread_id,
@@ -289,8 +289,61 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
             }
         };
 
+        // If there are some past variants from the frontend, we'll filter the content to instead start from a past point in time.
+        let content = match past_variants_from_frontend {
+            None | Some("") => {
+                debug!("No past variants from frontend, using all content.");
+                content
+            }
+            Some(past_variants) => {
+                debug!(
+                    "Filtering content with past variants from frontend: {}",
+                    past_variants
+                );
+                let new_content = match filter_variants(past_variants, content.clone()) {
+                    Ok(new_content) => new_content,
+                    Err(e) => {
+                        error!("Error filtering variants from frontend, the format was likely misunderstood: {:?}", e);
+                        return HttpResponse::UnprocessableEntity()
+                            .body(format!("Error filtering variants: {e}"));
+                    }
+                };
+
+                // If we succeed to find the past variants, we'll also need to send a new ServerHint with the thread_id.
+                // We'll simply have to set the thread_id to a new one.
+                thread_id = switch_to_new_thread_id(&thread_id);
+                debug!("Switched to new thread_id: {}", thread_id);
+
+                // In order for them to be saved to the new conversation, they need to be added to the conversation.
+                add_to_conversation(
+                    &thread_id,
+                    new_content.clone(),
+                    freva_config_path.clone(),
+                    user_id.clone(),
+                );
+
+                // We also need to send them to the stream, so we'll save them to starting_variants.
+                // However, in this case, the user gets the past variants in the same stream as the actual stream,
+                // So there is no delimiter. The frontend would be able to handle that, but as per the protocol, consecutive assistant variants are to be joined.
+                // So if the past variants end with an assistant message, and the new stream starts with an assistant message, they should be joined, which would confuse the user.
+                // This is why a single ServerHint with the new thread_id is sent before the past variants.
+                // (If an edit is done, the Serverhint with the thread_id is not sent at the very start, but between the past variants and the new stream.)
+                let server_hint =
+                    StreamVariant::ServerHint(format!("{{\"thread_id\": \"{thread_id}\"}}"));
+                // let new_content_and_server_hint = std::iter::once(server_hint)
+                //     .chain(new_content.clone().into_iter())
+                //     .collect();
+                let mut new_content_and_server_hint = new_content.clone();
+                new_content_and_server_hint.push(server_hint);
+                starting_variants = Some(new_content_and_server_hint);
+
+                new_content
+            }
+        };
+
         // We have a Vec of StreamVariant, but we want a Vec of ChatCompletionRequestMessage.
-        let mut past_messages = help_convert_sv_ccrm(content, model_supports_images(chatbot));
+        let mut past_messages =
+            help_convert_sv_ccrm(content, model_supports_images(chatbot.clone()));
         let user_message = ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
             name: Some("user".to_string()),
             content: async_openai::types::ChatCompletionRequestUserMessageContent::Text(
@@ -314,7 +367,8 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         user_id.clone(),
     );
 
-    let request: CreateChatCompletionRequest = match build_request(messages, chatbot).await {
+    let request: CreateChatCompletionRequest = match build_request(messages, chatbot.clone()).await
+    {
         Ok(request) => {
             trace!("Request built successfully: {request:?}");
             request
@@ -334,6 +388,7 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         chatbot,
         user_id,
         database,
+        starting_variants,
     )
     .await
 }
@@ -352,7 +407,7 @@ async fn build_request(
 
     let mut default_args = CreateChatCompletionRequestArgs::default(); // If the partial_request would be set to default here, the lifetime would be too short.
     let mut partial_request = default_args
-        .model(String::from(chatbot))
+        .model(String::from(chatbot.clone()))
         .n(1)
         .messages(messages)
         .stream(true)
@@ -362,17 +417,14 @@ async fn build_request(
             include_usage: true,
         });
 
-    match chatbot {
-        AvailableChatbots::OpenAI(OpenAIModels::o1_mini | OpenAIModels::o3_mini) => {
-            partial_request = partial_request.max_completion_tokens(16000u32); // The max tokens parameter is called differently for the reasoning models.
-        }
-        _ => {
-            partial_request = partial_request
-                .parallel_tool_calls(false) // No parallel tool calls!
-                .temperature(0.4) // The model shouldn't be too creative, but also not too boring.
-                .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
-                .max_tokens(16000u32);
-        }
+    if model_is_reasoning(chatbot) {
+        partial_request = partial_request.max_completion_tokens(16000u32); // The max tokens parameter is called differently for the reasoning models.
+    } else {
+        partial_request = partial_request
+            .parallel_tool_calls(false) // No parallel tool calls!
+            .temperature(0.4) // The model shouldn't be too creative, but also not too boring.
+            .frequency_penalty(0.1) // The chatbot sometimes repeats the empty string endlessly, so we'll try to prevent that.
+            .max_tokens(16000u32);
     }
 
     partial_request.build()
@@ -400,13 +452,9 @@ async fn create_and_stream(
     chatbot: AvailableChatbots,
     user_id: String,
     database: Database,
+    starting_variants: Option<Vec<StreamVariant>>,
 ) -> actix_web::HttpResponse {
-    let open_ai_stream = match select_client(chatbot)
-        .await
-        .chat()
-        .create_stream(request)
-        .await
-    {
+    let open_ai_stream = match LITE_LLM_CLIENT.chat().create_stream(request).await {
         Ok(stream) => stream.fuse(), // Fuse the stream so calling next() will return None after the stream ends instead of blocking.
         Err(e) => {
             // If we can't create the stream, we'll return a generic error.
@@ -415,17 +463,27 @@ async fn create_and_stream(
         }
     };
 
+    // If the starting_variants is Some, they will contain the new thread_id already.
+    let should_hint_thread_id = starting_variants.is_none();
+
+    // The variant_queue of the unfold state requires a VecDeque, but we have an Option<Vec<StreamVariant>> of variants to send if the user edited their input
+    // (They get the previous content to make sure they actually see it).
+    let variant_queue = match starting_variants {
+        None => VecDeque::new(),
+        Some(variants) => variants.into(),
+    };
+
     trace!("Stream created!");
     let out_stream = stream::unfold(
         (
             open_ai_stream, // the stream from the OpenAI client
             thread_id,
-            false,           // whether the stream should stop
-            true,            // whether the stream should hint the thread_id
-            VecDeque::new(), // the queue of variants to send
-            None,            // The tool name, if it was called
-            String::new(),   // the tool arguments,
-            String::new(),   // the tool id
+            false,                 // whether the stream should stop
+            should_hint_thread_id, // whether the stream should hint the thread_id
+            variant_queue,         // the queue of variants to send
+            None,                  // The tool name, if it was called
+            String::new(),         // the tool arguments,
+            String::new(),         // the tool id
             Cell::new(None), // the content of a llama tool call (See https://github.com/ollama/ollama/issues/5796 for why this needs to be done manually)
             None::<(mpsc::Receiver<Vec<StreamVariant>>, JoinHandle<()>)>, // the reciever for the tool call and the join handle for the tool call
         ),
@@ -441,10 +499,11 @@ async fn create_and_stream(
             mut llama_tool_call_content,
             mut reciever,
         )| {
-            // It is required to clone the freva_config_path, because it is moved into the closure. Same with the user_id. And the database.
+            // It is required to clone the freva_config_path, because it is moved into the closure. Same with the user_id. And the database. And now the chatbot.
             let freva_config_path_clone = freva_config_path.clone();
             let user_id = user_id.clone();
             let database = database.clone();
+            let chatbot = chatbot.clone();
             async move {
                 // Even higher priority than stopping the stream is sending the thread_id hint.
                 if should_hint_thread_id {
@@ -1040,7 +1099,7 @@ async fn oai_stream_to_variants(
                 }
             } else {
                 // Some models (specifically some of the qwen family, have the tendency to not return any choices to mark the end of the stream.)
-                if model_ends_on_no_choice(chatbot) {
+                if model_ends_on_no_choice(chatbot.clone()) {
                     debug!("Qwen-like model ended stream without choice, simulating stop event.");
                     // Differentiatie between a tool call and a standard stop by the tool arguments and tool name.
                     let finish_reason = if !tool_arguments.is_empty() && tool_name.is_some() {
@@ -1080,35 +1139,37 @@ async fn oai_stream_to_variants(
         None => {
             // The llama chatbot sometimes forgets to write </tool_call> at the end of the tool call.
             // If it's not an openAI chatbot, check whether we can get some tool call from the running tool.
-            if matches!(chatbot, AvailableChatbots::Ollama(_)) {
-                // Try to get the tool call from the running tool.
-                let tool_call = try_extract_tool_call(
-                    &llama_tool_call_content
-                        .take()
-                        .map(|c| c.take())
-                        .unwrap_or_default(),
-                );
-                match tool_call {
-                    None => {
-                        info!("Stream ended abruptly and without error. Ollama just does this, returning streamend.");
-                        vec![StreamVariant::StreamEnd("Ollama Stream ended".to_string())]
-                    }
-                    Some((name, arguments)) => {
-                        // We know it's the code interpreter and can send it as a delta.
-                        trace!("Tool call: {:?} with arguments: {:?}", name, arguments);
-                        vec![
-                            StreamVariant::Code(arguments, generate_id(), name),
-                            StreamVariant::StreamEnd("Ollama Stream ended".to_string()), // We still need to end the stream, because the tool call is done.
-                        ]
-                    }
+            // if matches!(chatbot, AvailableChatbots::Ollama(_)) {
+            // Try to get the tool call from the running tool.
+            let tool_call = try_extract_tool_call(
+                &llama_tool_call_content
+                    .take()
+                    .map(|c| c.take())
+                    .unwrap_or_default(),
+            );
+            match tool_call {
+                None => {
+                    info!("Stream ended abruptly and without error.");
+                    vec![StreamVariant::StreamEnd(
+                        "Stream ended abruptly.".to_string(),
+                    )]
                 }
-            } else {
-                // Else, it's just an abrupt end of the stream.
-                warn!("Stream ended abruptly and without error. This should not happen; returning StreamEnd.");
-                vec![StreamVariant::StreamEnd(
-                    "Stream ended abruptly".to_string(),
-                )]
+                Some((name, arguments)) => {
+                    // We know it's the code interpreter and can send it as a delta.
+                    trace!("Tool call: {:?} with arguments: {:?}", name, arguments);
+                    vec![
+                        StreamVariant::Code(arguments, generate_id(), name),
+                        StreamVariant::StreamEnd("Stream ended".to_string()), // We still need to end the stream, because the tool call is done.
+                    ]
+                }
             }
+            // } else {
+            //     // Else, it's just an abrupt end of the stream.
+            //     warn!("Stream ended abruptly and without error. This should not happen; returning StreamEnd.");
+            //     vec![StreamVariant::StreamEnd(
+            //         "Stream ended abruptly".to_string(),
+            //     )]
+            // }
         }
     }
 }
@@ -1224,7 +1285,7 @@ async fn restart_stream(
 
             // The stream wants a vector of ChatCompletionRequestMessage, so we need to convert the StreamVariants to that.
             let all_oai_messages =
-                help_convert_sv_ccrm(all_messages, model_supports_images(chatbot));
+                help_convert_sv_ccrm(all_messages, model_supports_images(chatbot.clone()));
 
             trace!("All messages: {:?}", all_oai_messages);
 
@@ -1239,12 +1300,7 @@ async fn restart_stream(
                 }
                 Ok(request) => {
                     trace!("Request built successfully: {:?}", request);
-                    match select_client(chatbot)
-                        .await
-                        .chat()
-                        .create_stream(request)
-                        .await
-                    {
+                    match LITE_LLM_CLIENT.chat().create_stream(request).await {
                         Err(e) => {
                             // If we can't create the stream, we'll return a generic error.
                             warn!("Error creating stream: {:?}", e);

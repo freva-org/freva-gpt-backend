@@ -289,7 +289,7 @@ async fn retrieve_previous_code_interpreter_imports_and_images(
     this_conversation.extend(past_conversation);
 
     let mut imports = Vec::<String>::new();
-    for variant in this_conversation {
+    for variant in this_conversation.clone() {
         if let StreamVariant::Code(code, _, name) = variant {
             if name != "code_interpreter" {
                 continue; // We only want code interpreter imports.
@@ -364,7 +364,10 @@ fn post_process(code: String, user_id: String, thread_id: String) -> String {
         ("pd.", "import pandas as pd\n"),
         ("ccrs.", "import cartopy.crs as ccrs\n"),
         ("cartopy.", "import cartopy\n"),
-        ("cfeature", "import cartopy.feature as cfeature\n"),
+        ("cfeature.", "import cartopy.feature as cfeature\n"),
+        ("egh.", "import easygems.healpix as egh\n"),
+        ("hp.", "import healpy as hp\n"),
+        ("cm.", "import matplotlib.cm as cm\n"),
     ];
 
     for (detect, add) in &libraries {

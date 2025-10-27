@@ -107,6 +107,113 @@ pub fn get_entire_prompt(user_id: &str, thread_id: &str) -> Vec<ChatCompletionRe
     result
 }
 
+// Because GPT-5 has significantly different requirements for prompts (due to its training data), we use seperate prompts for GPT-5 like Models.
+
+/// The basic starting prompt as a const of the correct type.
+static STARTING_PROMPT_STR_GPT_5: Lazy<String> = Lazy::new(|| {
+    let mut file = fs::File::open("src/chatbot/prompt_sources_gpt_5/starting_prompt.txt")
+        .expect("Unable to open starting_prompt.txt for GPT-5");
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .expect("Unable to read starting_prompt.txt for GPT-5");
+    content
+});
+
+/// The entire Example conversation file as a String.
+static EXAMPLE_CONVERSATIONS_STR_GPT_5: Lazy<String> = Lazy::new(|| {
+    let mut file = fs::File::open("src/chatbot/prompt_sources_gpt_5/examples.jsonl")
+        .expect("Unable to open examples.jsonl for GPT-5");
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .expect("Unable to read examples.jsonl for GPT-5");
+    trace!("Successfully read from File, content: {}", content);
+    content
+});
+
+/// The summary system prompt, as a static string.
+static SUMMARY_SYSTEM_PROMPT_STR_GPT_5: Lazy<String> = Lazy::new(|| {
+    let mut file = fs::File::open("src/chatbot/prompt_sources_gpt_5/summary_prompt.txt")
+        .expect("Unable to open summary_system_prompt.txt for GPT-5");
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .expect("Unable to read summary_system_prompt.txt for GPT-5");
+    trace!("Successfully read from File, content: {}", content);
+    content
+});
+
+/// The Starting prompt, as a static variable for the async_openai library.
+/// Note that we need to use Lazy because the Type wants a proper String, which isn't const as it requires allocation.
+pub static STARTING_PROMPT_CCRM_GPT_5: Lazy<ChatCompletionRequestSystemMessage> =
+    Lazy::new(|| ChatCompletionRequestSystemMessage {
+        name: Some("prompt".to_string()),
+        content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(
+            STARTING_PROMPT_STR_GPT_5.clone(),
+        ),
+    });
+
+/// Function that holds the example conversations as a type that the async_openai library can use.
+/// Doesn't template anymore, so the user_id and thread_id are not used.
+fn example_conversations_ccrm_gpt_5() -> Vec<ChatCompletionRequestMessage> {
+    let content = EXAMPLE_CONVERSATIONS_STR_GPT_5.clone();
+
+    let stream_variants = crate::chatbot::thread_storage::extract_variants_from_string(&content);
+    trace!("Returning number of lines: {}", stream_variants.len());
+
+    crate::chatbot::types::help_convert_sv_ccrm(stream_variants, false) // The example conversations shouldn't contain images, but if they do, we don't want to send them.
+}
+
+/// Some LLMs, especially Llama seem to require another prompt after the example conversations.
+static SUMMARY_SYSTEM_PROMPT_CCRM_GPT_5: Lazy<ChatCompletionRequestSystemMessage> =
+    Lazy::new(|| {
+        let content = SUMMARY_SYSTEM_PROMPT_STR_GPT_5.clone();
+        ChatCompletionRequestSystemMessage {
+            name: Some("prompt".to_string()),
+            content: async_openai::types::ChatCompletionRequestSystemMessageContent::Text(content),
+        }
+    });
+
+/// All messages that should be added at the start of a new conversation.
+/// Consists of a starting prompt and a few example conversations.
+fn entire_prompt_ccrm_gpt_5() -> Vec<ChatCompletionRequestMessage> {
+    let mut messages = vec![ChatCompletionRequestMessage::System(
+        STARTING_PROMPT_CCRM_GPT_5.clone(),
+    )];
+    messages.extend(example_conversations_ccrm_gpt_5());
+    messages.push(ChatCompletionRequestMessage::System(
+        SUMMARY_SYSTEM_PROMPT_CCRM_GPT_5.clone(),
+    ));
+    messages
+}
+
+/// Function that returns the entire prompt as a JSON string.
+pub fn get_entire_prompt_json_gpt_5(user_id: &str, thread_id: &str) -> String {
+    recursively_create_dir_at_rw_dir(user_id, thread_id);
+    // This function is a placeholder for now, but will in a few hours be used to
+    // Properly template the content of the starting prompt.
+    // For now, it just returns the JSON string of the starting prompt.
+    let ep_crrm = entire_prompt_ccrm_gpt_5();
+
+    let result =
+        serde_json::to_string(&ep_crrm).expect("Error converting starting prompt to JSON.");
+    // Safety: The conversion currently has no paths to error. However, if it does, the first call before the server is started will fail, causing the server to not start.
+    // Note that the templating makes it not pure, but if one templating is correct, and everything is alphanumeric, the rest should be too.
+
+    trace!("Returning starting prompt JSON for GPT-5: {}", result);
+    result
+}
+
+pub fn get_entire_prompt_gpt_5(
+    user_id: &str,
+    thread_id: &str,
+) -> Vec<ChatCompletionRequestMessage> {
+    recursively_create_dir_at_rw_dir(user_id, thread_id);
+    // Note that this function allows for the user_id and thread_id to be non-alphanumeric, as it is not used in the JSON parsing.
+    let result = entire_prompt_ccrm_gpt_5();
+
+    trace!("Returning templated starting prompt: {:?}", result);
+    result
+}
+
 /// Every time a prompt is requested, the folder at rw_dir needs to be created because else, some python functions
 /// might not find it. (We cannot expect all the functions to alwas recursively create the folders)
 fn recursively_create_dir_at_rw_dir(user_id: &str, thread_id: &str) {

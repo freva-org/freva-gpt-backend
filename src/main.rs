@@ -82,8 +82,20 @@ async fn main() -> std::io::Result<()> {
                 ) // AvailableChatbots, get the available chatbots.
                 .route(
                     "/getuserthreads",
-                    web::get().to(chatbot::get_user_threads::get_user_threads)
-                ), // GetUserThreads, get the latest 10 threads of the user.
+                    web::get().to(chatbot::mongodb::get_user_threads::get_user_threads)
+                ) // GetUserThreads, get the latest 10 threads of the user.
+                .route(
+                    "/setthreadtopic",
+                    web::post().to(chatbot::mongodb::set_thread_topic::set_thread_topic)
+                ) // set thread topic, where the user can change the topic of a specific thread
+                .route(
+                    "/setthreadtopic",
+                    web::get().to(chatbot::mongodb::set_thread_topic::set_thread_topic)
+                ) // Also allow the get method
+                .route(
+                    "/searchthreads",
+                    web::get().to(chatbot::mongodb::search_threads::search_threads)
+                ), // SearchThreads, search the threads of the user by a query.
             web::scope("/ping").route(
                 "",
                 actix_web::web::get().to(static_serve::moved_permanently)
@@ -123,11 +135,11 @@ async fn main() -> std::io::Result<()> {
         eprintln!("Error binding to the address. Exiting...");
         std::process::exit(1);
     })
-    .keep_alive(Duration::from_secs(1200)) // Long keep-alive time to prevent the server from closing the connection too early.
+    .keep_alive(Duration::from_secs(120)) // Long keep-alive time to prevent the server from closing the connection too early.
     // But as far as I can see, we will always have the problem that the stream length is capped at the keep-alive time...
     // If the keep-alive time is too short, we risk the connection being closed before the stream is finished.
     // If it's too long, there might be a lot of open connections that are not being used.
-    // FIXME: This long duration can be cut massively once a heartbeat is implemented.
+    // There is a floor to how long it needs to be, since Ollama does not send parts of tool calls, it needs to be at least around 20 seconds, else the frontend loses connection for long code snippets.
     .workers(8) // It uses 128 by default - far too much background usage
     .run()
     .await

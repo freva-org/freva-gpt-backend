@@ -37,14 +37,14 @@ pub fn append_thread(thread_id: &str, content: Conversation) {
         let to_push = match serde_json::to_string(&variant) {
             Ok(s) => s, // If it works, we can just use the JSON string.
             Err(e) => {
-                // If it doesn't, we can fall back to the old encoding. This is very bad, but we can't just not store the conversation.
-                // Besides, according to the signature of `serde_json::to_string`,
-                // this should only be able to fail if the type is not infallibly serializable, which StreamVariant is.
+                // We do not support the old encoding anymore, so we cannot fall back to that.
+                // But given that in the 13 Months since this code was written, it hasn't been executed once,
+                // I'm pretty sure that StreamVariants are always serializable to JSON now.
                 error!(
-                    "Error serializing variant to JSON; falling back to old encoding: {:?}",
-                    e
+                    "Error serializing variant to JSON, skipping variant: {:?}, error: {:?}",
+                    variant, e
                 );
-                variant.to_string() // This will use the old encoding, see the types.rs file.
+                continue;
             }
         };
 
@@ -78,7 +78,6 @@ fn open_thread(thread_id: &str) -> Option<File> {
     trace!("Opening thread with id: {}", thread_id);
     // We'll try to open the file for the conversation.
     match OpenOptions::new()
-        .write(true) // Write, don't only read
         .append(true) // Append, don't overwrite
         .create(true) // Create if it doesn't exist
         .open(format!("./threads/{thread_id}.txt"))
@@ -149,7 +148,13 @@ pub fn extract_variants_from_string(content: &str) -> Vec<StreamVariant> {
     let lines = content.lines();
     let mut res = Vec::new();
     for line in lines {
-        // First try to use json to deserialize the line.
+        // For organisational purposes, some lines might be comments (or empty), so we need to skip those.
+        if line.trim().is_empty() || line.starts_with("//") {
+            trace!("Skipping empty or comment line: {}", line);
+            continue;
+        }
+
+        // If the line should be parsed, try to use json to deserialize the line.
         match serde_json::from_str(line) {
             Ok(variant) => {
                 trace!("Successfully deserialized line: {:?}", variant);

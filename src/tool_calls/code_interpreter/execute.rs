@@ -12,7 +12,7 @@ use tracing::{debug, info, trace, warn};
 /// REQUIRES: The code has passed the safety checks.
 pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, String> {
     trace!("Preparing python interpreter for code execution.");
-    pyo3::prepare_freethreaded_python();
+    Python::initialize();
     // Fixed: Martin told me that the "global" interpreter lock, is, in fact, not global, but per process.
     // Because I moved the execution to another process to prevent catastrophic crashes, nothing should be able to interfere with the GIL.
 
@@ -63,7 +63,7 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
         .join("\n");
 
     trace!("Starting GIL block.");
-    let output = Python::with_gil(|py| {
+    let output = Python::attach(|py| {
         // We need a PyDict to store the local and global variables for the call.
         let locals = match try_read_locals(py, thread_id.clone()) {
             Some(locals) => locals,
@@ -98,10 +98,9 @@ pub fn execute_code(code: String, thread_id: Option<String>) -> Result<String, S
                 }
                 Some((rest, last)) => {
                     // We'll have to check the last line
-                    let last_line = last.trim();
-                    if should_eval(last_line, py) {
+                    if should_eval(last, py) {
                         // We'll split it up.
-                        (Some(rest.to_string()), Some(last_line.to_string()))
+                        (Some(rest.to_string()), Some(last.to_string()))
                     } else {
                         (Some(code), None)
                     }
@@ -285,6 +284,12 @@ fn should_eval(line: &str, py: Python) -> bool {
     // let exceptions = line.contains("plt.show()") || line.contains("item()") || line.contains("freva.databrowser.metadata_search(");
     // !negative || exceptions
 
+    // Never, ever try to eval if the last line is indented, that will lead to an indentation
+    // error.
+    if line.starts_with(' ') || line.starts_with('\t') {
+        return false;
+    }
+
     // New approach: Python has the ast library, which we can use to parse the line and decide whether it should be evaluated.
 
     let to_check = CString::new(format!(
@@ -403,6 +408,11 @@ fn try_read_locals(py: Python, thread_id: Option<String>) -> Option<Bound<PyDict
     let thread_id = thread_id?; // Unwrap the thread_id.
     let pickleable_path = format!("python_pickles/{thread_id}.pickle");
 
+    debug!(
+        "Trying to read locals from pickle file: {}",
+        pickleable_path
+    );
+
     // Check if pickled files exist
     if !std::path::Path::new(&pickleable_path).exists() {
         return None;
@@ -414,6 +424,8 @@ fn try_read_locals(py: Python, thread_id: Option<String>) -> Option<Bound<PyDict
 
 loaded_vars = []
 
+maybe_error = None
+
 # Load picklable variables
 with open('{pickleable_path}', 'rb') as f:
     # We load all variables from the file.
@@ -424,6 +436,11 @@ with open('{pickleable_path}', 'rb') as f:
             loaded_vars.append(var)
         except EOFError:
             break # We reached the end of the file, so we can stop loading variables.
+        except TypeError as e:
+            # Cartopy has a weird bug with deepcopy, so we need to catch this error: https://github.com/SciTools/cartopy/issues/2571
+            # Note that, because the loading itself fails, dill doesn't advance the file pointer, so we cannot just continue loading.
+            maybe_error = e
+            break
 
 # Now, if there is not exactly one variable, we assume that they are all locals.
 if len(loaded_vars) == 1:
@@ -440,9 +457,34 @@ else:
     .expect("Constant CString failed conversion");
     let temp_locals = PyDict::new(py);
 
+    debug!("Running code to load locals from pickle file.");
+
     // Run the code; if it doesn't work, we'll just return None.
-    py.run(&code, Some(&PyDict::new(py)), Some(&temp_locals))
-        .ok()?;
+    match py.run(&code, Some(&PyDict::new(py)), Some(&temp_locals)) {
+        Ok(()) => {
+            trace!("Successfully loaded locals from pickle file.");
+        }
+        Err(e) => {
+            warn!("Error loading locals from pickle file: {:?}", e);
+            debug!("Formatted error: {}", format_pyerr(&e, py));
+            return None;
+        }
+    }
+
+    debug!("Extracting loaded_vars from temporary locals.");
+
+    // Check if it ended with an error and report that.
+    match temp_locals.get_item("maybe_error").ok().flatten() {
+        Some(e) => {
+            // Sadly, PyErr cannot be type checked (???), so we'll just print the string representation.
+            let err_str = e.to_string();
+            warn!("Error loading some variables from pickle file: {}", err_str);
+            debug!("Continuing with found locals, ignoring the error.");
+        }
+        None => {
+            // No error, continue.
+        }
+    }
 
     // Now we have the loaded_vars in the locals.
     // We have to load that into the locals in rust, so we can use it.
@@ -464,11 +506,23 @@ else:
 fn save_to_pickle_file(py: Python, locals: &Bound<PyDict>, thread_id: &str) {
     trace!("Saving the locals to a pickle file.");
 
+    // Debug: print all the locals
+    let keys = locals.keys();
+    for k in keys {
+        trace!("Local variable before pickling: {:?}", k);
+    }
+
+    // We want to save the result of databrowser searches, but they are unpickleable.
+    // By default, they contain metadata besides the result, which can be useful.
+    // I couldn't find a way to keep the metadata, but the results can simply be extracted by running it through a list().
+
     // First we filter the locals to only include the ones that are actually serializable.
     // We'll execute some python code to do that.
     let code = CString::new(format!(
         r"import dill # like pickle, but can handle >2GB variables
 from types import ModuleType
+import freva_client
+import inspect
 
 local_items = locals().copy()
 pickleable_vars = {{}}
@@ -480,6 +534,18 @@ for key, value in local_items.items():
             # We shouldn't pickle modules, so we'll just skip them.
             unpickleable_vars[key] = [None, value]
             continue
+        if isinstance(value, freva_client.query.databrowser):
+            # We cannot store it as a databrowser result, but we can store it as a list
+            pickleable_vars[key] = list(value)
+            continue # We don't want to store it twice
+
+        # Avoid pickling matplotlib objects (Axes, Figure, etc.)
+        mod = inspect.getmodule(value.__class__)
+        if 'matplotlib' in str(mod): # Convert to string for substring check
+            # mark as unpickleable so we skip dumping it
+            unpickleable_vars[key] = [None, value]
+            continue
+        
         dill.dumps(value)
         pickleable_vars[key] = value
     except Exception as e:
