@@ -11,7 +11,7 @@ from fastmcp import FastMCP
 from src.tool_calls.rag.helpers import *
 from src.tool_calls.rag.document_loaders import CustomDirectoryLoader
 from src.tool_calls.rag.text_splitters import CustomDocumentSplitter
-from src.tool_calls.rag.header_gate import make_header_gate, MONGODB_URI_HDR
+from src.tool_calls.header_gate import make_header_gate
 from src.tool_calls.server_auth import jwt_verifier
 
 from src.tool_calls.rag.helpers import configure_logger
@@ -20,7 +20,6 @@ logger = configure_logger()
 
 LITE_LLM_ADDRESS = os.getenv("LITE_LLM_ADDRESS", "http://litellm:4000")
 CLEAR_MONGODB_EMBEDDINGS = os.getenv("CLEAR_MONGODB_EMBEDDINGS", "0").lower() in {"1","true","yes"}
-
 
 _disable_auth = os.getenv("MCP_DISABLE_AUTH", "0").lower() in {"1","true","yes"}  # for local testing
 mcp = FastMCP("rag_server", auth=None if _disable_auth else jwt_verifier)
@@ -34,6 +33,7 @@ AVAILABLE_LIBRARIES={"stableclimgen"}
 
 # ── Mongo helpers ────────────────────────────────────────────────────────────
 # Per-request header context
+MONGODB_URI_HDR = "mongodb-uri"
 mongo_uri_ctx: ContextVar[str | None] = ContextVar("mongo_uri_ctx", default=None)
 
 @lru_cache(maxsize=32)
@@ -208,13 +208,18 @@ if __name__ == "__main__":
     # Configure Streamable HTTP transport 
     host = os.getenv("MCP_HOST", "0.0.0.0")
     port = int(os.getenv("MCP_PORT", "8050"))
+    path = os.getenv("MCP_PATH", "/mcp")  # standard path
+
+    logger.info("Starting RAG MCP server on %s:%s%s (auth=%s)",
+                host, port, path, "off" if _disable_auth else "on")
 
     # Start the MCP server using Streamable HTTP transport
     wrapped_app = make_header_gate(
         mcp.http_app(),
-        mongo_ctx=mongo_uri_ctx,
+        ctx=mongo_uri_ctx,
+        header_name=MONGODB_URI_HDR,
         logger=logger,       
-        mcp_path="/mcp",  
+        mcp_path=path,  
     )
 
     import uvicorn
