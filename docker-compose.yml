@@ -42,6 +42,22 @@ services:
       - ./resources:/app/resources:ro
     networks: 
       - freva-gpt
+  code-server: 
+    platform: linux/amd64
+    image: localhost/code-interpreter-server-${INSTANCE_NAME}
+    build:
+      context: .
+      dockerfile: docker/code-interpreter-server/Dockerfile
+    env_file: .env
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8051
+    ports: 
+      - "8051:8051"
+    volumes:
+      - /work:/work:ro
+    networks: 
+      - freva-gpt
   ollama:
     image: ollama/ollama
     hostname: ollama-instance-${INSTANCE_NAME}
