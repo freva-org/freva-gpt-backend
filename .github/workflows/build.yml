@@ -76,12 +76,5 @@ jobs:
 
       - name: Verify image
         run: docker images
-    
-      - name: Logout from GitHub Container Registry
-        uses: docker/logout-action@v2
-        with:
-          registry: ghcr.io
 
-      - name: Cleanup Buildx builders
-        run: docker buildx prune --all --force
 
