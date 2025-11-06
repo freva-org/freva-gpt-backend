@@ -22,7 +22,8 @@ LITE_LLM_ADDRESS = os.getenv("LITE_LLM_ADDRESS", "http://litellm:4000")
 CLEAR_MONGODB_EMBEDDINGS = os.getenv("CLEAR_MONGODB_EMBEDDINGS", "0").lower() in {"1","true","yes"}
 
 
-_disable_auth = os.getenv("MCP_DISABLE_AUTH", "0").lower() in {"1","true","yes"}  # for local testing
+# _disable_auth = os.getenv("MCP_DISABLE_AUTH", "0").lower() in {"1","true","yes"}  # for local testing
+_disable_auth = True
 mcp = FastMCP("rag_server", auth=None if _disable_auth else jwt_verifier)
 
 # ── Config ───────────────────────────────────────────────────────────────────

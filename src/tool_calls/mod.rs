@@ -3,8 +3,10 @@
 use std::sync::Arc;
 
 use async_openai::types::{ChatCompletionTool, FunctionObject};
-use rmcp::{model::Tool, service::RunningService, RoleClient};
+use rmcp::model::Tool;
 use tracing::{debug, error, trace, warn};
+
+use crate::tool_calls::mcp::ServiceType;
 
 /// Routes the tool call to the appropriate function.
 pub mod route_call;
@@ -48,9 +50,7 @@ pub async fn all_tools() -> Vec<async_openai::types::ChatCompletionTool> {
 
 /// Returns properly formatted tools from the MCP servers.
 /// Doesn't surface errors and instead just returns an empty vector if something goes wrong.
-async fn mcp_client_to_tools(
-    client: Arc<RunningService<RoleClient, ()>>,
-) -> Vec<ChatCompletionTool> {
+async fn mcp_client_to_tools(client: Arc<ServiceType>) -> Vec<ChatCompletionTool> {
     let raw_tool_result = match client.list_tools(None).await {
         Ok(tools) => tools,
         Err(e) => {

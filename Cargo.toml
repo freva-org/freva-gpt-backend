@@ -42,7 +42,9 @@ itertools = "0.14.0"
 mongodb = { version = "3.3.0" }
 chrono = { version = "0.4.41", default-features = false }
 async-lazy = "0.1.2"
-rmcp = {version = "0.6.1", features=["client", "transport-child-process"] }
+rmcp = {version = "0.8.3", features=["client", "transport-child-process", "transport-streamable-http-client", "transport-streamable-http-client-reqwest"] }
+thiserror = "2.0.17"
+sse-stream = "0.2.1"
 
 [lints.rust]
 unsafe_code = "forbid"
