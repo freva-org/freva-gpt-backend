@@ -115,4 +115,6 @@ COPY src /app/src
 COPY test /app/test
 
 # Run the Rust code in very verbose mode, printing trace information
-ENTRYPOINT [ "cargo", "run", "-r", "--", "-vv"]
+RUN cargo build --release
+ENTRYPOINT [ "/app/target/release/freva-gpt2-backend", "-vv"]
+
