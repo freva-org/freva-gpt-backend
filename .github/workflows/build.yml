@@ -1,0 +1,107 @@
+name: Release freva-gpt2-backend image
+run-name: ${{ github.actor }} is releasing freva-gpt2-backend image
+
+on:
+  push:
+    tags:
+        - 'v*'
+  pull_request:
+    branches:
+        - main
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    name: 🐳 build-and-push-${{ matrix.variant }}
+    strategy:
+      matrix:
+        include:
+          - variant: base
+            target: without-crocodash
+            image-suffix: ""
+            needs-disk-space: false
+            platforms: linux/amd64,linux/arm64
+          - variant: crocodash
+            target: with-crocodash
+            image-suffix: "-crocodash"
+            needs-disk-space: true
+            platforms: linux/amd64  
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: free up disk space
+        if: matrix.needs-disk-space
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/hostedtoolcache
+          sudo apt-get clean
+          docker system prune -af
+          df -h
+      
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Create .env file for build
+        run: |
+          cp .env.example .env
+          echo "INSTANCE_NAME=ci" >> .env
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION=${VERSION#V}
+          VERSION=${VERSION#v}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION}"
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/freva-gpt2-backend${{ matrix.image-suffix }}
+          tags: |
+            type=ref,event=pr
+            type=raw,value=${{ steps.version.outputs.version }},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+
+      - name: Build and push image (${{ matrix.variant }})
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: dockerfiles/chatbot-backend/Dockerfile
+          target: final
+          build-args: |
+            BUILD_TARGET=${{ matrix.target }}
+          platforms: ${{ matrix.platforms }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
+          no-cache: ${{ startsWith(github.ref, 'refs/tags/') }}
+
+      - name: Verify image
+        run: docker images
