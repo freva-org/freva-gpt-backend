@@ -170,24 +170,23 @@ pub async fn run_runtime_checks() {
     }
 
     // Check whether MCP tools can be called.
-    // TODO: replace with the actual MCP tool call.
     print!("Checking whether MCP tools can be called... ");
     flush_stdout_stderr();
     info!("Checking whether MCP tools can be called.");
 
-    let mcp_result = try_execute_mcp_tool_call(
-        "hostname".to_string(),
-        // Some("Europe/Berlin".to_string()),
-        None,
-    )
-    .await;
-    if let Err(s) = mcp_result {
-        error!("Failed to call the MCP tool 'hostname': {s}");
-        eprintln!("Failed to call the MCP tool 'hostname': {s}");
-    } else {
-        println!("Success, hostname is: {mcp_result:?}");
-        flush_stdout_stderr();
-    }
+    // let mcp_result = try_execute_mcp_tool_call(
+    //     "hostname".to_string(),
+    //     // Some("Europe/Berlin".to_string()),
+    //     None,
+    // )
+    // .await;
+    // if let Err(s) = mcp_result {
+    //     error!("Failed to call the MCP tool 'hostname': {s}");
+    //     eprintln!("Failed to call the MCP tool 'hostname': {s}");
+    // } else {
+    //     println!("Success, hostname is: {mcp_result:?}");
+    //     flush_stdout_stderr();
+    // }
 
     // Also test the new rag system
     let mut rag_payload = serde_json::Map::new();
@@ -199,10 +198,10 @@ pub async fn run_runtime_checks() {
         "resources_to_retrieve_from".to_string(),
         "stableclimgen".into(),
     );
-    rag_payload.insert(
-        "collection".to_string(), // This should be a mongoDB collection, but just to show that, we set it to a strin, like an LLM would.
-        "stableclimgen".into(),
-    );
+    // rag_payload.insert( // This is currently not supported
+    //     "collection".to_string(),
+    //     "stableclimgen".into(),
+    // );
     let mcp_result =
         try_execute_mcp_tool_call("get_context_from_resources".to_string(), Some(rag_payload))
             .await;

@@ -28,7 +28,6 @@ def make_header_gate(
             receive: Callable[..., Awaitable],
             send: Callable[..., Awaitable],
         ):
-            print(scope) #DEBUG
             if scope.get("type") != "http":
                 return await self.app(scope, receive, send)
 
@@ -41,28 +40,15 @@ def make_header_gate(
                 k.decode("latin-1").lower(): v.decode("latin-1")
                 for k, v in scope.get("headers", [])
             }
-            v = hdrs.get(MONGODB_URI_HDR)
-            # Fallback: also try the bearer token header
-            if not v:
-                raw_auth = hdrs.get("authorization")
-                if raw_auth and raw_auth.lower().startswith("bearer "):
-                    v = raw_auth[7:].strip()
-                    # Also remove the token from headers to avoid confusion downstream
-                    # del scope["headers"]  # Be careful with case sensitivity
-                    # Scope is a dict, where "headers" is a list of tuples, so we need to reconstruct it
-                    new_headers = [
-                        (k, val) for k, val in scope.get("headers", [])
-                        if k.decode("latin-1").lower() != "authorization"
-                    ]
-                    scope["headers"] = new_headers
+            maybe_mongo_uri = hdrs.get(MONGODB_URI_HDR)
 
             try:
-                log.info("RAG headers (ASGI wrap): vault=%r all=%r", v, hdrs)
+                log.info("RAG headers (ASGI wrap): vault=%r all=%r", maybe_mongo_uri, hdrs)
             except Exception:
                 pass  # never fail on logging
 
             # Enforce required vault header
-            if not v or not (v.startswith("mongodb://") or v.startswith("mongodb+srv://")):
+            if not maybe_mongo_uri or not (maybe_mongo_uri.startswith("mongodb://") or maybe_mongo_uri.startswith("mongodb+srv://")):
                 body = (
                     b'event: message\r\n'
                     b'data: {"jsonrpc":"2.0","error":{"code":-32600,'
@@ -82,7 +68,7 @@ def make_header_gate(
                 return
 
             # Set ContextVars for downstream code
-            tok_v = mongo_ctx.set(v)
+            tok_v = mongo_ctx.set(maybe_mongo_uri)
             try:
                 return await self.app(scope, receive, send)
             finally:

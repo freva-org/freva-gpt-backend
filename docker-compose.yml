@@ -53,8 +53,8 @@ services:
     healthcheck:
       test: "curl http://localhost:4000/health/readiness"
   rag-server:
-    platform: linux/amd64
     image: localhost/rag-server-${INSTANCE_NAME}
+    hostname: rag-server-instance-${INSTANCE_NAME}
     build:
       context: .
       dockerfile: dockerfiles/rag-server/Dockerfile

@@ -6,7 +6,7 @@ use async_openai::types::{ChatCompletionTool, FunctionObject};
 use rmcp::model::Tool;
 use tracing::{debug, error, trace, warn};
 
-use crate::tool_calls::mcp::ServiceType;
+use crate::tool_calls::mcp::client::ServiceType;
 
 /// Routes the tool call to the appropriate function.
 pub mod route_call;

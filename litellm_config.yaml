@@ -145,6 +145,15 @@ model_list:
     model_info:
       supports_function_calling: true
 
+  # Embedding model for MCP-RAG
+  - model_name: "ollama/mxbai-embed-large:latest"
+    litellm_params:
+      model: "openai/mxbai-embed-large:latest"
+      api_base: "http://litellm:11434/v1" # First try the container, then fall back to the local ollama.
+  - model_name: "ollama/mxbai-embed-large:latest"
+    litellm_params:
+      model: "openai/mxbai-embed-large:latest"
+      api_base: "http://host.docker.internal:11434/v1" # For development only!
 litellm_settings:
   drop_params: true # Not all models support the same parameters. LiteLLM can automatically drop unsupported parameters.
   # set_verbose: true # For debugging, prints a lot more info, including secrets. Leave this on during production is highly discouraged.
