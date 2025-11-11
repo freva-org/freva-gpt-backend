@@ -3,8 +3,8 @@ use documented::docs_const;
 use tracing::{debug, trace, warn};
 
 use crate::{
-    auth::get_first_matching_field,
-    chatbot::mongodb::mongodb_storage::{get_database, read_threads_and_num},
+    auth::{get_first_matching_field, get_mongodb_uri},
+    chatbot::mongodb::mongodb_storage::{get_database_from_uri, read_threads_and_num},
 };
 
 /// # getuserthreads
@@ -50,10 +50,18 @@ pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
             .body("Vault URL not found. Please provide a non-empty vault URL in the headers.");
     };
 
-    let database = match get_database(vault_url).await {
+    let mongodb_uri = match get_mongodb_uri(vault_url).await {
+        Ok(uri) => uri,
+        Err(e) => {
+            warn!("Failed to get the MongoDB URI: {:?}", e);
+            return e;
+        }
+    };
+
+    let database = match get_database_from_uri(mongodb_uri).await {
         Ok(db) => db,
         Err(e) => {
-            debug!("Failed to connect to the database: {:?}", e);
+            warn!("Failed to connect to the database: {:?}", e);
             return HttpResponse::ServiceUnavailable().body("Failed to connect to the database.");
         }
     };

@@ -3,8 +3,8 @@ use documented::docs_const;
 use tracing::{debug, trace, warn};
 
 use crate::{
-    auth::get_first_matching_field,
-    chatbot::mongodb::mongodb_storage::{get_database, update_topic},
+    auth::{get_first_matching_field, get_mongodb_uri},
+    chatbot::mongodb::mongodb_storage::{get_database_from_uri, update_topic},
 };
 
 /// # set_thread_topic
@@ -54,7 +54,14 @@ pub async fn set_thread_topic(req: HttpRequest) -> impl Responder {
         .and_then(|h| h.to_str().ok());
 
     let database = if let Some(vault_url) = maybe_vault_url {
-        get_database(vault_url).await
+        let mongodb_uri = match get_mongodb_uri(vault_url).await {
+            Ok(uri) => uri,
+            Err(e) => {
+                warn!("Failed to get the MongoDB URI: {:?}", e);
+                return e;
+            }
+        };
+        get_database_from_uri(mongodb_uri).await
     } else {
         warn!("Vault URL not found");
         Err(actix_web::HttpResponse::BadRequest()

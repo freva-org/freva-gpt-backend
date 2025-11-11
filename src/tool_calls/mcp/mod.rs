@@ -9,16 +9,15 @@ pub mod client;
 use std::sync::Arc;
 
 use async_lazy::Lazy;
-use clap::crate_version;
-use rmcp::model::{ClientCapabilities, ClientInfo, Implementation};
 
-use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
-use rmcp::transport::{ConfigureCommandExt, StreamableHttpClientTransport, TokioChildProcess};
-use rmcp::ServiceExt;
+use rmcp::{
+    transport::{ConfigureCommandExt, TokioChildProcess},
+    ServiceExt,
+};
 use tokio::process::Command;
 use tracing::{debug, error};
 
-use crate::tool_calls::mcp::client::{MCPRAGClient, ServiceType};
+use crate::tool_calls::mcp::client::{get_mcp_rag_client, ServiceType};
 
 /// The global MCP Client that has connections to all supported MCP servers.
 static MCP_TEST_CLIENT: Lazy<Option<Arc<ServiceType>>> = Lazy::new(|| {
@@ -67,50 +66,10 @@ static MCP_RAG_CLIENT: Lazy<Option<Arc<ServiceType>>> = Lazy::new(|| {
     Box::pin(async {
         // We assume that the server has already started. We know its adress and currently hard code it.
 
-        let mongodb_uri = "mongodb://testing:testing@host.docker.internal:27017".to_string();
-        // First construct the inner client.
-        let client = MCPRAGClient {
-            inner: reqwest::Client::new(),
-            mongodb_uri: mongodb_uri.clone(),
-        };
-        let transport = StreamableHttpClientTransport::with_client(
-            client,
-            StreamableHttpClientTransportConfig {
-                uri: "http://localhost:8050/mcp".into(),
-                ..Default::default()
-            },
-        );
-        // let test = StreamableHttpClientTransport::from_uri("http://localhost:8050");
-
-        let client_info = ClientInfo {
-            protocol_version: Default::default(),
-            capabilities: ClientCapabilities::default(),
-            client_info: Implementation {
-                name: "freva-gpt2-backend-rag-client".to_string(),
-                version: crate_version!().to_string(),
-                title: None,
-                icons: None,
-                website_url: None,
-            },
-        };
-
-        let client = client_info.into_dyn().serve(transport).await;
-
-        let client = match client {
-            Ok(client) => client,
-            Err(e) => {
-                error!("Failed to create MCP RAG client: {}", e);
-                return None;
-            }
-        };
-
-        let server_info = client.peer_info();
-        debug!("Connected to MCP RAG server: {:?}", server_info);
-
-        let tools = client.list_all_tools().await;
-        debug!("MCP RAG server tools: {:?}", tools);
-
-        Some(Arc::new(client))
+        let mongodb_uri =
+            "mongodb://testing:testing@host.docker.internal:27017/?directConnection=true&authSource=admin"
+                .to_string();
+        get_mcp_rag_client(mongodb_uri).await
     })
 });
 

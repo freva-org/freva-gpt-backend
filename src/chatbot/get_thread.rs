@@ -4,8 +4,8 @@ use qstring::QString;
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    auth::get_first_matching_field,
-    chatbot::{mongodb::mongodb_storage::get_database, types::StreamVariant},
+    auth::{get_first_matching_field, get_mongodb_uri},
+    chatbot::{mongodb::mongodb_storage::get_database_from_uri, types::StreamVariant},
 };
 
 use super::storage_router::read_thread;
@@ -64,9 +64,16 @@ pub async fn get_thread(req: HttpRequest) -> impl Responder {
 
     // If we have a specific vault URL, we use it to initialize the database.
     let database = if let Some(vault_url) = maybe_vault_url {
+        let mongodb_uri = match get_mongodb_uri(vault_url).await {
+            Ok(uri) => uri,
+            Err(e) => {
+                warn!("Failed to get the MongoDB URI: {:?}", e);
+                return e;
+            }
+        };
         // Initialize the database with the vault URL.
         debug!("Using vault URL: {}", vault_url);
-        get_database(vault_url).await
+        get_database_from_uri(mongodb_uri).await
     } else {
         // We now need the vault URL, so this fails.
         warn!("No vault URL provided, cannot connect to the database for threads.");

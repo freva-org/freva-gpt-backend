@@ -18,7 +18,14 @@ use rmcp::transport::streamable_http_client::{
 };
 use rmcp::RoleClient;
 use sse_stream::{Sse, SseStream};
-use tracing::error;
+use tracing::{debug, error};
+
+use clap::crate_version;
+use rmcp::model::{ClientCapabilities, ClientInfo, Implementation};
+
+use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+use rmcp::transport::StreamableHttpClientTransport;
+use rmcp::ServiceExt;
 
 pub type ServiceType = RunningService<RoleClient, Box<dyn DynService<RoleClient> + 'static>>;
 
@@ -169,4 +176,56 @@ impl StreamableHttpClient for MCPRAGClient {
             }
         }
     }
+}
+
+async fn construct_mcp_rag_client(mongodb_uri: String) -> Option<Arc<ServiceType>> {
+    // First construct the inner client.
+    let client = MCPRAGClient {
+        inner: reqwest::Client::new(),
+        mongodb_uri: mongodb_uri.clone(),
+    };
+    let transport = StreamableHttpClientTransport::with_client(
+        client,
+        StreamableHttpClientTransportConfig {
+            uri: "http://localhost:8050/mcp".into(), // TODO: make it properly configurable
+            ..Default::default()
+        },
+    );
+    // let test = StreamableHttpClientTransport::from_uri("http://localhost:8050");
+
+    let client_info = ClientInfo {
+        protocol_version: Default::default(),
+        capabilities: ClientCapabilities::default(),
+        client_info: Implementation {
+            name: "freva-gpt2-backend-rag-client".to_string(),
+            version: crate_version!().to_string(),
+            title: None,
+            icons: None,
+            website_url: None,
+        },
+    };
+
+    let client = client_info.into_dyn().serve(transport).await;
+
+    let client = match client {
+        Ok(client) => client,
+        Err(e) => {
+            error!("Failed to create MCP RAG client: {}", e);
+            return None;
+        }
+    };
+
+    let server_info = client.peer_info();
+    debug!("Connected to MCP RAG server: {:?}", server_info);
+
+    let tools = client.list_all_tools().await;
+    debug!("MCP RAG server tools: {:?}", tools);
+
+    Some(Arc::new(client))
+}
+
+// Because the client is dependant on the mongodb URI, we may not be able to reuse a single one for all requests.
+// For now, we construct one every time it's needed, but in the future we may want to cache them based on the URI.
+pub async fn get_mcp_rag_client(mongodb_uri: String) -> Option<Arc<ServiceType>> {
+    construct_mcp_rag_client(mongodb_uri).await
 }

@@ -18,7 +18,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    auth::{get_first_matching_field, is_guest},
+    auth::{get_first_matching_field, get_mongodb_uri, is_guest},
     chatbot::{
         available_chatbots::{
             model_ends_on_no_choice, model_is_gpt_5, model_is_reasoning, model_supports_images,
@@ -30,7 +30,7 @@ use crate::{
             new_conversation_id, save_and_remove_conversation, switch_to_new_thread_id,
         },
         heartbeat::heartbeat_content,
-        mongodb::mongodb_storage::get_database,
+        mongodb::mongodb_storage::get_database_from_uri,
         prompting::{
             get_entire_prompt, get_entire_prompt_gpt_5, get_entire_prompt_json,
             get_entire_prompt_json_gpt_5,
@@ -40,7 +40,12 @@ use crate::{
         LITE_LLM_CLIENT,
     },
     logging::{silence_logger, undo_silence_logger},
-    tool_calls::{all_tools, code_interpreter::verify_can_access, route_call::route_call},
+    tool_calls::{
+        all_tools,
+        code_interpreter::verify_can_access,
+        mcp::{client::get_mcp_rag_client, execute::try_execute_mcp_tool_call_specific_clients},
+        route_call::route_call,
+    },
 };
 
 use super::{available_chatbots::AvailableChatbots, handle_active_conversations::generate_id};
@@ -151,13 +156,63 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         );
     };
 
-    let database = match get_database(vault_url).await {
+    // let Ok(mongodb_uri) = get_mongodb_uri(vault_url).await else {
+    //     warn!("The MongoDB URI could not be determined from the vault URL: {}", vault_url);
+
+    // }
+
+    let mongodb_uri = match get_mongodb_uri(vault_url).await {
+        Ok(uri) => uri,
+        Err(e) => {
+            warn!(
+                "The MongoDB URI could not be determined from the vault URL: {}. Error: {:?}",
+                vault_url, e
+            );
+            return e;
+        }
+    };
+
+    let database = match get_database_from_uri(mongodb_uri.clone()).await {
         Ok(db) => db,
         Err(e) => {
             warn!("Failed to connect to the database: {:?}", e);
             return HttpResponse::ServiceUnavailable().body("Failed to connect to the database.");
         }
     };
+
+    // The input is moved into the join, so we need to clone it here.
+    let input_clone = input.clone();
+    // In order to save some time, start a tokio task to run the MCP RAG server now, then join it later.
+    // DEBUG, just do it in a block for now, then put it into a task once it passes compilation.
+    let mcp_rag_server_handle: JoinHandle<Result<String, String>> = tokio::spawn(async move {
+        // The function will cache in the future
+        let client = match get_mcp_rag_client(mongodb_uri).await {
+            None => {
+                warn!("The MCP RAG client could not be created.");
+                return Err("The MCP RAG client could not be created.".to_string());
+            }
+            Some(client) => client,
+        };
+
+        // The payload consists of the question and the resources_to_retrieve_from, which is currently always "stableclimgen".
+
+        let mut payload = serde_json::Map::new();
+        payload.insert(
+            "question".to_string(),
+            serde_json::Value::String(input_clone),
+        );
+        payload.insert(
+            "resources_to_retrieve_from".to_string(),
+            serde_json::Value::String("stableclimgen".to_string()),
+        );
+
+        return try_execute_mcp_tool_call_specific_clients(
+            "get_context_from_resources".to_string(),
+            Some(payload),
+            &vec![client],
+        )
+        .await;
+    });
 
     // Because the call to conversation_state writes a warning if the thread is not found, we'll temporarily silence the logging.
     silence_logger();
@@ -233,6 +288,10 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
         &["chatvariants", "chat_variants", "edit", "edit_variants"],
         false,
     );
+
+    // We can now join the handle for the request to the MCP RAG server.
+    let _mcp_rag_result = mcp_rag_server_handle.await;
+    // It's currently unused, but in the future, we can use it to add dynamic context to the prompt.
 
     // For the same use case, also maybe record the starting variants, which we might need to send to the client.
     // (The frontend should get the entire thread, not just the new stuff.)

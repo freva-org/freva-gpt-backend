@@ -408,10 +408,8 @@ static MONGOCLIENTPOOL: Lazy<Arc<Mutex<Vec<(String, mongodb::Client)>>>> =
 // Note that officially, client pools are not recommended by mongodb as the client itself already does connection pooling.
 // However, in our case, we can have multiple vault URLs, so we need different clients for each vault URL.
 
-/// Constructs a MongoDB database connection using the Vault URL.
-pub async fn get_database(vault_url: &str) -> Result<Database, HttpResponse> {
-    let mongodb_uri = get_mongodb_uri(vault_url).await?;
-
+/// Constructs a MongoDB database connection using the URI.
+pub async fn get_database_from_uri(mongodb_uri: String) -> Result<Database, HttpResponse> {
     // First check if we already have a client for this URI.
     let maybe_client = {
         match MONGOCLIENTPOOL.lock() {

@@ -1,10 +1,12 @@
 // This file is for executing the MCP tool call.
 
+use std::sync::Arc;
+
 use rmcp::model::{CallToolRequestParam, RawContent};
 use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 
-use crate::tool_calls::mcp::ALL_MCP_CLIENTS;
+use crate::tool_calls::mcp::{client::ServiceType, ALL_MCP_CLIENTS};
 
 /// Tries to execute a tool call on the MCP servers.
 /// If it fails, it returns an error.
@@ -12,10 +14,23 @@ pub async fn try_execute_mcp_tool_call(
     func_name: String,
     arguments: Option<Map<String, Value>>,
 ) -> Result<String, String> {
+    // Use the global MCP clients for this.
+    let clients = ALL_MCP_CLIENTS.force().await;
+
+    try_execute_mcp_tool_call_specific_clients(func_name, arguments, clients).await
+}
+
+/// Tries to execute a tool call on a specified list of MCP clients.
+/// If it fails, it returns an error.
+pub async fn try_execute_mcp_tool_call_specific_clients(
+    func_name: String,
+    arguments: Option<Map<String, Value>>,
+    clients: &Vec<Arc<ServiceType>>,
+) -> Result<String, String> {
     // We first need to instantiate all MCP clients to find the one that has the function.
 
     let mut result = None;
-    for client in ALL_MCP_CLIENTS.force().await.iter() {
+    for client in clients {
         // each client first needs to be initialized.
 
         {
