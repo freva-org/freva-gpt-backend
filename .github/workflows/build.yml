@@ -1,4 +1,5 @@
 name: Release freva-gpt2-backend image
+run-name: ${{ github.actor }} is releasing freva-gpt2-backend image
 
 on:
   push:
