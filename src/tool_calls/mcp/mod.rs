@@ -6,6 +6,9 @@ pub mod execute;
 // Our implemenetation of the MCP Client.
 pub mod client;
 
+// Parsing the RAG response from the MCP RAG server.
+pub mod parse_rag;
+
 use std::sync::Arc;
 
 use async_lazy::Lazy;

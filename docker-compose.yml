@@ -55,6 +55,7 @@ services:
   rag-server:
     image: localhost/rag-server-${INSTANCE_NAME}
     hostname: rag-server-instance-${INSTANCE_NAME}
+    platform: linux/amd64
     build:
       context: .
       dockerfile: dockerfiles/rag-server/Dockerfile

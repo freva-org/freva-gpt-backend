@@ -148,7 +148,9 @@ def get_query_results(query: str, resource_name):
         query_results.append(list(col.aggregate(pipeline)))
 
     if query_results:
-        return postprocessing_query_result(query_results)
+        postprocessed = postprocessing_query_result(query_results)
+        # Convert from object to string using JSON
+        return json.dumps(postprocessed)
     else:
         logger.info("No results found for the query.")
         return "No content found."

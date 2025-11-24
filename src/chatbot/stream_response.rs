@@ -43,7 +43,10 @@ use crate::{
     tool_calls::{
         all_tools,
         code_interpreter::verify_can_access,
-        mcp::{client::get_mcp_rag_client, execute::try_execute_mcp_tool_call_specific_clients},
+        mcp::{
+            client::get_mcp_rag_client, execute::try_execute_mcp_tool_call_specific_clients,
+            parse_rag::parse_rag_response,
+        },
         route_call::route_call,
     },
 };
@@ -183,7 +186,6 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     // The input is moved into the join, so we need to clone it here.
     let input_clone = input.clone();
     // In order to save some time, start a tokio task to run the MCP RAG server now, then join it later.
-    // DEBUG, just do it in a block for now, then put it into a task once it passes compilation.
     let mcp_rag_server_handle: JoinHandle<Result<String, String>> = tokio::spawn(async move {
         // The function will cache in the future
         let client = match get_mcp_rag_client(mongodb_uri).await {
@@ -292,6 +294,17 @@ pub async fn stream_response(req: HttpRequest) -> impl Responder {
     // We can now join the handle for the request to the MCP RAG server.
     let _mcp_rag_result = mcp_rag_server_handle.await;
     // It's currently unused, but in the future, we can use it to add dynamic context to the prompt.
+
+    // DEBUG
+    println!("Received MCP RAG result: {:?}", _mcp_rag_result);
+    // If the result was successful, we can parse it.
+    if let Ok(Ok(rag_response)) = _mcp_rag_result {
+        debug!("MCP RAG response: {}", rag_response);
+        let test = parse_rag_response(&rag_response);
+        debug!("Parsed RAG response: {:?}", test);
+    } else {
+        warn!("Failed to get MCP RAG response.");
+    }
 
     // For the same use case, also maybe record the starting variants, which we might need to send to the client.
     // (The frontend should get the entire thread, not just the new stuff.)

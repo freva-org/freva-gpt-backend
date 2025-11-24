@@ -13,9 +13,8 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, trace, warn};
 
-use crate::{
-    auth::get_mongodb_uri,
-    chatbot::{thread_storage::cleanup_conversation, topic_extraction::summarize_topic, types},
+use crate::chatbot::{
+    thread_storage::cleanup_conversation, topic_extraction::summarize_topic, types,
 };
 
 /// Stores and loads threads from the mongoDB
