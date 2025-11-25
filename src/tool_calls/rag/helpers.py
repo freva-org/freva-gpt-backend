@@ -127,5 +127,4 @@ def postprocessing_query_result(query_results):
         else:
             raise (ValueError, f"Unknown resource type: {resource_type}")
 
-        context.append(inner_context)
     return context

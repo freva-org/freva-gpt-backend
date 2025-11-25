@@ -11,7 +11,7 @@ pub fn parse_rag_response(response: &str) -> Result<(Vec<String>, Vec<Vec<Stream
     // TODO: maybe, because the parsed StreamVariants Code and Codeoutput IDs are not coordinated,
     // they could potentially collide. Maybe auto-mangle the IDs here to make them unique?
 
-    let rag_responses: Result<Vec<Vec<RagResponse>>, _> = serde_json::from_str(response);
+    let rag_responses: Result<Vec<RagResponse>, _> = serde_json::from_str(response);
     let rag_responses = match rag_responses {
         Ok(responses) => {
             debug!("Successfully parsed RAG response into RagResponse enum.");
@@ -29,7 +29,7 @@ pub fn parse_rag_response(response: &str) -> Result<(Vec<String>, Vec<Vec<Stream
     let mut examples = Vec::new();
 
     // Iterate over the RagResponses
-    for rag_response in rag_responses.iter().flatten() {
+    for rag_response in rag_responses {
         match rag_response {
             RagResponse::Document(docs) => {
                 explanations.extend(docs.clone());
@@ -38,7 +38,7 @@ pub fn parse_rag_response(response: &str) -> Result<(Vec<String>, Vec<Vec<Stream
                 for ex in exs {
                     // There are multiple different examples here, so we
                     // store them separately.
-                    if let Ok(variants) = split_concatted_json_variants(ex) {
+                    if let Ok(variants) = split_concatted_json_variants(&ex) {
                         examples.push(variants);
                     } else {
                         warn!("Failed to parse example into StreamVariants: {:?}", ex);
