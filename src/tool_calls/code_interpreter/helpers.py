@@ -1,10 +1,7 @@
 import logging
 import re
 
-from src.core.logging_setup import configure_logging
-
 logger = logging.getLogger(__name__)
-configure_logging()
 
 
 def strip_ansi(text: str) -> str:
