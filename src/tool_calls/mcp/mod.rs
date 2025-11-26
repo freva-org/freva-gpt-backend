@@ -3,20 +3,31 @@
 // This module is responsible for executing MCP tool calls.
 pub mod execute;
 
+// Our implemenetation of the MCP Client.
+pub mod client;
+
+// Parsing the RAG response from the MCP RAG server.
+pub mod parse_rag;
+
 use std::sync::Arc;
 
 use async_lazy::Lazy;
-use rmcp::service::RunningService;
-use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
-use rmcp::{RoleClient, ServiceExt};
+
+use rmcp::{
+    transport::{ConfigureCommandExt, TokioChildProcess},
+    ServiceExt,
+};
 use tokio::process::Command;
 use tracing::{debug, error};
 
+use crate::tool_calls::mcp::client::{get_mcp_rag_client, ServiceType};
+
 /// The global MCP Client that has connections to all supported MCP servers.
-static MCP_TEST_CLIENT: Lazy<Option<Arc<RunningService<RoleClient, ()>>>> = Lazy::new(|| {
+static MCP_TEST_CLIENT: Lazy<Option<Arc<ServiceType>>> = Lazy::new(|| {
     Box::pin(async {
         // For testing purposes, use Tokio to spawn a child process for the MCP server.
         let client = ()
+            .into_dyn()
             .serve({
                 let spawned = TokioChildProcess::new(Command::new("uv").configure(|cmd| {
                     cmd.arg("run").arg("src/tool_calls/mcp/hostname.py");
@@ -53,14 +64,31 @@ static MCP_TEST_CLIENT: Lazy<Option<Arc<RunningService<RoleClient, ()>>>> = Lazy
     })
 });
 
+// The MCP Client that connects to the RAG server.
+static MCP_RAG_CLIENT: Lazy<Option<Arc<ServiceType>>> = Lazy::new(|| {
+    Box::pin(async {
+        // We assume that the server has already started. We know its adress and currently hard code it.
+
+        let mongodb_uri =
+            "mongodb://testing:testing@host.docker.internal:27017/?directConnection=true&authSource=admin"
+                .to_string();
+        get_mcp_rag_client(mongodb_uri).await
+    })
+});
+
 /// The `rust_mcp_sdk` library assigns a client to each MCP server, so we'll collect them here.
-pub static ALL_MCP_CLIENTS: Lazy<Vec<Arc<RunningService<RoleClient, ()>>>> = Lazy::new(|| {
+pub static ALL_MCP_CLIENTS: Lazy<Vec<Arc<ServiceType>>> = Lazy::new(|| {
     Box::pin(async {
         // We need to collect all the MCP clients here.
         let mut clients = Vec::new();
-        if let Some(client) = (*MCP_TEST_CLIENT.force().await).clone() {
-            clients.push(client);
-        }
+        // if let Some(client) = (*MCP_TEST_CLIENT.force().await).clone() {
+        //     clients.push(client);
+        // }
+
+        // // Create a new MCPRagClient and add it to the clients list.
+        // if let Some(client) = (*MCP_RAG_CLIENT.force().await).clone() {
+        //     clients.push(client);
+        // }
         clients
     })
 });

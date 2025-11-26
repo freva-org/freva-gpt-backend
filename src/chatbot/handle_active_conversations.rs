@@ -27,22 +27,28 @@ pub fn new_conversation_id() -> String {
     let value = generate_id();
 
     // If this value is already in use, we'll just try again.
-    match ACTIVE_CONVERSATIONS.lock() {
+    let result = match ACTIVE_CONVERSATIONS.lock() {
         Ok(guard) => {
             // If we can lock the mutex, we can check if the value is already in use.
             if guard.iter().any(|x| x.id == value) {
                 warn!("Generated conversation ID is already in use, trying again.");
-                return new_conversation_id();
+                None
+            } else {
+                Some(value)
             }
-            value
         }
         Err(e) => {
             error!(
                 "Error locking the mutex, falling back to hoping the value is unique: {:?}",
                 e
             );
-            value
+            Some(value)
         }
+    };
+
+    match result {
+        Some(value) => value,
+        None => new_conversation_id(), // Try again
     }
 }
 
@@ -93,15 +99,14 @@ pub async fn conversation_state(thread_id: &str, database: Database) -> Option<C
             //DEBUG
             // println!("Number of active conversations: {}", guard.len());
             // If we can lock the mutex, we can check if the value is already in use.
-            let return_val =
-                if let Some(conversation) = guard.iter_mut().find(|x| x.id == thread_id) {
-                    // If we find the conversation, we'll check if it's stopped.
-                    Some(conversation.state.clone())
-                } else {
-                    // If the conversation is not found, we'll return false.
-                    warn!("Conversation with id: {} not found.", thread_id);
-                    None
-                };
+            let return_val = if let Some(conversation) = guard.iter().find(|x| x.id == thread_id) {
+                // If we find the conversation, we'll check if it's stopped.
+                Some(conversation.state.clone())
+            } else {
+                // If the conversation is not found, we'll return false.
+                warn!("Conversation with id: {} not found.", thread_id);
+                None
+            };
             // Before returning, we'll clean up stale conversations.
             to_save = Some(cleanup_conversations(&mut guard));
             return_val
@@ -298,4 +303,46 @@ fn cleanup_conversations(guard: &mut Vec<ActiveConversation>) -> Vec<ActiveConve
         }
     });
     to_save
+}
+
+/// This function is run when the frontend sends an edit-input.
+/// It generates a new thread_id and manages the python_pickles file.
+pub fn switch_to_new_thread_id(thread_id: &str) -> String {
+    trace!(
+        "Switching to new thread_id for conversation with id: {}",
+        thread_id
+    );
+
+    // The conversation wasn't started yet at this point in the code, so we'll just create a new conversation with the new thread_id.
+    // This will happen automatically when this function returns a new thread_id.
+
+    let new_thread_id = new_conversation_id();
+
+    // We need to copy the python_pickles file to the new thread_id. This previously only happened within python.
+    // Both files lie in `python_pickles/{thread_id}.pickle` and `python_pickles/{new_thread_id}.pickle`.
+    let old_path = format!("python_pickles/{thread_id}.pickle");
+    let new_path = format!("python_pickles/{new_thread_id}.pickle");
+    if let Err(e) = std::fs::copy(&old_path, &new_path) {
+        if matches!(e.kind(), std::io::ErrorKind::NotFound) {
+            // If the error is not that the file doesn't exist, we log it as an error.
+            // If it is, we just ignore it, because it means the file didn't exist in the first place.
+            // This can happen if the user never used the code_interpreter or if the file was deleted manually.
+            // In this case, a new file will be created when the user uses the code_interpreter again.
+            trace!("File not found, ignoring.");
+        } else {
+            error!(
+                "Error copying python_pickles file from {} to {}: {:?}",
+                old_path, new_path, e
+            );
+        }
+    } else {
+        trace!(
+            "Copied python_pickles file from {} to {}",
+            old_path,
+            new_path
+        );
+    }
+
+    // Return the new thread_id.
+    new_thread_id
 }

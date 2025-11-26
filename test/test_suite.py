@@ -37,8 +37,18 @@ def get_avail_chatbots():
     print(response.text)
     return response.json()
 
-def get_user_threads():
-    response = get_request("/getuserthreads?")
+def get_user_threads(num_threads=None, page=0) -> tuple[list, int]:
+    response = get_request(f"/getuserthreads?num_threads={num_threads}&page={page}")
+    print(response.text)
+    return response.json()
+
+def set_thread_topic(thread_id, new_topic):
+    response = get_request(f"/setthreadtopic?thread_id={thread_id}&new_topic={new_topic}")
+    print(response.text)
+    return response.text
+
+def search_database(query: str):
+    response = get_request(f"/searchthreads?query={query}")
     print(response.text)
     return response.json()
 
@@ -52,12 +62,15 @@ class StreamResult:
     assistant_variants: list  = field(default_factory=list)
     image_variants: list = field(default_factory=list)
     server_hint_variants: list  = field(default_factory=list)
+    parsed_list: list = field(default_factory=list) # Full list of variants, with combined fragments.
     thread_id: str | None = None
 
     def extract_variants(self):
         if self.json_response:
             # The stream can stream multiple Assistant or Code fragments one after the other, in order to get good UX, but that means that multiple fragments that form a single variant can be streamed one after the other.
             # So, for convenience, we'll combine consecutive fragments that form a single variant into a single variant, if that variant is Assistant or Code. 
+
+            full_list = [] # Full list of variants, with combined fragments.
 
             running_code = None # None or tuple of (code, code_id) (which is the content of the fragment)
             running_assistant = None # None or string (which is the content of the fragment)
@@ -67,9 +80,11 @@ class StreamResult:
 
                 if variant != "Code" and running_code:
                     self.code_variants.append(running_code)
+                    full_list.append({"variant": "Code", "content": running_code})
                     running_code = None
                 if variant != "Assistant" and running_assistant:
                     self.assistant_variants.append(running_assistant)
+                    full_list.append({"variant": "Assistant", "content": running_assistant})
                     running_assistant = None
 
                 if variant == "Code":
@@ -84,40 +99,50 @@ class StreamResult:
                         running_assistant = content
                 elif variant == "CodeOutput":
                     self.codeoutput_variants.append(content[0])
+                    full_list.append({"variant": variant, "content": content[0]})
                 elif variant == "Image":
                     self.image_variants.append(content)
+                    full_list.append({"variant": variant, "content": content})
                 elif variant == "ServerHint":
                     self.server_hint_variants.append(content)
+                    full_list.append({"variant": variant, "content": content})
+                elif variant == "User" or variant == "OpenAIError" or variant == "CodeError" or variant == "StreamEnd":
+                    full_list.append({"variant": variant, "content": content})
+                else:
+                    pytest.warn(f"Unknown variant {variant} found in response!")
 
+            # If there is still a running code or assistant, add it to the list.
+            # But this shouldn't really happen, every stream should be ended with a StreamEnd variant.
+            if running_code:
+                self.code_variants.append(running_code)
+                full_list.append(("Code", running_code))
+            if running_assistant:
+                self.assistant_variants.append(running_assistant) 
+                full_list.append(("Assistant", running_assistant))
 
+            self.parsed_list = full_list
 
-            self.thread_id = json.loads(self.json_response[0]["content"])["thread_id"]
-            print("Debug: thread_id: " + self.thread_id) # Alway print the thread_id for debugging, so that when a test fails, we know which thread_id to look at.
+            self.thread_id = json.loads(self.server_hint_variants[0])["thread_id"]
+            print("Debug: thread_id: " + (self.thread_id or "None")) # Alway print the thread_id for debugging, so that when a test fails, we know which thread_id to look at.
 
     def has_error_variants(self):
         return any([ "error" in i["variant"].lower() for i in self.json_response])
 
-def generate_full_respone(user_input, chatbot=None, thread_id=None, user_id=None) -> StreamResult:
+def generate_full_response(user_input, chatbot=None, thread_id=None, user_id=None, edit_at=None) -> StreamResult:
     inner_url = "/streamresponse?input=" + user_input
     if chatbot:
         inner_url = inner_url + "&chatbot=" + chatbot
     if thread_id:
         inner_url = inner_url + "&thread_id=" + thread_id
+    if edit_at:
+        inner_url = inner_url + "&chatvariants=" + str(edit_at)
         
+    # DEBUG
+    print("Debug: Generating full response with URL: " + inner_url)
+
     # The response is streamed, but we will consume it here and store it
     result = StreamResult(chatbot)
     response = get_request(inner_url, stream=True)
-    
-    # unassembled_response = [] # Because the response may not necessary be chunked correctly. We will assemble it here.
-    # for delta in response:
-    #     if delta.decode("utf-8")[0] == "{":
-    #         unassembled_response.append(delta.decode("utf-8"))
-    #     else:
-    #         unassembled_response[-1] += delta.decode("utf-8")
-    
-    # # It's assembled now
-    # result.raw_response = unassembled_response
-    # result.json_response = [json.loads(i) for i in unassembled_response]
 
     # Because the python request library is highly unreliable when it comes to streaming, we will manually assemble the response packet by packet here. 
     raw_response = []
@@ -191,14 +216,19 @@ def print_docs():
 
 def test_available_chatbots():
     response = get_avail_chatbots()
+    assert "gpt-5" in response
+    assert "gpt-5-mini" in response
+    assert "gpt-5" in response
+    assert "gpt-5-mini" in response
     assert "gpt-4o-mini" in response
     assert "gpt-4o" in response
 
 
 def get_hello_world_thread_id() -> str:
-    response = generate_full_respone("Please use the code_interpreter tool to run the following code exactly and only once: \"print('Hello\\nWorld\\n!', flush=True)\".", chatbot="gpt-4o-mini")
+    response = generate_full_response("Please use the code_interpreter tool to run the following code exactly and only once: \"print('Hello\\nWorld\\n!', flush=True)\".", chatbot="gpt-4.1-mini")
     # Just make sure the code output contains "Hello World !"
     assert any("Hello\nWorld\n!" in i for i in response.codeoutput_variants)
+    assert response.thread_id, "No thread_id found"
     # Now return the thread_id for further testing
     return response.thread_id
 
@@ -216,7 +246,7 @@ def test_hello_world():
 
 def test_sine_wave(display = False):
     ''' Can the code_interpreter tool handle matplotlib and output an image? ''' # Base functionality test
-    response = generate_full_respone("This is a test regarding your capabilities of using the code_interpreter tool and whether it supports matplotlib. Please use the code_interpreter tool to run the following code: \"import numpy as np\nimport matplotlib.pyplot as plt\nt = np.linspace(-2 * np.pi, 2 * np.pi, 100)\nsine_wave = np.sin(t)\nplt.figure(figsize=(10, 5))\nplt.plot(t, sine_wave, label='Sine Wave')\nplt.title('Sine Wave from -2π to 2π')\nplt.xlabel('Angle (radians)')\nplt.ylabel('Sine value')\nplt.axhline(0, color='black', linewidth=0.5, linestyle='--')\nplt.axvline(0, color='black', linewidth=0.5, linestyle='--')\nplt.grid()\nplt.legend()\nplt.show()\".", chatbot="gpt-4o-mini")
+    response = generate_full_response("This is a test regarding your capabilities of using the code_interpreter tool and whether it supports matplotlib. Please use the code_interpreter tool to run the following code: \"import numpy as np\nimport matplotlib.pyplot as plt\nt = np.linspace(-2 * np.pi, 2 * np.pi, 100)\nsine_wave = np.sin(t)\nplt.figure(figsize=(10, 5))\nplt.plot(t, sine_wave, label='Sine Wave')\nplt.title('Sine Wave from -2π to 2π')\nplt.xlabel('Angle (radians)')\nplt.ylabel('Sine value')\nplt.axhline(0, color='black', linewidth=0.5, linestyle='--')\nplt.axvline(0, color='black', linewidth=0.5, linestyle='--')\nplt.grid()\nplt.legend()\nplt.show()\".", chatbot="gpt-4.1-mini")
     # We want to make sure we have generated code, code output and an image. But we want to print the assistant response if it fails.
     print(response.assistant_variants)
     assert response.code_variants
@@ -233,9 +263,9 @@ def test_sine_wave(display = False):
 
 def test_persistent_thread_storage():
     ''' Does the backend remember the content of a thread? ''' # Base functionality test
-    response = generate_full_respone("Please add 2+2 in the code_interpreter tool.", chatbot="gpt-4o-mini")
+    response = generate_full_response("Please add 2+2 in the code_interpreter tool.", chatbot="gpt-4.1-mini")
     # Now follow up with another request to the same thread_id, to test whether the storage is persistent
-    response2 = generate_full_respone("Now please multiply the result by 3.", chatbot="gpt-4o-mini", thread_id=response.thread_id)
+    response2 = generate_full_response("Now please multiply the result by 3, again in the code interpreter.", chatbot="gpt-4.1-mini", thread_id=response.thread_id)
     # The code output should now contain 12
     assert any("12" in i for i in response2.codeoutput_variants)
 
@@ -243,7 +273,7 @@ def test_persistent_thread_storage():
 def test_persistant_state_storage():
     ''' Can the backend refer to the same variable in different tool calls? ''' # Since Version 1.6.3
     # Here, we want to test whether the value of a variable is stored between tool calls (not requests)
-    response = generate_full_respone("Please assign the value 42 to the variable x in the code_interpreter tool. After that, call the tool with the code \"print(x, flush=True)\", without assigning x again. It's a test for the presistance of data.", chatbot="gpt-4o-mini")
+    response = generate_full_response("Please assign the value 42 to the variable x in the code_interpreter tool. After that, call the tool with the code \"print(x, flush=True)\", without assigning x again. It's a test for the presistance of data.", chatbot="gpt-4.1-mini")
     # The code output should now contain 42
     assert any("42" in i for i in response.codeoutput_variants)
     # Also make sure there are actually two code variants
@@ -252,32 +282,37 @@ def test_persistant_state_storage():
 
 def test_persistant_xarray_storage():
     ''' Can the backend refer to the same xarray in different tool calls? ''' # Since Version 1.6.5
-    reponse = generate_full_respone("Please generate a simple xarray dataset in the code_interpreter tool and print out the content. After that, call the tool with the code \"print(ds, flush=True)\", without generating the dataset again. It's a test for the presistance of data, specifically whether xarray Datasets also work.", chatbot="gpt-4o-mini")
+    reponse = generate_full_response("Please generate a simple xarray dataset in the code_interpreter tool and print out the content. After that, call the tool with the code \"print(ds, flush=True)\", without generating the dataset again. It's a test for the presistance of data, specifically whether xarray Datasets also work.", chatbot="gpt-4.1-mini")
     # The code output should now contain the content of the xarray dataset
     assert any(("xarray.Dataset" in i or "xarray.DataArray" in i) for i in reponse.codeoutput_variants)
     # Also make sure there are actually two code variants
     assert len(reponse.code_variants) == 2
 
 
-def test_qwen_available():
-    ''' Can the backend use non-OpenAI chatbots, such as Qwen? ''' # Since Version 1.7.1
-    # DEBUG
-    # import time
-    # time.sleep(100)
-    response = generate_full_respone("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="qwen2.5:3b")
+def test_models_available():
+    ''' Can the backend use the common models qwen2.5:3b, o4-mini and gpt-5-nano? ''' # Since Version 1.7.1, 1.10.1 and 1.10.2 respectively. 
+    qwen_response = generate_full_response("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="qwen2.5:3b")
     # The assistant output should now contain "200 Ok"
-    assert any("(200 ok)" in i.lower() for i in response.assistant_variants)
+    assert any("200 ok" in i.lower() for i in qwen_response.assistant_variants)
+
+    o4_mini_response = generate_full_response("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="o4-mini")
+    # The assistant output should now contain "200 Ok"
+    assert any("200 ok" in i.lower() for i in o4_mini_response.assistant_variants)
+
+    gpt_5_nano_response = generate_full_response("This is a test request for your basic functionality. Please respond with (200 Ok) and exit. Don't use the code interpreter, just say it.", chatbot="gpt-5-nano")
+    # The assistant output should now contain "200 Ok"
+    assert any("200 ok" in i.lower() for i in gpt_5_nano_response.assistant_variants)
 
 
 def test_qwen_code_interpreter():
     ''' Can the backend get a code response from Qwen? ''' # Since Version 1.7.1
-    response = generate_full_respone("Please use the code_interpreter tool to run `print(2938429834 * 234987234)`. Make sure to adhere to the JSON format!", chatbot="qwen2.5:3b")
+    response = generate_full_response("Please use the code_interpreter tool to run `print(2938429834 * 234987234)`. Make sure to adhere to the JSON format!", chatbot="qwen2.5:3b")
     # The code output should now contain the result of the multiplication
     assert any("690493498994739156" in i for i in response.codeoutput_variants)
 
 def test_heartbeat():
     ''' Can the backend send a heartbeat while a long calculation is running? ''' # Since Version 1.8.1
-    response = generate_full_respone("Please use the code_interpreter tool to run the following code: \"import time\ntime.sleep(7)\".", chatbot="gpt-4o-mini")
+    response = generate_full_response("Please use the code_interpreter tool to run the following code: \"import time\ntime.sleep(7)\".", chatbot="gpt-4.1-mini")
     # There should now, in total be at least three ServerHint Variants
     assert len(response.server_hint_variants) >= 3
     # The second Serverhint (first is thread_id) should be JSON containing "memory", "total_memory", "cpu_last_minute", "process_cpu" and "process_memory"
@@ -294,7 +329,7 @@ def test_heartbeat():
 
 def test_syntax_hinting():
     ''' Can the backend provide extended hints on syntax errors? ''' # Since Version 1.8.4
-    response = generate_full_respone("Please use the code_interpreter tool to run the following code: \"print('Hello World'\". This is a test for the improved syntax error reporting. If a hint containing the syntax error is returned, the test is successful.", chatbot="gpt-4o-mini")
+    response = generate_full_response("Please use the code_interpreter tool to run the following code: \"print('Hello World'\". This is a test for the improved syntax error reporting. If a hint containing the syntax error is returned, the test is successful.", chatbot="gpt-4.1-mini")
     # We can now check the Code Output for the string "Hint: the error occured on line", as well as "SyntaxError"
     assert any("Hint: the error occured on line" in i for i in response.codeoutput_variants)
     assert any("SyntaxError" in i for i in response.codeoutput_variants)
@@ -303,28 +338,16 @@ def test_regression_variable_storage():
     ''' Does the backend correctly handle the edge case of variable storage? ''' # Since Version 1.8.9
     input = "This is a test on a corner case of the code_interpreter tool: variables don't seem to be stored if the code errors before the last line.\
 To test this. Please run the following code: \"x = 42\nraise Exception('This is a test exception')\nprint('Padding for last-line-logic')\","
-    response = generate_full_respone(input, chatbot="gpt-4o-mini")
+    response = generate_full_response(input, chatbot="gpt-4.1-mini")
     # The code output should now contain the exception message
-    assert any("This is a test exception" in i for i in response.codeoutput_variants)
+    assert any(["This is a test exception" in i for i in response.codeoutput_variants])
+    assert any(["This is a test exception" in i for i in response.codeoutput_variants])
 
     # Now make sure the variable x is still stored
-    response2 = generate_full_respone("Now print the value of x without assigning it again.", chatbot="gpt-4o-mini", thread_id=response.thread_id)
+    response2 = generate_full_response("Please demonstrate the fact that the code interpreter does not persist variables after exceptions by printing x without reassigning it.", chatbot="gpt-5-mini", thread_id=response.thread_id)
     # The code output should now contain 42
-    assert any("42" in i for i in response2.codeoutput_variants)
-
-### This test is temporarily disabled because o3-mini just doesn't call the tool more than 95% of the time and I don't want to waste resources on it.
-def test_o3_mini_available():
-    pass
-#     ''' Can the backend use the O3-Mini chatbot, including for code_interpreter tool calls? ''' # Since Version 1.8.13
-#     response = generate_full_respone("This is a test request for your basic functionality. Please use the code_interpreter tool to run `print('Hello World')`. Remember to call the tool!", chatbot="o3-mini")
-#     # The Code Output should now contain "Hello World"
-#     # o3-mini is, however, quite confused by tool calling, so often, it declares that it will run the code and then just not do it. 
-#     # So, if there is no code output, we'll just let it try again. 
-#     if len(response.codeoutput_variants) > 0:
-#         assert any("hello world" in i.lower() for i in response.codeoutput_variants)
-#     else:
-#         response2 = generate_full_respone("Thanks, please run the code now.", chatbot="o3-mini", thread_id=response.thread_id)
-#         assert any("hello world" in i.lower() for i in response2.codeoutput_variants) # No third try, if it fails again, it's a fail.
+    assert any(["42" in i for i in response2.codeoutput_variants])
+    assert any(["42" in i for i in response2.codeoutput_variants])
 
 def test_third_request():
     '''Can the backend store information the user gave over multiple requests?''' # Since Version 1.8.14
@@ -332,33 +355,38 @@ def test_third_request():
     # Basically, I forgot to append the existing thread, so the conten was just overwritten.
     # This lead to the chatbot not being able to recall what the user wrote in their first request, once they do a third request, hence the name.
     
-    # response1 = generate_full_respone("Please remember the following information: \"I am a software engineer and I like to play chess\".", chatbot="gpt-4o-mini")
+    # response1 = generate_full_response("Please remember the following information: \"I am a software engineer and I like to play chess\".", chatbot="gpt-4o-mini")
     # This doesn't work well because it technically does work, but is not in the style of what frevaGPT was designed to work with.
-    response1 = generate_full_respone("Hi! I'm Sebastian from the DRKZ. Who are you?", chatbot="gpt-4o-mini")
+    response1 = generate_full_response("Hi! I'm Sebastian from the DRKZ. Who are you?", chatbot="gpt-4.1-mini")
     # The assistant should now remember the users name.
-    response2 = generate_full_respone("Nice to meet you! What do you think about chess?", chatbot="gpt-4o-mini", thread_id=response1.thread_id) # Just some filler. I'm not good at small talk.
+    response2 = generate_full_response("Nice to meet you! What do you think about chess?", chatbot="gpt-4.1-mini", thread_id=response1.thread_id) # Just some filler. I'm not good at small talk.
     
-    response3 = generate_full_respone("What was my name again?", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
+    response3 = generate_full_response("What was my name again?", chatbot="gpt-4.1-mini", thread_id=response1.thread_id)
     
     assert any("Sebastian" in i for i in response3.assistant_variants)
 
 
+should_test_mongo = True
 def test_get_user_threads():
     ''' Can the Frontend request the threads of a user? ''' # Since Version 1.9.0
     # Version 1.9.0 introduced the ability to request the threads of a user.
     # This requires MongoDB to be turned on, so this switch can be turned off to disable this feature.
-    should_test = True
-    if should_test:
+    if should_test_mongo:
         response = get_user_threads()
+        # Since Version 1.11.0, this also includes the total number of threads.
+        assert (isinstance(response, list) or (isinstance(response, tuple)) and len(response) == 2)
+        threads, num_threads = response
+        assert isinstance(num_threads, int)
+        assert num_threads >= len(threads)
         # The response should be a list of threads, each with a thread_id and a chatbot name
-        assert isinstance(response, list)
-        assert all(isinstance(i, dict) for i in response)
-        assert all("thread_id" in i for i in response)
-        assert all("user_id" in i for i in response)
-        assert all("date" in i for i in response)
-        assert all("topic" in i for i in response)
-        assert all("content" in i for i in response)
-        for i in response:
+        assert isinstance(threads, list)
+        assert all(isinstance(i, dict) for i in threads)
+        assert all("thread_id" in i for i in threads)
+        assert all("user_id" in i for i in threads)
+        assert all("date" in i for i in threads)
+        assert all("topic" in i for i in threads)
+        assert all("content" in i for i in threads)
+        for i in threads:
             assert isinstance(i["thread_id"], str)
             assert isinstance(i["user_id"], str)
             assert isinstance(i["date"], str)
@@ -371,13 +399,82 @@ def test_get_user_threads():
             assert all("content" in j for j in inner_content)
         
 
+def test_update_topic():
+    ''' Can the frontend update the topic of a past thread?''' # Since Version 1.11.1
+    if not should_test_mongo:
+        return
+    # So there is the get_user_threads endpoint which returns the past few threads of a user. 
+    # We'll grab the latest thread, check the topic, set it to another value, and check whether that worked. 
+    response = get_user_threads()
+    print(response)
+    threads = response[0]
+    latest_thread = threads[0] if threads else None
+    assert latest_thread is not None, "No threads found"
+
+    old_topic = latest_thread["topic"]
+    new_topic = old_topic + " - Updated" # To make sure it can never accidentally match the old topic
+
+    result = set_thread_topic(latest_thread["thread_id"], new_topic)
+    print(result)
+
+    updated_thread = get_user_threads()[0][0] # First thread (second top level item is the total number of threads of that user.)
+    assert updated_thread["topic"] == new_topic, "Failed to update thread topic"
+
+
+def test_get_user_threads_paginated():
+    ''' Can the frontend request a specific page of threads?''' # Since Version 1.11.1
+    if not should_test_mongo:
+        return
+
+    # We'll run a standard request against get_user threads with n=2 and then another with page = 1 and check that no thread is in both results.
+    response_page_0 = get_user_threads(num_threads=2) # page = 0 is implied
+    response_page_1 = get_user_threads(num_threads=2, page=1)
+    thread_ids_0 = set([i["thread_id"] for i in response_page_0[0]])
+    thread_ids_1 = set([i["thread_id"] for i in response_page_1[0]])
+    
+    # Set intersection should be empty. 
+    assert not thread_ids_0 & thread_ids_1, "Threads should be different between pages"
+
+def test_query_database():
+    ''' Can the frontend query the database?''' # Since Version 1.11.1
+    if not should_test_mongo:
+        return
+
+    response = search_database("test")
+    print(response)
+    # We can't test this in a useful way, so we'll just check that everything is in the right format.
+    assert response is not None
+    assert isinstance(response, list)
+    assert len(response) == 2 # First is the content, second is the total number of results
+    assert response[1] >= len(response[0])
+    response = response[0] # Check the content
+    assert isinstance(response, list)
+    for i in response:
+        assert "thread_id" in i
+        assert "user_id" in i
+        assert "date" in i
+        assert "topic" in i
+        assert "content" in i
+
+def test_query_database_prefix():
+    ''' Can the frontend query the database while specifying the variant where the query string occured?''' # Since Version 1.11.1
+    # The prefix is a bit underdocumented, but if we specify "ai:sorry", it should specifically search for threads where the assistant said sorry. 
+    # This is again quite hard to test for, so we instead to two request, where the second replaces the colon with a space and check whether that changes the result
+    if not should_test_mongo:
+        return
+    response_ai = search_database("user :introduction")
+    print(response_ai)
+    response_space = search_database("user introduction")
+    print(response_space)
+    assert response_ai != response_space, "Responses should be different"
 
 def test_use_rw_dir():
     ''' Does the LLM understand how it can use the rw directory? ''' # Since Version 1.9.0
     # The rw directory is a directory that the LLM can use to store and load files for the user.
     # This is a test to see if the LLM can use it correctly.
     # It should also infer that if the user wants to save a file, it should use the rw directory.
-    response = generate_full_respone("This is a test. Please generate a plot of a sine wave from -2π to 2π and save it as a PNG file. Remember to save it in the proper location.", chatbot="gpt-4o-mini")
+    #TODO: remove the hint for user_id and thread_id and make sure it still works
+    response = generate_full_response("This is a test. Please generate a plot of a sine wave from -2π to 2π and save it as a PNG file. Remember to save it in the proper location with user_id and thread_id.", chatbot="gpt-4.1-mini")
     # print(response)
     # Afer this, it should have generated a file in the rw directory.
     # Specifically, at "rw_dir/testing/{thread_id}/????.png"
@@ -398,7 +495,7 @@ def test_user_vision():
     ''' Can the LLM see the output that it generated? ''' # Since Version 1.10.0
 
     # The LLM should be able to see the image that the code it wrote generated.
-    response = generate_full_respone("You should have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates, save the image somehwere or write any code except for the plotting of the X! Look at the generated image instead.", chatbot="gpt-4o-mini")
+    response = generate_full_response("You should have access to vision capabilities. To test them, please generate two random numbers, x and y, between -1 and 1, without printing them, and plot a big red X at the position (x, y) in a 100x100 pixel image. Then please tell me where the X is located in the image, whether it's up, down, left, right or in the center. Do not print the coordinates, save the image somehwere or write any code except for the plotting of the X! Look at the generated image instead.", chatbot="gpt-4.1-mini")
 
     # print(response) # Debug
 
@@ -428,34 +525,126 @@ def test_non_alphanumeric_user_id():
         global global_user_id
         global_user_id = "example@web.de" # This is a valid email address, but contains non-alphanumeric characters.
         # Now we can run the test
-        response = generate_full_respone("This is simple test. Please just return 'OK' and exit.", chatbot="gpt-4o-mini")
+        response = generate_full_response("This is simple test. Please just return 'OK' and exit.", chatbot="gpt-4.1-mini")
         # The response should contain "OK"
         assert any("OK" in i for i in response.assistant_variants), "Assistant did not return 'OK'! Instead, it returned: " + ", ".join(response.assistant_variants)
     finally:
         # Reset the user ID to the default value, so that the other tests can run without issues.
         global_user_id = "testing"
         
-
-def test_mcp_server():
-    ''' Can the backend use an MCP server? ''' # Since Version 1.10.1
-    # Version 1.10.1 introduced the ability to use arbitrary local MCP servers.
-    # This is a simple test to make sure that the backend can connect to a local MCP server and use it.
-
-    # First, asks it whether it finds the MCP tool. 
-    response1 = generate_full_respone("Hi! I recently added support for MCP tools by translating the MCP protocol. You should have acces to the 'hostname' tool, do you see it?", chatbot="gpt-4o-mini")
+def test_edit_input():
+    ''' Can the backend handle edits to the user input? ''' # Since Version 1.10.3
+    # For the EVE demonstration, we want the capability to edit a past user input.
+    # This is a test for whether the backend can handle that.
+    response1 = generate_full_response("Hi, I'm Sebastian! Who are you?", chatbot="gpt-4o-mini") # Give it my name, to later test whether it remembers it.
+    # The response content doesn't matter yet.
+    response2 = generate_full_response("Nice to meet you! I've heard about the DKRZ and am a student of the university of Hamburg. Where is the DKRZ located?", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
     
-    assert any("hostname" in i.lower() for i in response1.assistant_variants), "The MCP tool 'hostname' was not found in the list of tools. Please check your MCP server configuration."
+    # Now we can edit the second request to run the test. 
+    # The LLM should have remembered my name, but not the fact that I am a student of the university of Hamburg.
+    response3 = generate_full_response("Thank you. This is a test for the functionality to edit existing requests. What do you know about me?", chatbot="gpt-4o-mini", thread_id=response1.thread_id, edit_at=["User", "Assistant"])
+    # The response should contain my name, but not the fact that I am a student of the university of Hamburg.
+    assert "sebastian" in "".join(response3.assistant_variants).lower(), "Assistant did not remember my name! Instead, it returned: " + ", ".join(response3.assistant_variants)
+    assert "student" not in "".join(response3.assistant_variants).lower(), "Assistant remembered the fact that I am a student of the university of Hamburg, but it should not have"
+    assert "university of hamburg" not in "".join(response3.assistant_variants).lower(), "Assistant remembered the fact that I am a student of the university of Hamburg, but it should not have"
 
-    # Then ask it to use the MCP tool.
-    response2 = generate_full_respone("Great! Please use it and tell me what the result is.", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
-    # The response should contain the current time in the format "YYYY-MM-DD HH:MM:SS"
-    print(response2)
+    # Additionally, the new response needs to have a different thread_id, so we can test that.
+    assert response3.thread_id != response1.thread_id, "The thread_id of the edited response is the same as the original response! It should be different, so that the frontend can handle it correctly."
+
+    # And that new thread_id should also be stored in the database, so we can test that.
+    # We know what it should contain.
+    retrived_thread = get_thread_by_id(response3.thread_id)
+    assert retrived_thread, "The thread with the edited response was not found in the database! It should have been stored, so that the frontend can handle it correctly."
+    print("retrived_thread: ", retrived_thread)
     
-    # Get the actual hostname to compare it with the response.
-    import socket
-    expected_hostname = socket.gethostname()
-    # The response should contain the hostname, so we check if it does.
-    assert any(expected_hostname in i for i in response2.codeoutput_variants), f"The MCP tool did not return the expected hostname. Expected: {expected_hostname}, but got: {response2.codeoutput_variants}"
+    # There may be some other variants in the thread still, so we only keep those that are User or Assistant.
+    retrived_thread = [i for i in retrived_thread if i["variant"] in ["User", "Assistant"]]
+    # Now we can check the length of the thread.
+    # There should be 4 variants in total, the first and third should be User, and the second and fourth should be Assistant.
+    # The first variant is the User input, the second variant is the Assistant response, the third variant is the User edit, and the fourth variant is the Assistant response to the edit.
+
+    assert len(retrived_thread) == 4, "The thread with the edited response should have 4 variants, but it has " + str(len(retrived_thread)) + "."
+    # The first and third variants should be User, and the second and fourth variants should be Assistant.
+    assert retrived_thread[0]["variant"] == retrived_thread[2]["variant"] == "User", "The first and third variants of the thread with the edited response should be User, but they are not."
+    assert retrived_thread[1]["variant"] == retrived_thread[3]["variant"] == "Assistant", "The second and fourth variants of the thread with the edited response should be Assistant, but they are not."
+
+    # Recently, the protocol for the edit functionality changed slightly, so that the previous variants, before the edit point are also sent. 
+    # This makes it easier for the frontend to display the thread correctly. But now the test case above has changed, so we'll add some additional checks.
+    # NOTE: the user variant is NOT sent from the backend, so the entire thread EXPECT the edited user input will be sent. 
+    # The Serverhint variant will be where the edit is indicated.
+
+    # We'll not use the thread from the database, but rather the one from the response, to make sure that the response is correct.
+    retrived_thread = [ i for i in response3.parsed_list if i["variant"] in ["User", "Assistant"] ]
+
+    print("retrived_thread of response: ", retrived_thread)
+
+    # There should be 3 variants in total, where the first is User, the second is Assistant, and the third is Assistant.
+
+    assert len(retrived_thread) == 3, "The edited response should have 3 variants, but it has " + str(len(retrived_thread)) + ". Instead, it has the following variants: " + str(retrived_thread)
+    
+    assert retrived_thread[0]["variant"] == "User", "The first variant of the thread with the edited response should be User, but it is " + retrived_thread[0]["variant"] + "."
+    assert retrived_thread[1]["variant"] == "Assistant", "The second variant of the thread with the edited response should be Assistant, but it is " + retrived_thread[1]["variant"] + "."
+    assert retrived_thread[2]["variant"] == "Assistant", "The third variant of the thread with the edited response should be Assistant, but it is " + retrived_thread[2]["variant"] + "."
+
+    # Additionally, the content of the user variant is known and should be checked.
+    assert retrived_thread[0]["content"] == "Hi, I'm Sebastian! Who are you?", "The content of the first variant of the thread with the edited response is not correct! It should be \"Hi, I'm Sebastian! Who are you?\", but it is \"" + retrived_thread[0]["content"] + "\"."
+    # The content of the second and third variants is not known, so we won't check them. 
+    
+
+def test_edit_input_with_code():
+    ''' If the frontend sends an edit request with code, does the backend handle it correctly? ''' # Since Version 1.10.3
+    # Because the backend has python pickles to store the variables, it should be able to handle edits with code.
+    
+    # We'll do the same setup as in previous tests for persistant; so one request to set a variable, a test request to check the variable, and then an edit request to change the variable.
+    response1 = generate_full_response("Please assign the value 42 to the variable x in the code_interpreter tool. After that, call the tool with the code \"print(x, flush=True)\", without assigning x again. It's a test for the presistance of data.", chatbot="gpt-4o-mini")
+    # The code output should now contain 42
+    assert any("42" in i for i in response1.codeoutput_variants)
+    assert len(response1.code_variants) == 2, "The code variants should contain two variants, one for the assignment of x and one for the print statement."
+
+    response2 = generate_full_response("Now print the value of x without assigning it again.", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
+    # The code output should now contain 42
+    assert any("42" in i for i in response2.codeoutput_variants)
+    assert all("x=" not in i for i in response2.code_variants), "The code variants should not contain the assignment of x, as it was already assigned in the first request."
+
+    # Now we can edit the second request to the same input, but in a different thread, to test whether the value of x is still stored.
+    response3 = generate_full_response("Now print the value of x without assigning it again.", chatbot="gpt-4o-mini", thread_id=response1.thread_id, edit_at=["User", "Code", "CodeOutput", "Code", "CodeOutput"])
+    # The code output should now contain 42 again, as the value of x should still be stored.
+    assert any("42" in i for i in response3.codeoutput_variants), "The code output should contain 42, as the value of x should still be stored, but it does not. Instead, it returned: " + ", ".join(response3.codeoutput_variants) 
+    assert all("x=" not in i for i in response3.code_variants), "The code variants should not contain the assignment of x, as it was already assigned in the first request and should still be stored. Instead, it returned: " + ", ".join(response3.code_variants)
+    
+
+def test_get_user_threads_with_n():
+    ''' Can the Frontend request a specific number of threads of a user? ''' # Since Version TODO
+    # This test is again dependant on MongoDB being turned on.
+    if should_test_mongo:
+        # We'll ask for 12 threads and assume their format is correct as the other test already tested that.
+        response = get_user_threads(num_threads=12)
+        threads, num_threads = response
+        assert num_threads >= 12, "User does not have 12 threads yet, cannot test."
+        assert len(threads) == 12, "Expected 12 threads, but got: " + str(len(threads))
+
+# TODO: After implementing the MCP code interpreter and using it to replace the legacy code interpreter, delete this test.
+
+# def test_mcp_server():
+#     ''' Can the backend use an MCP server? ''' # Since Version 1.10.1
+#     # Version 1.10.1 introduced the ability to use arbitrary local MCP servers.
+#     # This is a simple test to make sure that the backend can connect to a local MCP server and use it.
+
+#     # First, asks it whether it finds the MCP tool. 
+#     response1 = generate_full_response("Hi! I recently added support for MCP tools by translating the MCP protocol. You should have acces to the 'hostname' tool, do you see it?", chatbot="gpt-4o-mini")
+    
+#     assert any("hostname" in i.lower() for i in response1.assistant_variants), "The MCP tool 'hostname' was not found in the list of tools. Please check your MCP server configuration."
+
+#     # Then ask it to use the MCP tool.
+#     response2 = generate_full_response("Great! Please use it and tell me what the result is.", chatbot="gpt-4o-mini", thread_id=response1.thread_id)
+#     # The response should contain the current time in the format "YYYY-MM-DD HH:MM:SS"
+#     print(response2)
+    
+#     # Get the actual hostname to compare it with the response.
+#     import socket
+#     expected_hostname = socket.gethostname()
+#     # The response should contain the hostname, so we check if it does.
+#     assert any(expected_hostname in i for i in response2.codeoutput_variants), f"The MCP tool did not return the expected hostname. Expected: {expected_hostname}, but got: {response2.codeoutput_variants}"
 
 # --------------------------------
 # -- Mock Authentication Server --
@@ -475,16 +664,16 @@ def auth():
     password = os.getenv("LOCAL_MONGODB_PASSWORD", "testing")
     
     return jsonify({
-        "mongodb.url": f"mongodb://{username}:{password}@localhost:27017",
+        "mongodb.url": f"mongodb://{username}:{password}@localhost:27017/?directConnection=true&authSource=admin",
     }), 200
 
-@app.route("/api/freva-nextgen/auth/v2/userinfo", methods=["GET"])
-def userinfo():
+@app.route("/api/freva-nextgen/auth/v2/systemuser", methods=["GET"])
+def systemuser():
     # This would usually return the user information, but for testing, we just return a dummy response.
     # The backend needs to retrieve the user ID from here, so we return a dummy user ID.
     return jsonify({
         "user_id": global_user_id,
-        "username": "testing",
+        "pw_name": "testing",
     }), 200
 
 # Run the mock authentication server
@@ -499,8 +688,14 @@ def run_auth_server():
             if response.status_code == 200:
                 print("MongoDB is up and running.")
                 break
-        except requests.ConnectionError:
-            print("Waiting for MongoDB to start...")
+        except requests.ConnectionError as e:
+            print("Waiting for MongoDB to start...", str(e))
+            # Note that, because the local MongoDB noew requires authentication, this might crash with RemoteDisconnect, which is fine, but we need to catch it.
+            # So if it is a "RemoteDisconnected('Remote end closed connection without response')", we also break.
+            if "RemoteDisconnected" in str(e):
+                print("MongoDB is up and running (RemoteDisconnected).")
+                break
+            
             time.sleep(1)
             attempts += 1
     else:

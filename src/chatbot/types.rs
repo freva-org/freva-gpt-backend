@@ -1,7 +1,5 @@
-use core::fmt;
-
 use async_openai::types::{
-    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage, ChatCompletionRequestMessageContentPartImage, ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall, ImageUrl
+    ChatCompletionMessageToolCall, ChatCompletionRequestAssistantMessage, ChatCompletionRequestMessage, ChatCompletionRequestMessageContentPartImage, ChatCompletionRequestUserMessage, ChatCompletionToolType, FunctionCall, ImageDetail, ImageUrl
 };
 use documented::Documented;
 use serde::{Deserialize, Serialize, de::Error};
@@ -48,9 +46,11 @@ pub struct ActiveConversation {
 /// `{"variant": "Code", "content": "{\"code\":\"LLM Code here\"}"`
 ///
 /// CodeOutput: The output of the code that was executed, as a String. Also not formatted.
+/// Contains tracebacks if the code itself threw an exception and also hints to the line where the exception occured.
 ///
 /// Image: An image that was generated during the conversation, as a String. The image is Base64 encoded.
 /// An example of this would be a matplotlib plot. The image format should always be PNG.
+/// LLMs that support vision will be given the image to look at.
 ///
 /// ServerError: An error that occured on the server(backend) side, as a String. Contains the error message.
 /// The client should realize that this error occured and handle it accordingly; ServerErrors should immeadiately be followed by a StreamEnd.
@@ -59,12 +59,14 @@ pub struct ActiveConversation {
 /// These are often for the rate limits, but can also be for other things, i.E. if the API is down or a tool call took too long.
 ///
 /// CodeError: The Code from the LLM could not be executed or there was some other error while setting up the code execution.
+/// A successful code execution that itself threw an exception will not result in a CodeError, but in a CodeOutput containing the traceback.
 ///
 /// StreamEnd: The Stream ended. Contains a reason as a String. This is always the last message of a stream.
 /// If the last message is not a StreamEnd but the stream ended, it's an error from the server side and needs to be fixed.
 ///
 /// ServerHint: The Server hints something to the client. This is primarily used for giving the thread_id, but also for warnings.
-/// The Content is in JSON format, with the key being the hint and the value being the content. Currently, only the keys "thread_id" and "warning" are used.
+/// The Content is in JSON format, with the key being the hint and the value being the content. Mainly, the keys "thread_id" and "warning" are used,
+/// but the heartbeat during code execution may also contain "memory", "total_memory", "cpu_usage" and "cpu_last_minute", as well as "process_cpu" and "process_memory".
 /// An example for a ServerHint packet would be `{"variant": "ServerHint", "content": "{\"thread_id\":\"1234\"}"}`.
 /// That means that the content needs to be parsed as JSON to get the actual content.
 #[derive(Debug, Serialize, Deserialize, Clone, Documented, PartialEq, Eq, strum::VariantNames)]
@@ -96,23 +98,23 @@ pub enum StreamVariant {
     ServerHint(String),
 }
 
-impl fmt::Display for StreamVariant {
-    // A helper function to convert the StreamVariant to a String, will be used later when writing to the thread file.
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let result = match self {
-            Self::Prompt(s) => format!("Prompt:{s}"),
-            Self::User(s) => format!("User:{s}"),
-            Self::Assistant(s) => format!("Assistant:{s}"),
-            Self::Code(s, id, name) => format!("{name}:{s}:{id}"),
-            Self::CodeOutput(s, id) => format!("CodeOutput:{s}:{id}"),
-            Self::Image(s) => format!("Image:{s}"),
-            Self::ServerError(s) => format!("ServerError:{s}"),
-            Self::OpenAIError(s) => format!("OpenAIError:{s}"),
-            Self::CodeError(s) => format!("CodeError:{s}"),
-            Self::StreamEnd(s) => format!("StreamEnd:{s}"),
-            Self::ServerHint(s) => format!("ServerHint:{s}"), // It's a JSON string, we can just write it as is.
-        };
-        write!(f, "{result:?}")
+/// Converts a StreamVariant to its canonical Name. 
+/// Note that Display::fmt for StreamVariant was removed as it wasn't used anymore outside of this function.
+pub fn variant_name(variant: &StreamVariant) -> String {
+    // In order to have a single source of truth, we'll use the Display::fmt implementation to get the name of the variant.
+    // format!("{variant}").split_once(":").unwrap_or(("", "")).0.strip_prefix("\"").unwrap_or_default().to_string()
+    match *variant {
+        StreamVariant::Prompt(_) => "Prompt".to_string(),
+        StreamVariant::User(_) => "User".to_string(),
+        StreamVariant::Assistant(_) => "Assistant".to_string(),
+        StreamVariant::Code(_, _, _) => "Code".to_string(),
+        StreamVariant::CodeOutput(_, _) => "CodeOutput".to_string(),
+        StreamVariant::Image(_) => "Image".to_string(),
+        StreamVariant::ServerError(_) => "ServerError".to_string(),
+        StreamVariant::OpenAIError(_) => "OpenAIError".to_string(),
+        StreamVariant::CodeError(_) => "CodeError".to_string(),
+        StreamVariant::StreamEnd(_) => "StreamEnd".to_string(),
+        StreamVariant::ServerHint(_) => "ServerHint".to_string(),
     }
 }
 
@@ -124,6 +126,7 @@ pub enum ConversionError {
     VariantHide(&'static str), // Some variants are only for the backend, so they should not be converted.
     ParseError(&'static str),  // An error occured during parsing the prompt.
     CodeCall(String, String, String),  // A Code Call was found, which needs to be handled differently.
+    Image(String), // An image was found, which needs to be handled depending on the model.
 }
 
 /// A helper function to convert the `StreamVariant` to a `ChatCompletionRequestMessage`.
@@ -468,23 +471,30 @@ pub fn help_convert_sv_ccrm(input: Vec<StreamVariant>, send_images: bool) -> Vec
                     if let Some(buffer) = assistant_message_buffer.clone() {
                         all_oai_messages.push(ChatCompletionRequestMessage::Assistant(
                             ChatCompletionRequestAssistantMessage {
-                                ..buffer //TODO: This looks weird?
+                                ..buffer
                             },
                         ));
                         assistant_message_buffer = None; // Clear the buffer before sending the image.
                     }
                     // The image needs to be sent as a user message, because that's the protocol for some reason. 
 
+                    let url = "data:image/png;base64,".to_string() + &base64_encoded_image; // Should always be a PNG.
+                    trace!("Sending Image to LLM: {}", url);
+
                     let image_message = ChatCompletionRequestMessage::User(
                         ChatCompletionRequestUserMessage {
                             name: Some("frevaGPT".to_string()),
                             content: async_openai::types::ChatCompletionRequestUserMessageContent::Array(
                                 vec![
-
+                                    async_openai::types::ChatCompletionRequestUserMessageContentPart::Text(
+                                        async_openai::types::ChatCompletionRequestMessageContentPartText {
+                                            text: "Here is the image returned by the Code Interpreter.".to_string(),
+                                        }
+                                    ),
                                     async_openai::types::ChatCompletionRequestUserMessageContentPart::ImageUrl(ChatCompletionRequestMessageContentPartImage{
                                         image_url: ImageUrl {
-                                            url: "data:image/png;base64,".to_string() + &base64_encoded_image, // Should always be a PNG. 
-                                            ..Default::default()
+                                            url,
+                                            detail: Some(ImageDetail::High),
                                         }
                                     }),
                                     ]

@@ -4,21 +4,23 @@ use actix_web::{HttpRequest, HttpResponse, Responder};
 use documented::docs_const;
 use tracing::{debug, trace, warn};
 
+use crate::auth::get_first_matching_field;
+
 use super::{types::ConversationState, ACTIVE_CONVERSATIONS};
 
 // TODO: guarentee panic safety
 
 /// # Stop
-/// Stops the conversation with the given thread ID as soon as possible.
+/// Stops the conversation with the given thread ID as soon as possible. Requires Authentication.
 ///
-/// Takes in a `thread_id` and the `auth_key`.
+/// Takes in a `thread_id`.
 /// The thread_id identifies the conversation to stop.
-/// The auth_key needs to match the one on the backend for the request to be authorized.
-/// As with the other endpoints too, an Authorization header with an OpenID Connect token is also accepted.
 ///
-/// If the auth key is not given or does not match the one on the backend, an Unauthorized response is returned.
+/// If the thread id is not given, an UnprocessableEntity response is returned.
 ///
-/// If the thread id is not given, a BadRequest response is returned.
+/// If the thread could not be found, a NotFound response is returned.
+///
+/// If the thread was not running, a Conflict response is returned.
 ///
 /// If there is an error stopping the conversation, an InternalServerError response is returned.
 #[docs_const]
@@ -37,7 +39,12 @@ pub async fn stop(req: HttpRequest) -> impl Responder {
     let _maybe_username = crate::auth::authorize_or_fail!(qstring, headers);
 
     // Try to get the thread ID from the request's query parameters.
-    let thread_id = match qstring.get("thread_id") {
+    let thread_id = match get_first_matching_field(
+        &qstring,
+        headers,
+        &["thread_id", "x-thread-id", "thread-id"],
+        false,
+    ) {
         None | Some("") => {
             // If the thread ID is not found, we'll return a 422
             warn!("The User requested a stop without a thread ID.");

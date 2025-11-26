@@ -104,25 +104,27 @@ def get_new_or_changes_documents(documents, db):
 
 
 def postprocessing_query_result(query_results):
-    context = ""
+    context = []
     for result in query_results:
         resource_type = result[0].get("resource_type")
         if resource_type == "document":
-            if context: 
-                context += "\n\n"
-            context += "Here is some context that you can refer to answer the question:\n\n"
+            # if context: 
+            #     context += "\n\n"
+            # context += "Here is some context that you can refer to answer the question:\n\n"
             chunks_sorted = sorted(result, key=itemgetter("document", "chunk_id"))
-            context += "\n\n".join(document["content"] for document in chunks_sorted)
+            # The content is the JSON of each chunk
+            context.append({ "kind": "document", "content": [document["content"] for document in chunks_sorted] })
 
         elif resource_type == "example":
-            if context: 
-                context += "\n\n"
-            context += "Here are some examples that can help you answer the question:\n\n"\
-                       f"### EXAMPLES BEGIN ###\n\n"
+            # if context: 
+            #     context += "\n\n"
+            # context += "Here are some examples that can help you answer the question:\n\n"\
+            #            f"### EXAMPLES BEGIN ###\n\n"
             chunks_sorted = sorted(result, key=itemgetter("document", "chunk_id"))
-            context += "\n\n".join(document["content"] for document in chunks_sorted)
-            context += "\n\n### EXAMPLES END ###"
+            context.append({ "kind": "example", "content": [document["content"] for document in chunks_sorted] })
+            # context += "\n\n### EXAMPLES END ###"
 
         else:
             raise (ValueError, f"Unknown resource type: {resource_type}")
+
     return context

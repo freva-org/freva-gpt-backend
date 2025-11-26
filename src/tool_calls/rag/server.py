@@ -21,7 +21,9 @@ logger = configure_logger()
 LITE_LLM_ADDRESS = os.getenv("LITE_LLM_ADDRESS", "http://litellm:4000")
 CLEAR_MONGODB_EMBEDDINGS = os.getenv("CLEAR_MONGODB_EMBEDDINGS", "0").lower() in {"1","true","yes"}
 
-_disable_auth = os.getenv("MCP_DISABLE_AUTH", "0").lower() in {"1","true","yes"}  # for local testing
+
+# _disable_auth = os.getenv("MCP_DISABLE_AUTH", "0").lower() in {"1","true","yes"}  # for local testing
+_disable_auth = True # DEBUG, TODO: remove
 mcp = FastMCP("rag_server", auth=None if _disable_auth else jwt_verifier)
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -147,7 +149,9 @@ def get_query_results(query: str, resource_name):
         query_results.append(list(col.aggregate(pipeline)))
 
     if query_results:
-        return postprocessing_query_result(query_results)
+        postprocessed = postprocessing_query_result(query_results)
+        # Convert from object to string using JSON
+        return json.dumps(postprocessed)
     else:
         logger.info("No results found for the query.")
         return "No content found."

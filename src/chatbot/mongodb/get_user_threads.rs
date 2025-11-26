@@ -1,0 +1,94 @@
+use actix_web::{HttpRequest, HttpResponse, Responder};
+use documented::docs_const;
+use tracing::{debug, trace, warn};
+
+use crate::{
+    auth::{get_first_matching_field, get_mongodb_uri},
+    chatbot::mongodb::mongodb_storage::{get_database_from_uri, read_threads_and_num},
+};
+
+/// # getuserthreads
+/// Takes in a vault_url and returns the latest n threads of the user. Requires Authentication.
+/// n is an optional parameter that defaults to 10.
+/// if a page number (0-based) is passed, it instead paginates and uses that page number
+///
+/// If the vault_url is missing or empty, an UnprocessableEntity response is returned.
+///
+/// If the user cannot be authenticated, an Unauthorized response is returned.
+///
+/// If the database cannot be connected to, a ServiceUnavailable response is returned.
+#[docs_const]
+pub async fn get_user_threads(req: HttpRequest) -> impl Responder {
+    let qstring = qstring::QString::from(req.query_string());
+    let headers = req.headers();
+
+    debug!("Query string: {:?}", qstring);
+    // debug!("Headers: {:?}", headers);
+
+    // First try to authorize the user.
+    let user_id = crate::auth::authorize_or_fail!(qstring, headers);
+
+    debug!("User ID: {}", user_id);
+
+    // We first need to check whether we have a vault URL to connect to the database from.
+    let maybe_vault_url = get_first_matching_field(
+        &qstring,
+        headers,
+        &[
+            "x-freva-vault-url",
+            "x-vault-url",
+            "vault-url",
+            "vault_url",
+            "freva_vault_url",
+        ],
+        true,
+    );
+
+    let Some(vault_url) = maybe_vault_url else {
+        warn!("The User requested a stream without a vault URL.");
+        return HttpResponse::UnprocessableEntity()
+            .body("Vault URL not found. Please provide a non-empty vault URL in the headers.");
+    };
+
+    let mongodb_uri = match get_mongodb_uri(vault_url).await {
+        Ok(uri) => uri,
+        Err(e) => {
+            warn!("Failed to get the MongoDB URI: {:?}", e);
+            return e;
+        }
+    };
+
+    let database = match get_database_from_uri(mongodb_uri).await {
+        Ok(db) => db,
+        Err(e) => {
+            warn!("Failed to connect to the database: {:?}", e);
+            return HttpResponse::ServiceUnavailable().body("Failed to connect to the database.");
+        }
+    };
+
+    // Try to get n from the qstring
+    let n = match get_first_matching_field(
+        &qstring,
+        headers,
+        &["num_threads", "num-threads", "n_threads", "n-threads", "n"],
+        false,
+    ) {
+        Some(n) => {
+            debug!("Parsed num_threads: {}", n);
+            n.parse::<u32>().unwrap_or(10)
+        }
+        None => 10,
+    };
+    trace!("Final num_threads: {}", n);
+
+    let page = get_first_matching_field(&qstring, headers, &["page"], false)
+        .and_then(|p| p.parse::<u32>().ok());
+
+    // Retrieve the latest n threads of the user from the database.
+    let threads = read_threads_and_num(&user_id, database, n, page).await;
+
+    debug!("Threads: {:?}", threads);
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .json(threads)
+}
