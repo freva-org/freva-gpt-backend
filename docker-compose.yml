@@ -74,7 +74,7 @@ services:
     image: localhost/code-interpreter-server-${INSTANCE_NAME}
     build:
       context: .
-      dockerfile: docker/code-interpreter-server/Dockerfile
+      dockerfile: dockerfiles/code-interpreter-server/Dockerfile
     env_file: .env
     environment:
       MCP_HOST: 0.0.0.0
